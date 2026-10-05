@@ -1,0 +1,105 @@
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import { ArrowLeft, Pencil } from "lucide-react";
+import { requireCan } from "@/lib/auth-helpers";
+import { prisma } from "@/lib/prisma";
+import { can } from "@/lib/rbac";
+import { MODE_SHORT } from "@/lib/enums";
+import { formatIDR, formatDate } from "@/lib/format";
+import { PageHeader } from "@/components/page-header";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { JobStatusBadge } from "@/components/status-badge";
+
+export const dynamic = "force-dynamic";
+
+export default async function CustomerDetail({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const user = await requireCan("customers", "read");
+  const c = await prisma.customer.findUnique({
+    where: { id },
+    include: {
+      salesPic: { select: { name: true } }, contacts: true,
+      jobsAsCustomer: { orderBy: { openedAt: "desc" }, take: 10, select: { id: true, number: true, mode: true, status: true, openedAt: true, revenueIdr: true } },
+      _count: { select: { jobsAsCustomer: true, invoices: true } },
+    },
+  });
+  if (!c) notFound();
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <Button asChild variant="ghost" size="sm" className="mb-2 -ml-2"><Link href="/customers"><ArrowLeft /> Kembali</Link></Button>
+        <PageHeader title={c.name} description={`${c.code} · ${c.industry ?? "-"} · ${c.city ?? "-"}`}>
+          {can(user.role, "customers", "write") && (
+            <Button asChild variant="outline"><Link href={`/customers/${c.id}/edit`}><Pencil /> Edit</Link></Button>
+          )}
+        </PageHeader>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-3">
+        <Card>
+          <CardHeader><CardTitle className="text-base">Informasi</CardTitle></CardHeader>
+          <CardContent className="space-y-2 text-sm">
+            <Row label="NPWP" value={c.npwp ?? "-"} />
+            <Row label="Alamat" value={c.address ?? "-"} />
+            <Row label="Telepon" value={c.phone ?? "-"} />
+            <Row label="Email" value={c.email ?? "-"} />
+            <Row label="TOP" value={`${c.termOfPayment} hari`} />
+            <Row label="Credit Limit" value={formatIDR(Number(c.creditLimit))} />
+            <Row label="Sales PIC" value={c.salesPic?.name ?? "-"} />
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader><CardTitle className="text-base">Kontak (PIC)</CardTitle></CardHeader>
+          <CardContent className="space-y-3 text-sm">
+            {c.contacts.map((ct) => (
+              <div key={ct.id} className="rounded-md border p-3">
+                <p className="font-medium">{ct.name} {ct.isPrimary && <Badge variant="outline" className="ml-1">Primary</Badge>}</p>
+                <p className="text-muted-foreground">{ct.position}</p>
+                <p className="text-muted-foreground">{ct.phone} · {ct.email}</p>
+              </div>
+            ))}
+            {c.contacts.length === 0 && <p className="text-muted-foreground">Belum ada kontak.</p>}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader><CardTitle className="text-base">Ringkasan</CardTitle></CardHeader>
+          <CardContent className="space-y-2 text-sm">
+            <Row label="Total Job" value={String(c._count.jobsAsCustomer)} />
+            <Row label="Total Invoice" value={String(c._count.invoices)} />
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader><CardTitle className="text-base">Job Terakhir</CardTitle></CardHeader>
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader><TableRow>
+              <TableHead>No. Job</TableHead><TableHead>Mode</TableHead><TableHead>Tanggal</TableHead>
+              <TableHead>Revenue</TableHead><TableHead>Status</TableHead>
+            </TableRow></TableHeader>
+            <TableBody>
+              {c.jobsAsCustomer.map((j) => (
+                <TableRow key={j.id}>
+                  <TableCell><Link href={`/jobs/${j.id}`} className="font-medium text-primary hover:underline">{j.number}</Link></TableCell>
+                  <TableCell><Badge variant="outline">{MODE_SHORT[j.mode]}</Badge></TableCell>
+                  <TableCell>{formatDate(j.openedAt)}</TableCell>
+                  <TableCell className="tabular-nums">{formatIDR(Number(j.revenueIdr))}</TableCell>
+                  <TableCell><JobStatusBadge status={j.status} /></TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function Row({ label, value }: { label: string; value: string }) {
+  return <div className="flex justify-between gap-4"><span className="text-muted-foreground">{label}</span><span className="text-right font-medium">{value}</span></div>;
+}
