@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Briefcase } from "lucide-react";
+import { Briefcase } from "lucide-react";
 import { requireCan } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
 import { can } from "@/lib/rbac";
@@ -12,6 +12,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { InvoiceStatusBadge } from "@/components/status-badge";
+import { Breadcrumbs } from "@/components/breadcrumbs";
 
 export const dynamic = "force-dynamic";
 
@@ -37,7 +38,7 @@ export default async function InvoiceDetail({ params }: { params: Promise<{ id: 
   return (
     <div className="space-y-6">
       <div>
-        <Button asChild variant="ghost" size="sm" className="mb-2 -ml-2"><Link href="/invoices"><ArrowLeft /> Kembali</Link></Button>
+        <Breadcrumbs items={[{ label: "Invoice (AR)", href: "/invoices" }, { label: inv.number }]} />
         <PageHeader title={inv.number} description={`${inv.customer.name} · ${formatDate(inv.date)}`}>
           <InvoiceStatusBadge status={inv.status} />
           <InvoiceActions

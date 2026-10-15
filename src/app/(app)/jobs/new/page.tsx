@@ -1,33 +1,35 @@
 import Link from "next/link";
-import { ArrowLeft, FileSignature, ArrowRightLeft } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { requireCan } from "@/lib/auth-helpers";
+import { prisma } from "@/lib/prisma";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { JobForm } from "../job-form";
+
+export const dynamic = "force-dynamic";
 
 export default async function NewJobPage() {
   await requireCan("jobs", "write", { redirectTo: "/jobs" });
+  const [customers, sales, commodities, ports, airports] = await Promise.all([
+    prisma.customer.findMany({ where: { isActive: true }, orderBy: { name: "asc" }, select: { id: true, name: true, code: true } }),
+    prisma.user.findMany({ where: { role: { in: ["SALES", "OPERATION", "ADMIN"] }, isActive: true }, orderBy: { name: "asc" }, select: { id: true, name: true } }),
+    prisma.commodity.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true, hsCode: true } }),
+    prisma.port.findMany({ orderBy: { unlocode: "asc" }, select: { id: true, unlocode: true, name: true } }),
+    prisma.airport.findMany({ orderBy: { iata: "asc" }, select: { id: true, iata: true, name: true } }),
+  ]);
   return (
     <div className="space-y-6">
       <div>
         <Button asChild variant="ghost" size="sm" className="mb-2 -ml-2"><Link href="/jobs"><ArrowLeft /> Kembali</Link></Button>
-        <PageHeader title="Job Baru" description="Buat job dari quotation yang sudah disetujui" />
+        <PageHeader title="Job Baru" description="Buat job/shipment manual (atau gunakan Convert dari Quotation)" />
       </div>
-      <Card>
-        <CardContent className="space-y-4 p-6">
-          <div className="flex items-start gap-3 rounded-lg border bg-muted/30 p-4">
-            <ArrowRightLeft className="mt-0.5 h-5 w-5 text-primary" />
-            <div>
-              <p className="font-medium">Alur rekomendasi: Quotation → Job</p>
-              <p className="text-sm text-muted-foreground">
-                Buka quotation berstatus <span className="font-medium">Accepted/Sent</span>, lalu klik <span className="font-medium">Convert ke Job</span>.
-                Seluruh charge (selling &amp; buying) otomatis terbawa ke costing job baru.
-              </p>
-            </div>
-          </div>
-          <Button asChild><Link href="/quotations"><FileSignature /> Ke daftar Quotation</Link></Button>
-        </CardContent>
-      </Card>
+      <JobForm
+        customers={customers.map((c) => ({ id: c.id, label: `${c.name} (${c.code})` }))}
+        sales={sales.map((u) => ({ id: u.id, label: u.name }))}
+        commodities={commodities.map((c) => ({ id: c.id, label: `${c.hsCode} — ${c.name}` }))}
+        ports={ports.map((p) => ({ id: p.id, label: `${p.unlocode} — ${p.name}` }))}
+        airports={airports.map((a) => ({ id: a.id, label: `${a.iata} — ${a.name}` }))}
+      />
     </div>
   );
 }

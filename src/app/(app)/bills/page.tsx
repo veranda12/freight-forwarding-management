@@ -2,8 +2,7 @@ import { requireCan } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
 import { formatIDR } from "@/lib/format";
 import { PageHeader } from "@/components/page-header";
-import { StatCard } from "@/components/stat-card";
-import { FileInput, Clock, Percent } from "lucide-react";
+import { StatStrip } from "@/components/stat-strip";
 import { BillsTable, type BillRow } from "./bills-table";
 
 export const dynamic = "force-dynamic";
@@ -21,11 +20,11 @@ export default async function BillsPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="Vendor Bill (AP)" description={`${rows.length} tagihan vendor`} />
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
-        <StatCard label="Total Bill" value={rows.length} icon={FileInput} />
-        <StatCard label="Outstanding AP" value={formatIDR(outstanding)} icon={Clock} tone="warning" />
-        <StatCard label="PPh 23 Dipotong" value={formatIDR(pphTotal)} icon={Percent} tone="default" />
-      </div>
+      <StatStrip items={[
+        { label: "Total bill", value: rows.length },
+        { label: "Outstanding AP", value: formatIDR(outstanding), tone: "warning" },
+        { label: "PPh 23 dipotong", value: formatIDR(pphTotal) },
+      ]} />
       <BillsTable data={rows} />
     </div>
   );

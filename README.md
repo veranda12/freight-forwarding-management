@@ -91,4 +91,17 @@ npm run build        # production build
 npm run typecheck    # tsc --noEmit
 npm run db:seed      # ulang seed (idempoten)
 npm run db:studio    # Prisma Studio
+npm run test         # unit test (Vitest)
+npm run test:e2e     # end-to-end test (Playwright)
 ```
+
+## 8. Testing
+
+- **Unit (Vitest)** — `npm run test`: RBAC, format mata uang/tanggal, enum, dan validasi check digit ISO 6346 (18 test).
+- **E2E (Playwright)** — `npm run test:e2e`: 10 skenario menelusuri UI nyata (dashboard, RBAC, Job+PDF, Accounting balance, buat Invoice→bayar, tracking publik, CRUD Vendor/Commodity, form Quotation & Job). Detail & flow demo ada di `DEMO.md`.
+
+## 9. CRUD & Form Manual
+
+- **CRUD master** (tambah/edit + validasi Zod + audit): Customer, Vendor, Overseas Agent, Commodity, Container Type, Pajak.
+- **Form create manual**: Quotation (multi-charge, preview margin live) dan Job/Shipment (routing sea/air adaptif). Job juga bisa dibuat via **Convert dari Quotation**.
+- **Invoice manual**: buat dari Job → catat pembayaran → batalkan (reversal jurnal).

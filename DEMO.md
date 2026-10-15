@@ -134,6 +134,9 @@ Robot yang **mendemokan sendiri** aplikasi lewat browser sungguhan — untuk mem
 # pastikan DB sudah di-seed
 npm run db:seed
 
+# unit test (fungsi murni: RBAC, format, ISO 6346, enum)
+npm run test
+
 # jalankan E2E (otomatis build & start server, lalu klik UI)
 npm run test:e2e
 
@@ -153,16 +156,18 @@ npm run test:e2e:report
 | 5 | Finance alur uang | **Buat Invoice dari Job** → **Catat Pembayaran** → toast sukses |
 | 6 | Tracking publik | Halaman `/track/...` terbuka **tanpa login** & **tanpa** kata Revenue/Profit/Margin |
 
+### Tambahan uji CRUD & form manual (`e2e/crud.spec.ts`)
+| # | Skenario | Yang dibuktikan |
+|---|---|---|
+| 7 | Admin buat **Vendor** baru | Form generik EntityForm → tersimpan & muncul di daftar |
+| 8 | Admin buat **Commodity** baru | Create master → muncul di daftar |
+| 9 | Sales buka **form Quotation** manual | Kontrol multi-charge + simpan ter-render |
+| 10 | Operation buka **form Job** manual | Data shipment + routing + simpan ter-render |
+
 ### Hasil terakhir
 ```
-Running 6 tests using 1 worker
-  ok 1 … Management melihat dashboard (KPI + grafik)
-  ok 2 … RBAC: Sales tidak melihat & tidak bisa buka Accounting
-  ok 3 … Operation: detail Job, costing, dan dokumen PDF
-  ok 4 … Finance: Trial Balance & Neraca seimbang
-  ok 5 … Finance: buat Invoice dari Job lalu catat pembayaran
-  ok 6 … Tracking publik tanpa login (tanpa harga)
-  6 passed (13.7s)
+Unit (Vitest):      18 passed  (rbac, format, enums, ISO 6346 check digit)
+E2E  (Playwright):  10 passed  (6 demo flow + 4 CRUD/form)
 ```
 
 ✅ **Semua lulus** — aplikasi siap didemokan ke calon klien.

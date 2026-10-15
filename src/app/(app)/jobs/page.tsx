@@ -24,7 +24,8 @@ export default async function JobsPage() {
   const jobs = await prisma.job.findMany({
     orderBy: { openedAt: "desc" },
     select: {
-      id: true, number: true, mode: true, direction: true, status: true, etd: true,
+      id: true, number: true, mode: true, direction: true, status: true, etd: true, eta: true,
+      vesselName: true, voyageNo: true, flightNo: true,
       revenueIdr: true, profitIdr: true, marginPct: true,
       customer: { select: { name: true } },
       pol: { select: { unlocode: true } }, pod: { select: { unlocode: true } },
@@ -36,8 +37,13 @@ export default async function JobsPage() {
     id: j.id, number: j.number, mode: j.mode, direction: j.direction, status: j.status,
     customer: j.customer.name, route: routeOf(j),
     etd: j.etd ? j.etd.toISOString() : null,
+    eta: j.eta ? j.eta.toISOString() : null,
+    vessel: j.flightNo ?? [j.vesselName, j.voyageNo].filter(Boolean).join(" "),
     revenue: Number(j.revenueIdr), profit: Number(j.profitIdr), margin: Number(j.marginPct),
   }));
+
+  // D-11: kolom komersial hanya untuk role yang berhak (Ops/Docs fokus operasional)
+  const showFinancials = ["ADMIN", "FINANCE", "SALES", "MANAGEMENT"].includes(user.role);
 
   return (
     <div className="space-y-6">
@@ -48,7 +54,7 @@ export default async function JobsPage() {
           </Button>
         )}
       </PageHeader>
-      <JobsTable data={rows} />
+      <JobsTable data={rows} showFinancials={showFinancials} />
     </div>
   );
 }

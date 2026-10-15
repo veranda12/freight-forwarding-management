@@ -2,8 +2,7 @@ import { requireCan } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
 import { formatIDR, formatPercent } from "@/lib/format";
 import { PageHeader } from "@/components/page-header";
-import { StatCard } from "@/components/stat-card";
-import { TrendingUp, DollarSign, Receipt } from "lucide-react";
+import { StatStrip } from "@/components/stat-strip";
 import { CostingTable, type CostingRow } from "./costing-table";
 
 export const dynamic = "force-dynamic";
@@ -27,12 +26,12 @@ export default async function CostingPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="Costing & Profitability" description="Revenue, cost, dan margin per job" />
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatCard label="Total Revenue" value={formatIDR(totalRev)} icon={DollarSign} tone="success" />
-        <StatCard label="Total Cost" value={formatIDR(totalCost)} icon={Receipt} tone="default" />
-        <StatCard label="Gross Profit" value={formatIDR(totalProfit)} icon={TrendingUp} tone="success" />
-        <StatCard label="Rata-rata Margin" value={formatPercent(avgMargin)} icon={TrendingUp} tone={avgMargin < 15 ? "warning" : "success"} />
-      </div>
+      <StatStrip items={[
+        { label: "Total revenue", value: formatIDR(totalRev), tone: "success" },
+        { label: "Total cost", value: formatIDR(totalCost) },
+        { label: "Gross profit", value: formatIDR(totalProfit), tone: "success" },
+        { label: "Rata-rata margin", value: formatPercent(avgMargin), tone: avgMargin < 15 ? "warning" : "success" },
+      ]} />
       <CostingTable data={rows} />
     </div>
   );

@@ -1,3 +1,4 @@
+import React from "react";
 import { requireCan } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
 import { getTrialBalance, getIncomeStatement, getBalanceSheet } from "@/lib/accounting";
@@ -8,25 +9,43 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { LedgerView } from "./ledger-view";
+import { AccountingFilter } from "./accounting-filter";
 
 export const dynamic = "force-dynamic";
 
-export default async function AccountingPage() {
+const TB_ORDER = ["ASSET", "LIABILITY", "EQUITY", "REVENUE", "EXPENSE"] as const;
+const TB_TYPE_LABEL: Record<string, string> = { ASSET: "Aset", LIABILITY: "Kewajiban", EQUITY: "Ekuitas", REVENUE: "Pendapatan", EXPENSE: "Beban" };
+
+export default async function AccountingPage({ searchParams }: { searchParams: Promise<{ asof?: string }> }) {
   await requireCan("accounting", "read");
+  const sp = await searchParams;
+  const asofStr = sp.asof && /^\d{4}-\d{2}-\d{2}$/.test(sp.asof) ? sp.asof : new Date().toISOString().slice(0, 10);
+  const asof = new Date(asofStr + "T23:59:59");
+  const yearStart = new Date(asof.getFullYear(), 0, 1);
+
   const [tb, pl, bs, journals, accounts] = await Promise.all([
-    getTrialBalance(),
-    getIncomeStatement(),
-    getBalanceSheet(),
+    getTrialBalance(asof),
+    getIncomeStatement(yearStart, asof),
+    getBalanceSheet(asof),
     prisma.journalEntry.findMany({
+      where: { date: { lte: asof } },
       orderBy: { date: "desc" }, take: 80,
       include: { lines: true },
     }),
     prisma.coaAccount.findMany({ where: { isPostable: true }, orderBy: { code: "asc" }, select: { code: true, name: true } }),
   ]);
 
+  // D-13: kelompokkan Trial Balance per tipe akun + subtotal
+  const tbGroups = TB_ORDER.map((type) => {
+    const rows = tb.rows.filter((r) => r.type === type);
+    return { type, rows, debit: rows.reduce((s, r) => s + r.debit, 0), credit: rows.reduce((s, r) => s + r.credit, 0) };
+  }).filter((g) => g.rows.length > 0);
+
   return (
     <div className="space-y-6">
-      <PageHeader title="Accounting" description="General Ledger, Trial Balance, Laba Rugi, dan Neraca" />
+      <PageHeader title="Accounting" description="General Ledger, Trial Balance, Laba Rugi, dan Neraca">
+        <AccountingFilter asof={asofStr} />
+      </PageHeader>
 
       <Tabs defaultValue="tb">
         <TabsList>
@@ -47,13 +66,22 @@ export default async function AccountingPage() {
                   <TableHead className="text-right">Debit</TableHead><TableHead className="text-right">Kredit</TableHead>
                 </TableRow></TableHeader>
                 <TableBody>
-                  {tb.rows.map((r) => (
-                    <TableRow key={r.code}>
-                      <TableCell className="font-mono text-xs">{r.code}</TableCell>
-                      <TableCell>{r.name}</TableCell>
-                      <TableCell className="text-right tabular-nums">{r.debit ? formatIDR(r.debit) : "-"}</TableCell>
-                      <TableCell className="text-right tabular-nums">{r.credit ? formatIDR(r.credit) : "-"}</TableCell>
-                    </TableRow>
+                  {tbGroups.map((g) => (
+                    <React.Fragment key={g.type}>
+                      {g.rows.map((r) => (
+                        <TableRow key={r.code}>
+                          <TableCell className="font-mono text-xs">{r.code}</TableCell>
+                          <TableCell>{r.name}</TableCell>
+                          <TableCell className="text-right tabular-nums">{r.debit ? formatIDR(r.debit) : "-"}</TableCell>
+                          <TableCell className="text-right tabular-nums">{r.credit ? formatIDR(r.credit) : "-"}</TableCell>
+                        </TableRow>
+                      ))}
+                      <TableRow className="bg-muted/40 font-medium">
+                        <TableCell colSpan={2} className="text-xs uppercase text-muted-foreground">Subtotal {TB_TYPE_LABEL[g.type]}</TableCell>
+                        <TableCell className="text-right tabular-nums">{g.debit ? formatIDR(g.debit) : "-"}</TableCell>
+                        <TableCell className="text-right tabular-nums">{g.credit ? formatIDR(g.credit) : "-"}</TableCell>
+                      </TableRow>
+                    </React.Fragment>
                   ))}
                 </TableBody>
               </Table>

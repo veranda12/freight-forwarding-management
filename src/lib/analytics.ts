@@ -20,6 +20,49 @@ function last12Months(): { key: string; label: string }[] {
   return out;
 }
 
+/** Antrian aksi operasional untuk dashboard (D-02). */
+export async function getWorklist() {
+  const now = new Date();
+  const in3 = new Date(now.getTime() + 3 * 86400000);
+  const in2 = new Date(now.getTime() + 2 * 86400000);
+  const in7 = new Date(now.getTime() + 7 * 86400000);
+
+  const [departingSoon, cutoffSoon, blPending, arOverdue, apDueSoon] = await Promise.all([
+    prisma.job.findMany({
+      where: { status: { in: ["BOOKED", "STUFFING"] }, etd: { lte: in3 } },
+      orderBy: { etd: "asc" }, take: 8,
+      select: { id: true, number: true, etd: true, status: true, customer: { select: { name: true } } },
+    }),
+    prisma.booking.findMany({
+      where: { status: { in: ["REQUESTED", "CONFIRMED"] }, cyCutoff: { lte: in2, gte: new Date(now.getTime() - 2 * 86400000) } },
+      orderBy: { cyCutoff: "asc" }, take: 8,
+      select: { id: true, cyCutoff: true, job: { select: { id: true, number: true } }, vendor: { select: { name: true } } },
+    }),
+    prisma.job.findMany({
+      where: { status: { in: ["DEPARTED", "IN_TRANSIT", "ARRIVED"] }, mode: { in: ["SEA_FCL", "SEA_LCL"] }, hblNo: null },
+      orderBy: { etd: "asc" }, take: 8,
+      select: { id: true, number: true, etd: true, customer: { select: { name: true } } },
+    }),
+    prisma.invoice.findMany({
+      where: { status: "OVERDUE" }, orderBy: { dueDate: "asc" }, take: 8,
+      select: { id: true, number: true, total: true, amountPaid: true, dueDate: true, customer: { select: { name: true } } },
+    }),
+    prisma.vendorBill.findMany({
+      where: { status: { in: ["UNPAID", "PARTIAL"] }, dueDate: { lte: in7 } },
+      orderBy: { dueDate: "asc" }, take: 8,
+      select: { id: true, number: true, total: true, amountPaid: true, dueDate: true, vendor: { select: { name: true } } },
+    }),
+  ]);
+
+  return {
+    departingSoon: departingSoon.map((j) => ({ id: j.id, number: j.number, party: j.customer.name, date: j.etd?.toISOString() ?? null, extra: j.status })),
+    cutoffSoon: cutoffSoon.map((b) => ({ id: b.job.id, number: b.job.number, party: b.vendor.name, date: b.cyCutoff?.toISOString() ?? null, extra: "CY cut-off" })),
+    blPending: blPending.map((j) => ({ id: j.id, number: j.number, party: j.customer.name, date: j.etd?.toISOString() ?? null, extra: "B/L belum terbit" })),
+    arOverdue: arOverdue.map((i) => ({ id: i.id, number: i.number, party: i.customer.name, date: i.dueDate.toISOString(), amount: Number(i.total) - Number(i.amountPaid) })),
+    apDueSoon: apDueSoon.map((b) => ({ id: b.id, number: b.number, party: b.vendor.name, date: b.dueDate.toISOString(), amount: Number(b.total) - Number(b.amountPaid) })),
+  };
+}
+
 export async function getDashboardData() {
   const now = toZonedTime(new Date(), TZ);
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);

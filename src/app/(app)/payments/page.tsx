@@ -2,8 +2,7 @@ import { requireCan } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
 import { formatIDR } from "@/lib/format";
 import { PageHeader } from "@/components/page-header";
-import { StatCard } from "@/components/stat-card";
-import { ArrowDownCircle, ArrowUpCircle } from "lucide-react";
+import { StatStrip } from "@/components/stat-strip";
 import { PaymentsTable, type PaymentRow } from "./payments-table";
 
 export const dynamic = "force-dynamic";
@@ -24,10 +23,10 @@ export default async function PaymentsPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="Receipt & Payment" description={`${rows.length} transaksi kas/bank`} />
-      <div className="grid grid-cols-2 gap-3">
-        <StatCard label="Total Penerimaan" value={formatIDR(received)} icon={ArrowDownCircle} tone="success" />
-        <StatCard label="Total Pembayaran" value={formatIDR(paid)} icon={ArrowUpCircle} tone="warning" />
-      </div>
+      <StatStrip items={[
+        { label: "Total penerimaan", value: formatIDR(received), tone: "success" },
+        { label: "Total pembayaran", value: formatIDR(paid), tone: "warning" },
+      ]} />
       <PaymentsTable data={rows} />
     </div>
   );

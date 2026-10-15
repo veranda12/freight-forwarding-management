@@ -2,8 +2,7 @@ import { requireCan } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
 import { formatIDR } from "@/lib/format";
 import { PageHeader } from "@/components/page-header";
-import { StatCard } from "@/components/stat-card";
-import { Receipt, AlertTriangle, CheckCircle2, Clock } from "lucide-react";
+import { StatStrip } from "@/components/stat-strip";
 import { InvoicesTable, type InvoiceRow } from "./invoices-table";
 
 export const dynamic = "force-dynamic";
@@ -27,12 +26,12 @@ export default async function InvoicesPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="Invoice (AR)" description={`${rows.length} invoice`} />
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatCard label="Total Invoice" value={rows.length} icon={Receipt} />
-        <StatCard label="Outstanding" value={formatIDR(outstanding)} icon={Clock} tone="warning" />
-        <StatCard label="Overdue" value={formatIDR(overdue)} icon={AlertTriangle} tone="destructive" />
-        <StatCard label="Lunas" value={formatIDR(paid)} icon={CheckCircle2} tone="success" />
-      </div>
+      <StatStrip items={[
+        { label: "Total invoice", value: rows.length },
+        { label: "Outstanding", value: formatIDR(outstanding), tone: "warning" },
+        { label: "Overdue", value: formatIDR(overdue), tone: "destructive" },
+        { label: "Lunas", value: formatIDR(paid), tone: "success" },
+      ]} />
       <InvoicesTable data={rows} />
     </div>
   );

@@ -17,13 +17,13 @@ async function login(page: Page, email: string) {
 
 test.describe("Demo Freight Forwarding Management System", () => {
   // 1) MANAGEMENT — Dashboard terisi angka & grafik
-  test("1. Management melihat dashboard (KPI + grafik)", async ({ page }) => {
+  test("1. Management melihat dashboard (worklist + KPI + grafik)", async ({ page }) => {
     await login(page, "manager@demo.com");
-    await expect(page.getByRole("heading", { name: /Selamat datang/ })).toBeVisible();
-    await expect(page.getByText("Shipment Aktif")).toBeVisible();
-    await expect(page.getByText("Revenue Bulan Ini")).toBeVisible();
-    await expect(page.getByText("AR Overdue")).toBeVisible();
-    // minimal satu grafik Recharts ter-render
+    await expect(page.getByRole("heading", { name: /Halo/ })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Butuh Aksi" })).toBeVisible(); // worklist operasional
+    await expect(page.getByText("Shipment aktif")).toBeVisible();       // KPI strip
+    await expect(page.getByText("AR overdue").first()).toBeVisible();
+    // minimal satu grafik Recharts ter-render (analitik sekunder)
     await expect(page.locator("svg.recharts-surface").first()).toBeVisible();
   });
 

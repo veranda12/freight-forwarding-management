@@ -11,6 +11,62 @@ import { modeDirKey } from "@/lib/enums";
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
+type QuoLineInput = { chargeCodeId: string; qty: number; buyingPrice: number; sellingPrice: number; taxable: boolean };
+type QuoInput = {
+  customerId: string; ownerId?: string; mode: string; direction: string;
+  currency: string; exchangeRate: number; validUntil: string; incoterm?: string;
+  originText?: string; destText?: string; notes?: string; lines: QuoLineInput[];
+};
+
+export async function createQuotation(input: QuoInput): Promise<{ ok: boolean; error?: string; id?: string }> {
+  const user = await assertCan("quotations", "write");
+  if (!input.customerId) return { ok: false, error: "Customer wajib dipilih." };
+  const lines = (input.lines ?? []).filter((l) => l.chargeCodeId);
+  if (lines.length === 0) return { ok: false, error: "Minimal satu baris charge." };
+
+  const fx = Number(input.exchangeRate) || 1;
+  let totalSell = 0, totalBuy = 0;
+  for (const l of lines) {
+    totalSell += r2(Number(l.qty) * Number(l.sellingPrice) * fx);
+    totalBuy += r2(Number(l.qty) * Number(l.buyingPrice) * fx);
+  }
+  totalSell = r2(totalSell); totalBuy = r2(totalBuy);
+  const margin = r2(totalSell - totalBuy);
+  const marginPct = totalSell > 0 ? r2((margin / totalSell) * 100) : 0;
+
+  const id = await prisma.$transaction(async (tx) => {
+    const { genDocNumber, SEQ } = await import("@/lib/sequence");
+    const number = await genDocNumber(tx, SEQ.QUOTATION);
+    const validUntil = input.validUntil ? new Date(input.validUntil) : new Date(Date.now() + 30 * 86400000);
+    const quo = await tx.quotation.create({
+      data: {
+        number, customerId: input.customerId, ownerId: input.ownerId || user.id,
+        mode: input.mode as any, direction: input.direction as any,
+        currency: input.currency || "USD", exchangeRate: new Prisma.Decimal(fx),
+        validUntil, status: "DRAFT", incoterm: input.incoterm || null,
+        originText: input.originText || null, destText: input.destText || null, notes: input.notes || null,
+        totalSelling: new Prisma.Decimal(totalSell), totalBuying: new Prisma.Decimal(totalBuy),
+        marginAmount: new Prisma.Decimal(margin), marginPct: new Prisma.Decimal(marginPct),
+        needsApproval: totalSell > 0 && margin / totalSell < 0.1,
+        lines: {
+          create: lines.map((l, i) => ({
+            chargeCodeId: l.chargeCodeId, currency: input.currency || "USD",
+            exchangeRate: new Prisma.Decimal(fx), qty: new Prisma.Decimal(Number(l.qty) || 1),
+            buyingPrice: new Prisma.Decimal(Number(l.buyingPrice) || 0),
+            sellingPrice: new Prisma.Decimal(Number(l.sellingPrice) || 0),
+            taxable: !!l.taxable, sortOrder: i,
+          })),
+        },
+      },
+    });
+    return quo.id;
+  });
+
+  await writeAudit({ entity: "Quotation", entityId: id, action: "CREATE", userId: user.id });
+  revalidatePath("/quotations");
+  return { ok: true, id };
+}
+
 export async function setQuotationStatus(id: string, status: QuotationStatus) {
   const user = await assertCan("quotations", "write");
   await prisma.quotation.update({

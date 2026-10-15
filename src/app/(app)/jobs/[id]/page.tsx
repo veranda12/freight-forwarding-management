@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
-  ArrowLeft, Ship, Plane, Truck, FileCheck, Package, Download, ExternalLink,
+  Ship, Plane, Truck, FileCheck, Package, Download, ExternalLink,
 } from "lucide-react";
 import { requireCan } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
@@ -16,6 +16,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { JobStatusBadge, InvoiceStatusBadge, BookingStatusBadge } from "@/components/status-badge";
 import { EmptyState } from "@/components/empty-state";
+import { Breadcrumbs } from "@/components/breadcrumbs";
 import { cn } from "@/lib/utils";
 import { StatusControl } from "./status-control";
 import { MilestoneTimeline, type MilestoneItem } from "./milestone-timeline";
@@ -34,6 +35,15 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
+function StripCell({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="px-4 py-2.5">
+      <p className="truncate text-xs text-muted-foreground">{label}</p>
+      <div className="mt-0.5 text-sm font-medium">{children}</div>
+    </div>
+  );
+}
+
 const DOC_TYPES = [
   { kind: "HBL", label: "House B/L" },
   { kind: "MBL", label: "Master B/L" },
@@ -48,6 +58,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
   const canWrite = can(user.role, "jobs", "write");
   const canDocs = can(user.role, "documents", "read");
   const canInvoice = can(user.role, "invoices", "write");
+  const canFin = ["ADMIN", "FINANCE", "SALES", "MANAGEMENT"].includes(user.role);
 
   const job = await prisma.job.findUnique({
     where: { id },
@@ -88,12 +99,17 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
     isDone: m.isDone,
   }));
 
+  // Operasional dulu (D-06): milestone berikutnya & hitung mundur ETD
+  const nextMs = job.milestones.find((m) => !m.isDone);
+  const nowMs = Date.now();
+  const dToEtd = job.etd ? Math.ceil((new Date(job.etd).getTime() - nowMs) / 86400000) : null;
+  const etdHint = dToEtd == null ? null : dToEtd > 0 ? `H-${dToEtd}` : dToEtd === 0 ? "hari ini" : `lewat ${-dToEtd}h`;
+  const etdTone = dToEtd == null ? "" : dToEtd < 0 ? "text-destructive" : dToEtd <= 3 ? "text-warning" : "text-muted-foreground";
+
   return (
     <div className="space-y-6">
       <div>
-        <Button asChild variant="ghost" size="sm" className="mb-2 -ml-2">
-          <Link href="/jobs"><ArrowLeft /> Kembali ke daftar job</Link>
-        </Button>
+        <Breadcrumbs items={[{ label: "Job / Shipment", href: "/jobs" }, { label: job.number }]} />
         <PageHeader
           title={job.number}
           description={`${MODE_LABELS[job.mode]} · ${DIRECTION_LABELS[job.direction]} · ${job.customer.name}`}
@@ -103,21 +119,29 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
         </PageHeader>
       </div>
 
-      {/* Summary */}
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Card><CardContent className="flex items-center gap-3 p-4">
-          <div className="rounded-lg bg-primary/10 p-2.5 text-primary"><Icon className="h-5 w-5" /></div>
-          <div><p className="text-xs text-muted-foreground">Rute</p><p className="font-semibold">{originCode} → {destCode}</p></div>
-        </CardContent></Card>
-        <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Revenue</p><p className="text-lg font-semibold">{formatIDR(revenue)}</p></CardContent></Card>
-        <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Cost</p><p className="text-lg font-semibold">{formatIDR(cost)}</p></CardContent></Card>
-        <Card><CardContent className="p-4">
-          <p className="text-xs text-muted-foreground">Profit / Margin</p>
-          <p className={cn("text-lg font-semibold", margin < 10 ? "text-destructive" : margin < 15 ? "text-warning" : "text-success")}>
-            {formatIDR(profit)} <span className="text-sm">({formatPercent(margin)})</span>
-          </p>
-        </CardContent></Card>
-      </div>
+      {/* Status & jadwal — operasional dulu (D-06) */}
+      <Card>
+        <CardContent className="grid grid-cols-2 divide-x divide-y p-0 sm:grid-cols-3 lg:grid-cols-6 lg:divide-y-0">
+          <StripCell label="Status"><JobStatusBadge status={job.status} /></StripCell>
+          <StripCell label="Rute"><span className="inline-flex items-center gap-1.5"><Icon className="h-3.5 w-3.5 text-muted-foreground" />{originCode} → {destCode}</span></StripCell>
+          <StripCell label="ETD">{formatDate(job.etd)}{etdHint && <span className={cn("ml-1.5 text-xs font-medium", etdTone)}>{etdHint}</span>}</StripCell>
+          <StripCell label="ETA">{formatDate(job.eta)}</StripCell>
+          <StripCell label="ATD / ATA"><span className="text-sm">{formatDate(job.atd)} / {formatDate(job.ata)}</span></StripCell>
+          <StripCell label="Milestone berikutnya"><span className="truncate text-sm">{nextMs?.title ?? "Selesai"}</span></StripCell>
+        </CardContent>
+      </Card>
+
+      {/* Finansial — sekunder, role-gated (D-06/D-11) */}
+      {canFin && (
+        <Card>
+          <CardContent className="grid grid-cols-2 divide-x divide-y p-0 sm:grid-cols-4 sm:divide-y-0">
+            <StripCell label="Revenue"><span className="tabular-nums">{formatIDR(revenue)}</span></StripCell>
+            <StripCell label="Cost"><span className="tabular-nums text-muted-foreground">{formatIDR(cost)}</span></StripCell>
+            <StripCell label="Profit"><span className={cn("tabular-nums", profit < 0 && "text-destructive")}>{formatIDR(profit)}</span></StripCell>
+            <StripCell label="Margin"><span className={cn("tabular-nums font-medium", margin < 10 ? "text-destructive" : margin < 15 ? "text-warning" : "text-success")}>{formatPercent(margin)}</span></StripCell>
+          </CardContent>
+        </Card>
+      )}
 
       <Tabs defaultValue="overview">
         <TabsList>
@@ -136,7 +160,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
             <Card>
               <CardHeader><CardTitle className="text-base">Detail Shipment</CardTitle></CardHeader>
               <CardContent>
-                <dl className="grid grid-cols-2 gap-4">
+                <dl className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3">
                   <Field label="Mode">{MODE_LABELS[job.mode]}</Field>
                   <Field label="Arah">{DIRECTION_LABELS[job.direction]}</Field>
                   <Field label={isAir ? "Origin Airport" : "Port of Loading"}>{origin ? `${origin.name}` : "-"}</Field>
@@ -155,7 +179,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
             <Card>
               <CardHeader><CardTitle className="text-base">Jadwal & Dokumen</CardTitle></CardHeader>
               <CardContent>
-                <dl className="grid grid-cols-2 gap-4">
+                <dl className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3">
                   <Field label="ETD">{formatDate(job.etd)}</Field>
                   <Field label="ETA">{formatDate(job.eta)}</Field>
                   <Field label="ATD">{formatDate(job.atd)}</Field>
