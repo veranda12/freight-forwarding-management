@@ -29,7 +29,7 @@ export default async function BookingsPage() {
             <TableBody>
               {bookings.map((b) => (
                 <TableRow key={b.id}>
-                  <TableCell className="font-medium">{b.number}</TableCell>
+                  <TableCell className="font-medium"><Link href={`/bookings/${b.id}`} className="text-primary hover:underline">{b.number}</Link></TableCell>
                   <TableCell><Link href={`/jobs/${b.job.id}`} className="text-primary hover:underline">{b.job.number}</Link></TableCell>
                   <TableCell>{b.vendor.name}</TableCell>
                   <TableCell className="font-mono text-xs">{b.carrierBookingNo}</TableCell>

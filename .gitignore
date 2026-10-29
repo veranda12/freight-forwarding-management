@@ -48,3 +48,6 @@ graphify-out/
 .playwright/
 /marketing
 /playwright-report
+docs/
+*.md
+!README.md

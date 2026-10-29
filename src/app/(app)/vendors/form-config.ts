@@ -14,4 +14,7 @@ export const VENDOR_FIELDS: FieldConfig[] = [
   { name: "country", label: "Negara", placeholder: "Indonesia" },
   { name: "phone", label: "Telepon" },
   { name: "email", label: "Email", type: "email" },
+  { name: "isForeign", label: "Vendor luar negeri (kena PPh 26)", type: "checkbox" },
+  { name: "pph26Rate", label: "Tarif PPh 26 khusus (%), kosong = tarif charge code", type: "number", placeholder: "20" },
+  { name: "skdNumber", label: "No. SKD / P3B (opsional)", colSpan: 2 },
 ];

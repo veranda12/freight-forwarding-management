@@ -7,6 +7,8 @@ import { assertCan } from "@/lib/auth-helpers";
 import { writeAudit } from "@/lib/audit";
 import { JOB_STATUS_LABELS, modeDirKey } from "@/lib/enums";
 import { genJobNumber } from "@/lib/sequence";
+import { computeChargeable } from "@/lib/chargeable";
+import { getWeightRules } from "@/lib/weight-rules";
 
 type JobInput = Record<string, unknown>;
 const s = (v: unknown) => { const x = typeof v === "string" ? v.trim() : v == null ? "" : String(v); return x !== "" ? x : null; };
@@ -17,11 +19,16 @@ export async function createJob(input: JobInput): Promise<{ ok: boolean; error?:
   const user = await assertCan("jobs", "write");
   const mode = s(input.mode); const direction = s(input.direction); const customerId = s(input.customerId);
   if (!mode || !direction || !customerId) return { ok: false, error: "Mode, arah, dan customer wajib diisi." };
+  if (direction !== "EXPORT" && direction !== "IMPORT") return { ok: false, error: "Arah Ekspor-Impor hanya Export/Import. Kargo antar kota dibuat di menu Domestik." };
   const isAir = mode === "AIR";
+  const rules = await getWeightRules("INTERNATIONAL");
 
   const id = await prisma.$transaction(async (tx) => {
     const number = await genJobNumber(tx, modeDirKey(mode as any, direction as any));
-    const gw = num(input.grossWeightKg); const vol = num(input.volumeCbm); const cw = num(input.chargeableWeight); const pkg = num(input.packages);
+    const gw = num(input.grossWeightKg); const vol = num(input.volumeCbm); const pkg = num(input.packages);
+    // chargeable weight kosong → hitung dari Aturan Berat (Air/LCL/Land)
+    let cw = num(input.chargeableWeight);
+    if (cw == null && rules[mode] && (gw || vol)) cw = computeChargeable({ actualKg: gw ?? 0, volumeCbm: vol ?? 0 }, rules[mode]).chargeableKg;
     const job = await tx.job.create({
       data: {
         number, mode: mode as any, direction: direction as any, status: "DRAFT",

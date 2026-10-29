@@ -3,7 +3,8 @@ import {
   LayoutDashboard, Users, Building2, Globe2, Anchor, Coins, Tags, Container,
   Package, Percent, BookOpen, FileText, Briefcase, CalendarCheck, FileSignature,
   Calculator, Receipt, FileInput, StickyNote, Wallet, BookMarked, BarChart3,
-  UserCog, Settings, History, MapPin,
+  UserCog, Settings, History, MapPin, Truck, PackageCheck, Scale, Calculator as CalcIcon,
+  ArrowLeftRight, BookCheck, Landmark, GitCompare, RefreshCw,
 } from "lucide-react";
 
 export type NavItem = {
@@ -26,19 +27,24 @@ export const NAV: NavGroup[] = [
     ],
   },
   {
-    label: "Sales",
+    // Lini bisnis 1: forwarding internasional
+    label: "Ekspor-Impor",
     items: [
       { label: "Rate Management", href: "/rates", icon: Tags, resource: "rates" },
       { label: "Quotation", href: "/quotations", icon: FileSignature, resource: "quotations" },
-    ],
-  },
-  {
-    label: "Operasional",
-    items: [
       { label: "Job / Shipment", href: "/jobs", icon: Briefcase, resource: "jobs" },
       { label: "Booking", href: "/bookings", icon: CalendarCheck, resource: "bookings" },
       { label: "Dokumentasi", href: "/documents", icon: FileText, resource: "documents" },
       { label: "Tracking", href: "/tracking", icon: MapPin, resource: "tracking" },
+    ],
+  },
+  {
+    // Lini bisnis 2: kargo domestik (antar kota) — data & alur terpisah
+    label: "Domestik",
+    items: [
+      { label: "Pengiriman (STT)", href: "/domestic", icon: Truck, resource: "domestic" },
+      { label: "Cek Tarif", href: "/domestic/check", icon: CalcIcon, resource: "domesticTariffs" },
+      { label: "Tarif Domestik", href: "/domestic/tariffs", icon: PackageCheck, resource: "domesticTariffs" },
     ],
   },
   {
@@ -50,6 +56,12 @@ export const NAV: NavGroup[] = [
       { label: "Debit/Credit Note", href: "/notes", icon: StickyNote, resource: "notes" },
       { label: "Receipt & Payment", href: "/payments", icon: Wallet, resource: "payments" },
       { label: "Accounting", href: "/accounting", icon: BookMarked, resource: "accounting" },
+      { label: "Arus Kas", href: "/accounting/cash-flow", icon: ArrowLeftRight, resource: "accounting" },
+      { label: "Tutup Buku", href: "/accounting/closing", icon: BookCheck, resource: "accounting" },
+      { label: "Aset Tetap", href: "/accounting/fixed-assets", icon: Building2, resource: "accounting" },
+      { label: "Pajak", href: "/accounting/tax", icon: Landmark, resource: "accounting" },
+      { label: "Rekonsiliasi Bank", href: "/accounting/bank-rec", icon: GitCompare, resource: "accounting" },
+      { label: "Revaluasi Kurs", href: "/accounting/fx", icon: RefreshCw, resource: "accounting" },
     ],
   },
   {
@@ -65,8 +77,10 @@ export const NAV: NavGroup[] = [
       { label: "Vendor", href: "/vendors", icon: Building2, resource: "vendors" },
       { label: "Overseas Agent", href: "/agents", icon: Globe2, resource: "agents" },
       { label: "Port & Airport", href: "/ports", icon: Anchor, resource: "ports" },
+      { label: "Armada Sendiri", href: "/vehicles", icon: Truck, resource: "vehicles" },
       { label: "Currency & Kurs", href: "/currencies", icon: Coins, resource: "currencies" },
       { label: "Charge Code", href: "/charges", icon: Tags, resource: "charges" },
+      { label: "Aturan Berat", href: "/weight-rules", icon: Scale, resource: "weightRules" },
       { label: "Container Type", href: "/containers", icon: Container, resource: "containers" },
       { label: "Commodity", href: "/commodities", icon: Package, resource: "commodities" },
       { label: "Pajak", href: "/taxes", icon: Percent, resource: "taxes" },

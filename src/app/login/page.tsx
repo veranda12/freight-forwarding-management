@@ -21,11 +21,11 @@ export default async function LoginPage() {
             Kelola operasional freight forwarding dalam satu sistem.
           </h1>
           <p className="max-w-md text-primary-foreground/80">
-            Quotation, job, booking, dokumen B/L, costing, invoice, hingga laporan keuangan —
+            Quotation, job, booking, dokumen B/L, costing, invoice, hingga laporan keuangan,
             terintegrasi end-to-end untuk Sea, Air, dan Trucking.
           </p>
           <ul className="grid grid-cols-2 gap-2 text-sm text-primary-foreground/90">
-            {["Multi-currency & kurs harian", "Jurnal otomatis & reversal", "Tracking publik real-time", "Profitability per job"].map((f) => (
+            {["Multi-currency & kurs harian", "Jurnal otomatis & reversal", "Tracking publik", "Profitability per job"].map((f) => (
               <li key={f} className="flex items-center gap-2">
                 <span className="h-1.5 w-1.5 rounded-full bg-primary-foreground/70" />
                 {f}

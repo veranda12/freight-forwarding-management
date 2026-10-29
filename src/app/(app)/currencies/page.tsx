@@ -5,6 +5,8 @@ import { PageHeader } from "@/components/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { SyncKursButton } from "./sync-kurs-button";
+import { CurrencyForms } from "./currency-forms";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +23,9 @@ export default async function CurrenciesPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Currency & Kurs" description="Mata uang dan kurs tengah terhadap IDR" />
+      <PageHeader title="Currency & Kurs" description="Kurs terhadap IDR. Sumber: Frankfurter (data ECB), bukan kurs resmi Bank Indonesia.">
+        <SyncKursButton />
+      </PageHeader>
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
           <CardHeader><CardTitle className="text-base">Mata Uang</CardTitle></CardHeader>
@@ -57,6 +61,12 @@ export default async function CurrenciesPage() {
           </CardContent>
         </Card>
       </div>
+      <Card>
+        <CardHeader><CardTitle className="text-base">Tambah Mata Uang & Kurs</CardTitle></CardHeader>
+        <CardContent>
+          <CurrencyForms foreign={currencies.filter((c) => !c.isBase).map((c) => ({ code: c.code, name: c.name }))} />
+        </CardContent>
+      </Card>
     </div>
   );
 }

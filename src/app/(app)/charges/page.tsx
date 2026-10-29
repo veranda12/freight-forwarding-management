@@ -3,6 +3,9 @@ import { prisma } from "@/lib/prisma";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { ChargeTaxEdit } from "./charge-tax-edit";
+import { ChargeMapEdit } from "./charge-map-edit";
+import { ChargeNew } from "./charge-new";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 export const dynamic = "force-dynamic";
@@ -13,15 +16,24 @@ export default async function ChargesPage() {
     orderBy: { code: "asc" },
     include: { revenueAccount: true, expenseAccount: true },
   });
+  const accounts = await prisma.coaAccount.findMany({
+    where: { isPostable: true, type: { in: ["REVENUE", "EXPENSE"] } },
+    select: { id: true, code: true, name: true, type: true },
+    orderBy: { code: "asc" },
+  });
+  const revenueAccounts = accounts.filter((a) => a.type === "REVENUE").map((a) => ({ id: a.id, code: a.code, name: a.name }));
+  const expenseAccounts = accounts.filter((a) => a.type === "EXPENSE").map((a) => ({ id: a.id, code: a.code, name: a.name }));
   return (
     <div className="space-y-6">
-      <PageHeader title="Charge Code" description={`${charges.length} kode biaya dengan mapping akun pendapatan & biaya`} />
+      <PageHeader title="Charge Code" description={`${charges.length} kode biaya dengan mapping akun pendapatan & biaya`}>
+        <ChargeNew revenueAccounts={revenueAccounts} expenseAccounts={expenseAccounts} />
+      </PageHeader>
       <Card>
         <CardContent className="p-0">
           <Table>
             <TableHeader><TableRow>
               <TableHead>Kode</TableHead><TableHead>Nama</TableHead><TableHead>Akun Pendapatan</TableHead>
-              <TableHead>Akun Biaya</TableHead><TableHead>PPN</TableHead><TableHead>PPh 23</TableHead>
+              <TableHead>Akun Biaya</TableHead><TableHead>PPN</TableHead><TableHead>PPh 23</TableHead><TableHead>PPh 26</TableHead><TableHead className="text-right">Aksi</TableHead>
             </TableRow></TableHeader>
             <TableBody>
               {charges.map((c) => (
@@ -32,6 +44,8 @@ export default async function ChargesPage() {
                   <TableCell className="text-muted-foreground text-xs">{c.expenseAccount ? `${c.expenseAccount.code} ${c.expenseAccount.name}` : "-"}</TableCell>
                   <TableCell>{c.defaultTaxable ? <Badge variant="outline">11%</Badge> : "-"}</TableCell>
                   <TableCell>{c.isPph23 ? <Badge variant="outline">2%</Badge> : "-"}</TableCell>
+                  <TableCell>{c.isPph26 ? <Badge variant="outline">{Number(c.pph26Rate)}%</Badge> : "-"}</TableCell>
+                  <TableCell className="text-right whitespace-nowrap"><ChargeMapEdit id={c.id} code={c.code} name={c.name} revenueAccountId={c.revenueAccountId} expenseAccountId={c.expenseAccountId} revenueAccounts={revenueAccounts} expenseAccounts={expenseAccounts} /><ChargeTaxEdit id={c.id} code={c.code} name={c.name} defaultTaxable={c.defaultTaxable} isPph23={c.isPph23} isPph26={c.isPph26} pph26Rate={Number(c.pph26Rate)} /></TableCell>
                 </TableRow>
               ))}
             </TableBody>

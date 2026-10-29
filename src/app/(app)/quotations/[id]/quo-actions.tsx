@@ -35,8 +35,11 @@ export function QuoActions({ id, status, hasJob }: { id: string; status: Quotati
         <Button variant="outline" className="text-success" onClick={() => change("ACCEPTED", "Quotation diterima.")}><Check /> Terima</Button>
         <Button variant="outline" className="text-destructive" onClick={() => change("REJECTED", "Quotation ditolak.")}><X /> Tolak</Button>
       </>}
-      {(status === "ACCEPTED" || status === "SENT") && !hasJob && (
+      {status === "ACCEPTED" && !hasJob && (
         <Button onClick={convert} disabled={pending}><ArrowRightLeft /> Convert ke Job</Button>
+      )}
+      {status === "SENT" && !hasJob && (
+        <span className="text-sm text-muted-foreground">Terima quotation dulu untuk mengonversi ke job.</span>
       )}
     </div>
   );

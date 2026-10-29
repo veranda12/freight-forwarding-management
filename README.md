@@ -71,7 +71,7 @@ RBAC ditegakkan di server (`requireCan`/`assertCan`) — bukan sekadar menyembun
 
 ## 5. Modul
 
-Master Data (Customer, Vendor, Overseas Agent, Port & Airport, Currency & Kurs, Charge Code, Container Type, Commodity, Pajak, COA) · Sales (Rate, Quotation) · Operasional (Job, Booking, Dokumentasi PDF, Tracking publik) · Finance (Costing, AR Invoice, AP Bill, Debit/Credit Note, Payment, Accounting, Laporan) · Dashboard · Sistem (User, Audit Log, Setting).
+Master Data (Customer, Vendor, Overseas Agent, Port & Airport, Currency & Kurs, Charge Code, Aturan Berat, Container Type, Commodity, Pajak, COA) · **Ekspor-Impor** (Rate, Quotation, Job, Booking, Dokumentasi PDF, Tracking publik) · **Domestik** (STT antar kota, Cek Tarif, Tarif Domestik) · Finance (Costing, AR Invoice, AP Bill, Debit/Credit Note, Payment, Accounting, Laporan) · Dashboard · Sistem (User, Audit Log, Setting).
 
 ## 6. Prinsip Teknis
 
@@ -97,11 +97,22 @@ npm run test:e2e     # end-to-end test (Playwright)
 
 ## 8. Testing
 
-- **Unit (Vitest)** — `npm run test`: RBAC, format mata uang/tanggal, enum, dan validasi check digit ISO 6346 (18 test).
-- **E2E (Playwright)** — `npm run test:e2e`: 10 skenario menelusuri UI nyata (dashboard, RBAC, Job+PDF, Accounting balance, buat Invoice→bayar, tracking publik, CRUD Vendor/Commodity, form Quotation & Job). Detail & flow demo ada di `DEMO.md`.
+- **Unit (Vitest)** — `npm run test`: RBAC, format mata uang/tanggal, enum, check digit ISO 6346, dan perhitungan berat kena biaya (28 test).
+- **E2E (Playwright)** — `npm run test:e2e`: 14 skenario (termasuk alur Domestik & Aturan Berat di `e2e/domestic.spec.ts`) menelusuri UI nyata (dashboard, RBAC, Job+PDF, Accounting balance, buat Invoice→bayar, tracking publik, CRUD Vendor/Commodity, form Quotation & Job). Detail & flow demo ada di `DEMO.md`.
 
 ## 9. CRUD & Form Manual
 
 - **CRUD master** (tambah/edit + validasi Zod + audit): Customer, Vendor, Overseas Agent, Commodity, Container Type, Pajak.
 - **Form create manual**: Quotation (multi-charge, preview margin live) dan Job/Shipment (routing sea/air adaptif). Job juga bisa dibuat via **Convert dari Quotation**.
 - **Invoice manual**: buat dari Job → catat pembayaran → batalkan (reversal jurnal).
+
+## 10. Domestik & Aturan Berat
+
+Dua lini bisnis dipisah: **Ekspor-Impor** (Job, arah Export/Import) dan **Domestik** (STT antar kota) — menu, data, dan penomoran sendiri. Finance (invoice, pembayaran, jurnal) tetap satu buku.
+
+- **Cek Tarif** (`/domestic/check`): isi dimensi, berat, kota tujuan → bandingkan harga & lead time darat/laut/udara, lalu "Buat STT".
+- **STT** (`/domestic`): Surat Tanda Terima per pengiriman — koli, perhitungan berat, status perjalanan, bukti terima (POD), cetak PDF, buat invoice (jurnal otomatis ke akun 4500 Pendapatan Kargo Domestik), lacak publik di `/track/<nomor STT>`.
+- **Tarif Domestik** (`/domestic/tariffs`): harga jual per kg per rute & mode, minimum tagih, lead time.
+- **Aturan Berat** (`/weight-rules`): berat kena biaya = max(berat aktual, CBM × 1.000.000 ÷ divisor), lalu berat minimum, volume minimum (CBM), pembulatan, dan toleransi pembulatan (mis. sisa ≤ 0,3 kg dibulatkan ke bawah) — semuanya bisa diatur per mode untuk Ekspor-Impor (Air/LCL/Land, dipakai otomatis di form Job) dan Domestik (Darat/Laut/Udara).
+
+Seed domestik bersifat idempoten: `npx tsx prisma/seed-domestic.ts` (juga jalan otomatis di akhir `prisma db seed`). Status PPN charge code `DOMFRT` diset kena PPN 11% — sesuaikan di menu Charge Code dengan konsultan pajak Anda (jasa pengurusan transportasi bisa memakai PPN besaran tertentu).

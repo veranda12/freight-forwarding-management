@@ -6,6 +6,8 @@ import { prisma } from "@/lib/prisma";
 import { can } from "@/lib/rbac";
 import { formatIDR, formatDate, formatNumber } from "@/lib/format";
 import { InvoiceActions } from "./invoice-actions";
+import { latestRate } from "@/lib/fx";
+import { suggestPph23 } from "@/lib/receipt-deductions";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -22,7 +24,7 @@ export default async function InvoiceDetail({ params }: { params: Promise<{ id: 
   const inv = await prisma.invoice.findUnique({
     where: { id },
     include: {
-      customer: true, job: { select: { id: true, number: true } },
+      customer: true, job: { select: { id: true, number: true } }, domesticShipment: { select: { id: true, number: true } },
       lines: { include: { chargeCode: true } },
       allocations: { include: { payment: true } },
     },
@@ -34,6 +36,9 @@ export default async function InvoiceDetail({ params }: { params: Promise<{ id: 
     : null;
 
   const outstanding = Number(inv.total) - Number(inv.amountPaid);
+  const outstandingForeign = Number(inv.amountForeign) - Number(inv.amountPaidForeign);
+  const defaultPaymentRate = inv.currency !== "IDR" ? await latestRate(prisma, inv.currency, new Date().toISOString().slice(0, 10)) : null;
+  const pph23Suggest = suggestPph23(inv.lines.filter((l) => l.chargeCode.isPph23).reduce((s, l) => s + Number(l.amount), 0));
 
   return (
     <div className="space-y-6">
@@ -43,12 +48,18 @@ export default async function InvoiceDetail({ params }: { params: Promise<{ id: 
           <InvoiceStatusBadge status={inv.status} />
           <InvoiceActions
             invoiceId={inv.id}
+            currency={inv.currency}
             outstanding={outstanding}
+            outstandingForeign={outstandingForeign}
+            bookedRate={Number(inv.exchangeRate)}
+            defaultPaymentRate={defaultPaymentRate}
+            pph23Suggest={pph23Suggest}
             canWrite={can(user.role, "payments", "write") || can(user.role, "invoices", "write")}
             cancellable={can(user.role, "invoices", "write") && Number(inv.amountPaid) === 0 && inv.status !== "CANCELLED"}
           />
         </PageHeader>
         {inv.job && <Link href={`/jobs/${inv.job.id}`} className="mt-2 inline-flex items-center gap-1.5 text-sm text-primary hover:underline"><Briefcase className="h-4 w-4" /> Job {inv.job.number}</Link>}
+        {inv.domesticShipment && <Link href={`/domestic/${inv.domesticShipment.id}`} className="mt-2 inline-flex items-center gap-1.5 text-sm text-primary hover:underline"><Briefcase className="h-4 w-4" /> STT {inv.domesticShipment.number}</Link>}
       </div>
 
       <div className="grid gap-4 lg:grid-cols-3">
@@ -98,7 +109,7 @@ export default async function InvoiceDetail({ params }: { params: Promise<{ id: 
               <CardContent className="space-y-2 text-sm">
                 {inv.allocations.map((a) => (
                   <div key={a.id} className="flex justify-between">
-                    <span className="text-muted-foreground">{a.payment.number} · {formatDate(a.payment.date)}</span>
+                    <Link href={`/payments/${a.payment.id}`} className="text-primary hover:underline">{a.payment.number} · {formatDate(a.payment.date)}</Link>
                     <span className="tabular-nums">{formatIDR(Number(a.amount))}</span>
                   </div>
                 ))}

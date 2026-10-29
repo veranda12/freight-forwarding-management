@@ -49,4 +49,5 @@ export const SEQ = {
   JOURNAL: "JE",
   DEBIT_NOTE: "DN",
   CREDIT_NOTE: "CN",
+  STT: "STT", // Surat Tanda Terima — pengiriman domestik
 } as const;

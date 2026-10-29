@@ -5,6 +5,8 @@ import {
   r2, pick, weighted, randAmount, npwp, containerNumber, blNumber, awbNumber,
   addDays, daysAgo,
 } from "./seed-helpers";
+import { seedDomestic } from "./seed-domestic";
+import { seedAccountingExt } from "./seed-accounting-ext";
 
 const prisma = new PrismaClient();
 
@@ -175,6 +177,7 @@ async function main() {
     ["1100", "Kas", "ASSET", "DEBIT", true],
     ["1200", "Bank BCA", "ASSET", "DEBIT", true],
     ["1300", "Piutang Usaha", "ASSET", "DEBIT", true],
+    ["1450", "PPh 23 Dibayar Dimuka", "ASSET", "DEBIT", true],
     ["1500", "Uang Muka / WIP", "ASSET", "DEBIT", true],
     ["2000", "Hutang Usaha", "LIABILITY", "CREDIT", true],
     ["2100", "PPN Keluaran", "LIABILITY", "CREDIT", true],
@@ -597,14 +600,15 @@ async function main() {
     const mode = weighted<"SEA_FCL" | "SEA_LCL" | "AIR" | "LAND" | "CUSTOMS">([
       ["SEA_FCL", 45], ["AIR", 20], ["SEA_LCL", 15], ["LAND", 12], ["CUSTOMS", 8],
     ]);
-    const direction = weighted<"EXPORT" | "IMPORT" | "DOMESTIC">([
-      ["EXPORT", 45], ["IMPORT", 45], ["DOMESTIC", 10],
+    // Ekspor-Impor saja — kargo domestik ada di modul terpisah (seed-domestic.ts)
+    const direction = weighted<"EXPORT" | "IMPORT">([
+      ["EXPORT", 50], ["IMPORT", 50],
     ]);
     const cust = pick(customers);
     const commodity = pick(commodities);
     const modeKey =
       mode === "SEA_FCL" || mode === "SEA_LCL" ? "SEA" : mode === "AIR" ? "AIR" : mode === "LAND" ? "LAND" : "CC";
-    const dirKey = direction === "EXPORT" ? "EXP" : direction === "IMPORT" ? "IMP" : "DOM";
+    const dirKey = direction === "EXPORT" ? "EXP" : "IMP";
     const modeDir = `${modeKey}-${dirKey}`;
     const number = nextJob(modeDir, openedAt);
 
@@ -650,8 +654,7 @@ async function main() {
     // mode-specific routing + docs
     if (mode === "SEA_FCL" || mode === "SEA_LCL") {
       if (direction === "EXPORT") { polId = port["IDTPP"]; podId = port[pick(foreignPorts)]; }
-      else if (direction === "IMPORT") { polId = port[pick(foreignPorts)]; podId = port["IDTPP"]; }
-      else { polId = port["IDTPP"]; podId = port[pick(idPorts.filter((p) => p !== "IDTPP"))]; }
+      else { polId = port[pick(foreignPorts)]; podId = port["IDTPP"]; }
       data.pol = { connect: { id: polId } };
       data.pod = { connect: { id: podId } };
       data.vesselName = `${pick(["MV", "MV", "MSC", "EVER"])} ${faker.word.noun().toUpperCase()}`;
@@ -685,10 +688,8 @@ async function main() {
     const foreignCo = `${faker.company.name()} ${pick(["Co., Ltd", "Trading", "Inc.", "GmbH"])}`;
     if (direction === "EXPORT") {
       data.shipperName = cust.name; data.consigneeName = foreignCo;
-    } else if (direction === "IMPORT") {
-      data.shipperName = foreignCo; data.consigneeName = cust.name;
     } else {
-      data.shipperName = cust.name; data.consigneeName = faker.company.name();
+      data.shipperName = foreignCo; data.consigneeName = cust.name;
     }
     data.notifyName = data.consigneeName;
 
@@ -1142,6 +1143,9 @@ async function main() {
     quotations: await prisma.quotation.count(),
   };
   console.log("  • Ringkasan:", counts);
+  await seedDomestic(prisma);
+  await seedAccountingExt(prisma);
+
   console.log("✅ Seed selesai.");
 }
 

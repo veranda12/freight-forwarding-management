@@ -6,7 +6,7 @@ describe("enums", () => {
     expect(modeDirKey("SEA_FCL", "EXPORT")).toBe("SEA-EXP");
     expect(modeDirKey("SEA_LCL", "IMPORT")).toBe("SEA-IMP");
     expect(modeDirKey("AIR", "EXPORT")).toBe("AIR-EXP");
-    expect(modeDirKey("LAND", "DOMESTIC")).toBe("LAND-DOM");
+    expect(modeDirKey("LAND", "EXPORT")).toBe("LAND-EXP");
     expect(modeDirKey("CUSTOMS", "IMPORT")).toBe("CC-IMP");
   });
 

@@ -11,12 +11,12 @@ export default async function InvoicesPage() {
   await requireCan("invoices", "read");
   const invoices = await prisma.invoice.findMany({
     orderBy: { date: "desc" },
-    include: { customer: { select: { name: true } }, job: { select: { number: true } } },
+    include: { customer: { select: { name: true } }, job: { select: { number: true } }, domesticShipment: { select: { number: true } } },
   });
   const rows: InvoiceRow[] = invoices.map((i) => ({
     id: i.id, number: i.number, customer: i.customer.name,
     date: i.date.toISOString(), dueDate: i.dueDate.toISOString(),
-    total: Number(i.total), paid: Number(i.amountPaid), status: i.status, job: i.job?.number ?? null,
+    total: Number(i.total), paid: Number(i.amountPaid), status: i.status, job: i.job?.number ?? i.domesticShipment?.number ?? null,
   }));
 
   const outstanding = rows.filter((r) => r.status !== "PAID" && r.status !== "CANCELLED").reduce((s, r) => s + (r.total - r.paid), 0);

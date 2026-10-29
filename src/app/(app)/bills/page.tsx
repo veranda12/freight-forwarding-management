@@ -1,6 +1,9 @@
 import { requireCan } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
+import { can } from "@/lib/rbac";
 import { formatIDR } from "@/lib/format";
+import { latestRate } from "@/lib/fx";
+import { r2 } from "@/lib/accounting-core";
 import { PageHeader } from "@/components/page-header";
 import { StatStrip } from "@/components/stat-strip";
 import { BillsTable, type BillRow } from "./bills-table";
@@ -8,13 +11,29 @@ import { BillsTable, type BillRow } from "./bills-table";
 export const dynamic = "force-dynamic";
 
 export default async function BillsPage() {
-  await requireCan("bills", "read");
+  const user = await requireCan("bills", "read");
   const bills = await prisma.vendorBill.findMany({ orderBy: { date: "desc" }, include: { vendor: { select: { name: true } } } });
-  const rows: BillRow[] = bills.map((b) => ({
-    id: b.id, number: b.number, vendor: b.vendor.name, date: b.date.toISOString(), dueDate: b.dueDate.toISOString(),
-    subtotal: Number(b.subtotal), pph23: Number(b.pph23Amount), total: Number(b.total), status: b.status,
-  }));
-  const outstanding = rows.filter((r) => r.status !== "PAID" && r.status !== "CANCELLED").reduce((s, r) => s + r.total, 0);
+  const today = new Date().toISOString().slice(0, 10);
+  const rateCache = new Map<string, number | null>();
+  const rateOf = async (cur: string) => {
+    if (!rateCache.has(cur)) rateCache.set(cur, await latestRate(prisma, cur, today));
+    return rateCache.get(cur) ?? null;
+  };
+
+  const rows: BillRow[] = [];
+  for (const b of bills) {
+    const outstanding = r2(Number(b.total) - Number(b.amountPaid));
+    rows.push({
+      id: b.id, number: b.number, vendor: b.vendor.name, date: b.date.toISOString(), dueDate: b.dueDate.toISOString(),
+      subtotal: Number(b.subtotal), pph23: Number(b.pph23Amount), total: Number(b.total), status: b.status,
+      currency: b.currency,
+      outstanding,
+      outstandingForeign: r2(Number(b.amountForeign) - Number(b.amountPaidForeign)),
+      bookedRate: Number(b.exchangeRate),
+      defaultPaymentRate: b.currency === "IDR" ? 1 : await rateOf(b.currency),
+    });
+  }
+  const outstandingTotal = rows.filter((r) => r.status !== "PAID" && r.status !== "CANCELLED").reduce((s, r) => s + r.outstanding, 0);
   const pphTotal = rows.reduce((s, r) => s + r.pph23, 0);
 
   return (
@@ -22,10 +41,10 @@ export default async function BillsPage() {
       <PageHeader title="Vendor Bill (AP)" description={`${rows.length} tagihan vendor`} />
       <StatStrip items={[
         { label: "Total bill", value: rows.length },
-        { label: "Outstanding AP", value: formatIDR(outstanding), tone: "warning" },
+        { label: "Outstanding AP", value: formatIDR(outstandingTotal), tone: "warning" },
         { label: "PPh 23 dipotong", value: formatIDR(pphTotal) },
       ]} />
-      <BillsTable data={rows} />
+      <BillsTable data={rows} canPay={can(user.role, "payments", "write")} />
     </div>
   );
 }

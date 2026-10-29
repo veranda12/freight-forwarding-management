@@ -21,6 +21,9 @@ import { cn } from "@/lib/utils";
 import { StatusControl } from "./status-control";
 import { MilestoneTimeline, type MilestoneItem } from "./milestone-timeline";
 import { CreateInvoiceButton } from "./create-invoice-button";
+import { CreateBillButton } from "./create-bill-button";
+import { FleetCostButton } from "./fleet-cost-button";
+import { ContainerForm } from "./container-form";
 
 export const dynamic = "force-dynamic";
 
@@ -71,7 +74,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
       milestones: { orderBy: { sortOrder: "asc" } },
       documents: { orderBy: { createdAt: "desc" } },
       booking: { include: { vendor: true } },
-      costings: { include: { chargeCode: true, vendor: true }, orderBy: [{ side: "asc" }, { sortOrder: "asc" }] },
+      costings: { include: { chargeCode: true, vendor: true, vehicle: true }, orderBy: [{ side: "asc" }, { sortOrder: "asc" }] },
       invoices: { orderBy: { date: "desc" } },
       bills: { include: { vendor: true }, orderBy: { date: "desc" } },
     },
@@ -87,6 +90,16 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
 
   const selling = job.costings.filter((c) => c.side === "SELLING");
   const buying = job.costings.filter((c) => c.side === "BUYING");
+  const currencies = await prisma.currency.findMany({ where: { isBase: false }, select: { code: true, name: true }, orderBy: { code: "asc" } });
+  const unbilled = Object.values(buying.filter((c) => !c.billed && c.vendorId).reduce<Record<string, { vendorId: string; name: string; amount: number }>>((acc, c) => {
+    const k = c.vendorId as string;
+    acc[k] = acc[k] ?? { vendorId: k, name: c.vendor?.name ?? "-", amount: 0 };
+    acc[k].amount += Number(c.actualIdr);
+    return acc;
+  }, {}));
+  const canBill = can(user.role, "bills", "write");
+  const canContainers = can(user.role, "containers", "write");
+  const containerTypes = await prisma.containerType.findMany({ where: { isActive: true }, orderBy: { code: "asc" }, select: { id: true, code: true, name: true } });
   const revenue = Number(job.revenueIdr);
   const cost = Number(job.costIdr);
   const profit = Number(job.profitIdr);
@@ -170,8 +183,8 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
                   {isAir ? <Field label="Flight No">{job.flightNo}</Field> : <Field label="Vessel / Voyage">{job.vesselName} {job.voyageNo}</Field>}
                   <Field label="Sales PIC">{job.salesPic?.name}</Field>
                   <Field label="Gross Weight">{job.grossWeightKg ? `${formatNumber(Number(job.grossWeightKg), 0)} kg` : "-"}</Field>
-                  {isAir ? <Field label="Chargeable Weight">{job.chargeableWeight ? `${formatNumber(Number(job.chargeableWeight), 0)} kg` : "-"}</Field>
-                    : <Field label="Volume">{job.volumeCbm ? `${formatNumber(Number(job.volumeCbm), 2)} CBM` : "-"}</Field>}
+                  <Field label="Volume">{job.volumeCbm ? `${formatNumber(Number(job.volumeCbm), 2)} CBM` : "-"}</Field>
+                  {job.chargeableWeight && <Field label="Chargeable Weight">{`${formatNumber(Number(job.chargeableWeight), 0)} kg`}</Field>}
                   <Field label="Packages">{job.packages ? `${job.packages} ${job.packageType ?? ""}` : "-"}</Field>
                 </dl>
               </CardContent>
@@ -232,20 +245,35 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
         {!isAir && (
           <TabsContent value="containers">
             <Card>
+              <CardHeader className="flex-row items-center justify-between">
+                <CardTitle className="text-base">Container</CardTitle>
+                {canContainers && <ContainerForm jobId={job.id} types={containerTypes} />}
+              </CardHeader>
               <CardContent className="p-0">
                 {job.containers.length ? (
                   <Table>
                     <TableHeader><TableRow>
                       <TableHead>No. Container</TableHead><TableHead>Seal</TableHead>
-                      <TableHead>Type</TableHead><TableHead>Gross Weight</TableHead>
+                      <TableHead>Type</TableHead><TableHead>Gross Weight</TableHead><TableHead>Volume</TableHead>
+                      {canContainers && <TableHead className="text-right">Aksi</TableHead>}
                     </TableRow></TableHeader>
                     <TableBody>
                       {job.containers.map((c) => (
                         <TableRow key={c.id}>
                           <TableCell className="font-medium">{c.containerNo}</TableCell>
-                          <TableCell>{c.sealNo}</TableCell>
-                          <TableCell><Badge variant="outline">{c.containerType?.code}</Badge></TableCell>
-                          <TableCell>{c.grossWeightKg ? `${formatNumber(Number(c.grossWeightKg), 0)} kg` : "-"}</TableCell>
+                          <TableCell>{c.sealNo ?? "-"}</TableCell>
+                          <TableCell><Badge variant="outline">{c.containerType?.code ?? "-"}</Badge></TableCell>
+                          <TableCell>{c.grossWeightKg == null ? "-" : `${formatNumber(Number(c.grossWeightKg), 0)} kg`}</TableCell>
+                          <TableCell>{c.volumeCbm == null ? "-" : `${formatNumber(Number(c.volumeCbm), 2)} cbm`}</TableCell>
+                          {canContainers && (
+                            <TableCell className="text-right">
+                              <ContainerForm jobId={job.id} types={containerTypes} initial={{
+                                id: c.id, containerNo: c.containerNo, sealNo: c.sealNo, containerTypeId: c.containerTypeId,
+                                grossWeightKg: c.grossWeightKg == null ? null : Number(c.grossWeightKg),
+                                volumeCbm: c.volumeCbm == null ? null : Number(c.volumeCbm),
+                              }} />
+                            </TableCell>
+                          )}
                         </TableRow>
                       ))}
                     </TableBody>
@@ -304,7 +332,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
         <TabsContent value="costing">
           <div className="space-y-4">
             <CostTable title="Selling (Revenue)" rows={selling} totalIdr={revenue} tone="success" />
-            <CostTable title="Buying (Cost)" rows={buying} totalIdr={cost} tone="destructive" />
+            <CostTable title="Buying (Cost)" rows={buying} totalIdr={cost} tone="destructive" recordable={canBill} />
             <Card>
               <CardContent className="flex flex-wrap items-center justify-between gap-4 p-5">
                 <div><p className="text-sm text-muted-foreground">Gross Profit</p><p className={cn("text-2xl font-semibold", profit < 0 && "text-destructive")}>{formatIDR(profit)}</p></div>
@@ -321,7 +349,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
             <Card>
               <CardHeader className="flex-row items-center justify-between">
                 <CardTitle className="text-base">AR Invoice</CardTitle>
-                {canInvoice && job.costings.some((c) => c.side === "SELLING") && <CreateInvoiceButton jobId={job.id} />}
+                {canInvoice && job.costings.some((c) => c.side === "SELLING") && <CreateInvoiceButton jobId={job.id} currencies={currencies} />}
               </CardHeader>
               <CardContent className="p-0">
                 {job.invoices.length ? (
@@ -345,6 +373,25 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
                 ) : <EmptyState title="Belum ada invoice" className="border-0 py-8" />}
               </CardContent>
             </Card>
+            {canBill && unbilled.length > 0 && (
+              <Card>
+                <CardHeader><CardTitle className="text-base">Biaya Beli Belum di-Bill</CardTitle></CardHeader>
+                <CardContent className="p-0">
+                  <Table>
+                    <TableHeader><TableRow><TableHead>Vendor</TableHead><TableHead>Biaya (IDR)</TableHead><TableHead className="text-right">Aksi</TableHead></TableRow></TableHeader>
+                    <TableBody>
+                      {unbilled.map((u) => (
+                        <TableRow key={u.vendorId}>
+                          <TableCell className="font-medium">{u.name}</TableCell>
+                          <TableCell>{formatIDR(u.amount)}</TableCell>
+                          <TableCell className="text-right"><CreateBillButton jobId={job.id} vendorId={u.vendorId} vendorName={u.name} amountIdr={u.amount} currencies={currencies} /></TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+            )}
             {job.bills.length > 0 && (
               <Card>
                 <CardHeader><CardTitle className="text-base">AP Vendor Bill</CardTitle></CardHeader>
@@ -377,12 +424,13 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
 }
 
 function CostTable({
-  title, rows, totalIdr, tone,
+  title, rows, totalIdr, tone, recordable = false,
 }: {
   title: string;
-  rows: { id: string; chargeCode: { code: string; name: string }; description: string | null; vendor: { name: string } | null; currency: string; qty: any; unitPrice: any; amountForeign: any; actualIdr: any }[];
+  rows: { id: string; chargeCode: { code: string; name: string }; description: string | null; vendor: { name: string } | null; vehicle: { plate: string } | null; currency: string; qty: any; unitPrice: any; amountForeign: any; actualIdr: any; recordedAt: Date | null }[];
   totalIdr: number;
   tone: "success" | "destructive";
+  recordable?: boolean;
 }) {
   return (
     <Card>
@@ -391,18 +439,26 @@ function CostTable({
         {rows.length ? (
           <Table>
             <TableHeader><TableRow>
-              <TableHead>Charge</TableHead><TableHead>Vendor</TableHead><TableHead>Qty</TableHead>
+              <TableHead>Charge</TableHead><TableHead>Vendor / Armada</TableHead><TableHead>Qty</TableHead>
               <TableHead>Harga</TableHead><TableHead>Valas</TableHead><TableHead className="text-right">IDR</TableHead>
+              {recordable && <TableHead className="text-right">Beban armada</TableHead>}
             </TableRow></TableHeader>
             <TableBody>
               {rows.map((r) => (
                 <TableRow key={r.id}>
                   <TableCell><span className="font-medium">{r.chargeCode.code}</span> <span className="text-muted-foreground">{r.chargeCode.name}</span></TableCell>
-                  <TableCell className="text-muted-foreground">{r.vendor?.name ?? "-"}</TableCell>
+                  <TableCell className="text-muted-foreground">{r.vendor?.name ?? (r.vehicle ? `Armada ${r.vehicle.plate}` : "-")}</TableCell>
                   <TableCell>{formatNumber(Number(r.qty), 0)}</TableCell>
                   <TableCell>{formatMoney(Number(r.unitPrice), r.currency, r.currency === "IDR" ? 0 : 2)}</TableCell>
                   <TableCell>{formatMoney(Number(r.amountForeign), r.currency, r.currency === "IDR" ? 0 : 2)}</TableCell>
                   <TableCell className="text-right tabular-nums">{formatIDR(Number(r.actualIdr))}</TableCell>
+                  {recordable && (
+                    <TableCell className="text-right">
+                      {r.vehicle && !r.vendor
+                        ? <FleetCostButton lineId={r.id} plate={r.vehicle.plate} defaultAmount={Number(r.actualIdr)} recorded={!!r.recordedAt} />
+                        : <span className="text-muted-foreground">-</span>}
+                    </TableCell>
+                  )}
                 </TableRow>
               ))}
             </TableBody>

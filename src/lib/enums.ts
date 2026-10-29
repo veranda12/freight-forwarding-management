@@ -8,6 +8,8 @@ import type {
   BookingStatus,
   VendorType,
   NoteStatus,
+  DomesticMode,
+  DomesticStatus,
 } from "@prisma/client";
 
 type BadgeVariant = "default" | "secondary" | "outline" | "success" | "warning" | "destructive" | "muted";
@@ -31,7 +33,6 @@ export const MODE_SHORT: Record<TransportMode, string> = {
 export const DIRECTION_LABELS: Record<TradeDirection, string> = {
   EXPORT: "Export",
   IMPORT: "Import",
-  DOMESTIC: "Domestic",
 };
 
 /** untuk key sequence job: SEA-EXP, AIR-IMP, dst */
@@ -44,7 +45,7 @@ export function modeDirKey(mode: TransportMode, dir: TradeDirection): string {
       : mode === "LAND"
       ? "LAND"
       : "CC";
-  const d = dir === "EXPORT" ? "EXP" : dir === "IMPORT" ? "IMP" : "DOM";
+  const d = dir === "EXPORT" ? "EXP" : "IMP";
   return `${m}-${d}`;
 }
 
@@ -160,4 +161,47 @@ export const VENDOR_TYPE_LABELS: Record<VendorType, string> = {
   WAREHOUSE: "Warehouse",
   DEPOT: "Depo",
   OTHER: "Lainnya",
+};
+
+// ---------------- Domestik ----------------
+
+export const DOM_MODE_LABELS: Record<DomesticMode, string> = {
+  DARAT: "Darat",
+  LAUT: "Laut",
+  UDARA: "Udara",
+};
+
+export const DOM_STATUS_LABELS: Record<DomesticStatus, string> = {
+  BOOKED: "Order diterima",
+  PICKED_UP: "Barang dijemput",
+  IN_TRANSIT: "Dalam perjalanan",
+  ARRIVED: "Tiba di kota tujuan",
+  OUT_FOR_DELIVERY: "Diantar ke penerima",
+  DELIVERED: "Diterima",
+  CANCELLED: "Dibatalkan",
+};
+
+export const DOM_STATUS_VARIANT: Record<DomesticStatus, BadgeVariant> = {
+  BOOKED: "secondary",
+  PICKED_UP: "default",
+  IN_TRANSIT: "default",
+  ARRIVED: "warning",
+  OUT_FOR_DELIVERY: "warning",
+  DELIVERED: "success",
+  CANCELLED: "destructive",
+};
+
+/** urutan status STT domestik (tanpa CANCELLED) */
+export const DOM_STATUS_FLOW: DomesticStatus[] = [
+  "BOOKED", "PICKED_UP", "IN_TRANSIT", "ARRIVED", "OUT_FOR_DELIVERY", "DELIVERED",
+];
+
+/** Label mode untuk aturan berat (gabungan Ekspor-Impor & Domestik). */
+export const WEIGHT_RULE_MODE_LABELS: Record<string, string> = {
+  AIR: "Air Freight",
+  SEA_LCL: "Sea LCL",
+  LAND: "Land / Trucking",
+  UDARA: "Udara",
+  DARAT: "Darat",
+  LAUT: "Laut",
 };

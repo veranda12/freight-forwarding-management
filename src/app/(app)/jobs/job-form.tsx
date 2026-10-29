@@ -12,14 +12,18 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { MODE_LABELS, DIRECTION_LABELS } from "@/lib/enums";
+import { computeChargeable, type WeightRuleInput } from "@/lib/chargeable";
+import { formatNumber } from "@/lib/format";
 import { createJob } from "./actions";
 
 type Opt = { id: string; label: string };
+export type JobWeightRules = Record<string, WeightRuleInput>;
+const BASIS = { ACTUAL: "berat aktual", VOLUME: "berat volume", MIN_VOLUME: "volume minimum", MINIMUM: "berat minimum" } as const;
 
 export function JobForm({
-  customers, sales, commodities, ports, airports,
+  customers, sales, commodities, ports, airports, weightRules,
 }: {
-  customers: Opt[]; sales: Opt[]; commodities: Opt[]; ports: Opt[]; airports: Opt[];
+  customers: Opt[]; sales: Opt[]; commodities: Opt[]; ports: Opt[]; airports: Opt[]; weightRules: JobWeightRules;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -33,10 +37,18 @@ export function JobForm({
   const set = (k: string, v: string) => setF((p) => ({ ...p, [k]: v }));
   const isAir = f.mode === "AIR";
 
+  // Chargeable weight otomatis dari Aturan Berat (Air / LCL / Land); bisa ditimpa manual
+  const [cwManual, setCwManual] = useState(false);
+  const rule = weightRules[f.mode];
+  const auto = rule
+    ? computeChargeable({ actualKg: parseFloat(f.grossWeightKg) || 0, volumeCbm: parseFloat(f.volumeCbm) || 0 }, rule)
+    : null;
+  const chargeable = cwManual || !auto ? f.chargeableWeight : auto.chargeableKg ? String(auto.chargeableKg) : "";
+
   function submit() {
     if (!f.customerId) { toast.error("Pilih customer."); return; }
     start(async () => {
-      const res = await createJob(f);
+      const res = await createJob({ ...f, chargeableWeight: chargeable });
       if (res.ok && res.id) { toast.success("Job dibuat."); router.push(`/jobs/${res.id}`); router.refresh(); }
       else toast.error(res.error ?? "Gagal.");
     });
@@ -65,7 +77,7 @@ export function JobForm({
               <Sel label="Origin Airport" value={f.originAirportId} onChange={(v) => set("originAirportId", v)} options={airports} placeholder="Pilih…" />
               <Sel label="Dest. Airport" value={f.destAirportId} onChange={(v) => set("destAirportId", v)} options={airports} placeholder="Pilih…" />
               <Fld label="Flight No"><Input value={f.flightNo} onChange={(e) => set("flightNo", e.target.value)} /></Fld>
-              <Fld label="Chargeable Weight (kg)"><Input type="number" value={f.chargeableWeight} onChange={(e) => set("chargeableWeight", e.target.value)} /></Fld>
+              <Fld label="Volume (CBM)"><Input type="number" value={f.volumeCbm} onChange={(e) => set("volumeCbm", e.target.value)} /></Fld>
             </>
           ) : (
             <>
@@ -79,6 +91,24 @@ export function JobForm({
           <Fld label="ETD"><Input type="date" value={f.etd} onChange={(e) => set("etd", e.target.value)} /></Fld>
           <Fld label="ETA"><Input type="date" value={f.eta} onChange={(e) => set("eta", e.target.value)} /></Fld>
           <Fld label="Gross Weight (kg)"><Input type="number" value={f.grossWeightKg} onChange={(e) => set("grossWeightKg", e.target.value)} /></Fld>
+          {rule && (
+            <div className="space-y-1.5">
+              <Label htmlFor="cw">Chargeable Weight (kg)</Label>
+              <Input
+                id="cw" type="number" value={chargeable}
+                onChange={(e) => { setCwManual(true); set("chargeableWeight", e.target.value); }}
+              />
+              <p className="text-xs text-muted-foreground">
+                {cwManual ? (
+                  <>Diisi manual · <button type="button" className="text-primary hover:underline" onClick={() => setCwManual(false)}>kembali ke otomatis</button></>
+                ) : auto && auto.chargeableKg > 0 ? (
+                  <>Otomatis: {BASIS[auto.basis]} (÷{rule.divisor}{rule.minChargeableKg ? `, min ${formatNumber(rule.minChargeableKg, 0)} kg` : ""}) · <a href="/weight-rules" className="text-primary hover:underline">Aturan Berat</a></>
+                ) : (
+                  <>Isi gross weight & volume — dihitung otomatis (÷{rule.divisor})</>
+                )}
+              </p>
+            </div>
+          )}
           <Fld label="Jumlah Koli"><Input type="number" value={f.packages} onChange={(e) => set("packages", e.target.value)} /></Fld>
           <Fld label="Jenis Kemasan"><Input value={f.packageType} onChange={(e) => set("packageType", e.target.value)} placeholder="Carton / Pallet" /></Fld>
         </CardContent>
@@ -109,7 +139,7 @@ function Sel({ label, value, onChange, options, placeholder }: { label: string; 
     <div className="space-y-1.5">
       <Label>{label}</Label>
       <Select value={value} onValueChange={onChange}>
-        <SelectTrigger><SelectValue placeholder={placeholder} /></SelectTrigger>
+        <SelectTrigger aria-label={label}><SelectValue placeholder={placeholder} /></SelectTrigger>
         <SelectContent>{options.map((o) => <SelectItem key={o.id} value={o.id}>{o.label}</SelectItem>)}</SelectContent>
       </Select>
     </div>

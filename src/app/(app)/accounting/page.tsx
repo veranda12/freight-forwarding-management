@@ -2,13 +2,14 @@ import React from "react";
 import { requireCan } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
 import { getTrialBalance, getIncomeStatement, getBalanceSheet } from "@/lib/accounting";
-import { formatIDR, formatDate } from "@/lib/format";
+import { formatIDR } from "@/lib/format";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { LedgerView } from "./ledger-view";
+import { JournalExplorer } from "./journal-explorer";
 import { AccountingFilter } from "./accounting-filter";
 
 export const dynamic = "force-dynamic";
@@ -23,15 +24,10 @@ export default async function AccountingPage({ searchParams }: { searchParams: P
   const asof = new Date(asofStr + "T23:59:59");
   const yearStart = new Date(asof.getFullYear(), 0, 1);
 
-  const [tb, pl, bs, journals, accounts] = await Promise.all([
+  const [tb, pl, bs, accounts] = await Promise.all([
     getTrialBalance(asof),
     getIncomeStatement(yearStart, asof),
     getBalanceSheet(asof),
-    prisma.journalEntry.findMany({
-      where: { date: { lte: asof } },
-      orderBy: { date: "desc" }, take: 80,
-      include: { lines: true },
-    }),
     prisma.coaAccount.findMany({ where: { isPostable: true }, orderBy: { code: "asc" }, select: { code: true, name: true } }),
   ]);
 
@@ -137,30 +133,7 @@ export default async function AccountingPage({ searchParams }: { searchParams: P
 
         {/* Journal */}
         <TabsContent value="je">
-          <Card>
-            <CardContent className="p-0">
-              <Table>
-                <TableHeader><TableRow>
-                  <TableHead>No. Jurnal</TableHead><TableHead>Tanggal</TableHead>
-                  <TableHead>Keterangan</TableHead><TableHead>Sumber</TableHead><TableHead className="text-right">Nilai</TableHead>
-                </TableRow></TableHeader>
-                <TableBody>
-                  {journals.map((j) => {
-                    const total = j.lines.reduce((s, l) => s + Number(l.debit), 0);
-                    return (
-                      <TableRow key={j.id}>
-                        <TableCell className="font-mono text-xs">{j.number}</TableCell>
-                        <TableCell>{formatDate(j.date)}</TableCell>
-                        <TableCell className="max-w-xs truncate">{j.description}</TableCell>
-                        <TableCell><Badge variant="outline">{j.source}</Badge></TableCell>
-                        <TableCell className="text-right tabular-nums">{formatIDR(total)}</TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
+          <JournalExplorer accounts={accounts} />
         </TabsContent>
       </Tabs>
     </div>

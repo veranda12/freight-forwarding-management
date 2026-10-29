@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { can } from "@/lib/rbac";
+import type { Role } from "@prisma/client";
 
 export async function GET(req: NextRequest) {
   const session = await auth();
@@ -10,8 +12,9 @@ export async function GET(req: NextRequest) {
   if (q.length < 2) return NextResponse.json([]);
 
   const like = { contains: q, mode: "insensitive" as const };
+  const canDomestic = can((session.user as { role?: Role }).role, "domestic", "read");
 
-  const [jobs, customers, containers] = await Promise.all([
+  const [jobs, customers, containers, stts] = await Promise.all([
     prisma.job.findMany({
       where: {
         OR: [
@@ -32,6 +35,14 @@ export async function GET(req: NextRequest) {
       select: { containerNo: true, job: { select: { id: true, number: true } } },
       take: 5,
     }),
+    canDomestic
+      ? prisma.domesticShipment.findMany({
+          where: { OR: [{ number: like }, { consigneeName: like }, { shipperName: like }, { destCity: like }] },
+          select: { id: true, number: true, originCity: true, destCity: true, customer: { select: { name: true } } },
+          orderBy: { createdAt: "desc" },
+          take: 5,
+        })
+      : Promise.resolve([]),
   ]);
 
   const results = [
@@ -46,6 +57,12 @@ export async function GET(req: NextRequest) {
       label: c.name,
       sublabel: `${c.code} · ${c.city ?? "-"}`,
       href: `/customers/${c.id}`,
+    })),
+    ...stts.map((t) => ({
+      type: "stt" as const,
+      label: t.number,
+      sublabel: `Domestik · ${t.originCity} → ${t.destCity} · ${t.customer.name}`,
+      href: `/domestic/${t.id}`,
     })),
     ...containers.map((c) => ({
       type: "container" as const,

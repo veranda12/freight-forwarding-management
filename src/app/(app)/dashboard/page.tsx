@@ -1,6 +1,7 @@
 import {
-  Ship, FileWarning, AlertTriangle, ArrowUpCircle, CalendarClock,
+  Ship, FileWarning, AlertTriangle, ArrowUpCircle, CalendarClock, Truck, PackageOpen,
 } from "lucide-react";
+import { can } from "@/lib/rbac";
 import { requireCan } from "@/lib/auth-helpers";
 import { getDashboardData, getWorklist } from "@/lib/analytics";
 import { formatIDR } from "@/lib/format";
@@ -19,6 +20,7 @@ export default async function DashboardPage() {
   const isOps = ["ADMIN", "OPERATION", "MANAGEMENT", "SALES"].includes(role);
   const isDocs = ["ADMIN", "DOCUMENTATION", "OPERATION", "MANAGEMENT"].includes(role);
   const isFin = ["ADMIN", "FINANCE", "MANAGEMENT"].includes(role);
+  const isDom = can(role, "domestic", "read");
 
   const kpis: { label: string; value: string; tone?: string }[] = [
     { label: "Shipment aktif", value: String(d.kpis.activeJobs) },
@@ -52,7 +54,7 @@ export default async function DashboardPage() {
 
       {/* Worklist — antrian aksi role-aware */}
       <div>
-        <h2 className="mb-2 text-sm font-semibold text-muted-foreground">Butuh Aksi</h2>
+        <h2 className="mb-2 text-sm font-semibold text-muted-foreground">Butuh Aksi · Ekspor-Impor</h2>
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {isOps && <WorklistPanel title="Berangkat ≤ 3 hari" items={wl.departingSoon} hrefBase="/jobs/" icon={Ship} tone="warning" emptyText="Tak ada shipment berangkat dekat" />}
           {isOps && <WorklistPanel title="Cut-off CY ≤ 2 hari" items={wl.cutoffSoon} hrefBase="/jobs/" icon={CalendarClock} tone="warning" emptyText="Tak ada cut-off mendekat" />}
@@ -61,6 +63,17 @@ export default async function DashboardPage() {
           {isFin && <WorklistPanel title="AP jatuh tempo ≤ 7 hari" items={wl.apDueSoon} hrefBase="/bills/" icon={ArrowUpCircle} tone="warning" emptyText="Tidak ada tagihan jatuh tempo" />}
         </div>
       </div>
+
+      {/* Domestik — lini bisnis terpisah, panel sendiri */}
+      {isDom && (
+        <div>
+          <h2 className="mb-2 text-sm font-semibold text-muted-foreground">Butuh Aksi · Domestik</h2>
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            <WorklistPanel title="STT lewat estimasi tiba" items={wl.domLate} hrefBase="/domestic/" icon={Truck} tone="destructive" emptyText="Semua STT sesuai jadwal" />
+            <WorklistPanel title="Belum dijemput" items={wl.domPickup} hrefBase="/domestic/" icon={PackageOpen} tone="warning" emptyText="Tidak ada order menunggu jemput" />
+          </div>
+        </div>
+      )}
 
       {/* Analitik — sekunder */}
       <div>

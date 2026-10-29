@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { ChevronRight } from "lucide-react";
+import { TabTitle } from "@/components/shell/tabs-context";
 
 export function Breadcrumbs({ items }: { items: { label: string; href?: string }[] }) {
   return (
@@ -14,6 +15,7 @@ export function Breadcrumbs({ items }: { items: { label: string; href?: string }
           )}
         </span>
       ))}
+      {items.length > 0 && <TabTitle title={items[items.length - 1].label} />}
     </nav>
   );
 }

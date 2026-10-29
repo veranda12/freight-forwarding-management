@@ -25,7 +25,7 @@ export default async function QuotationDetail({ params }: { params: Promise<{ id
     where: { id },
     include: {
       customer: true, owner: { select: { name: true } },
-      lines: { include: { chargeCode: true }, orderBy: { sortOrder: "asc" } },
+      lines: { include: { chargeCode: true, vendor: { select: { name: true } }, vehicle: { select: { plate: true } } }, orderBy: { sortOrder: "asc" } },
       job: { select: { id: true, number: true } },
     },
   });
@@ -54,21 +54,34 @@ export default async function QuotationDetail({ params }: { params: Promise<{ id
           <CardContent className="p-0">
             <Table>
               <TableHeader><TableRow>
-                <TableHead>Charge</TableHead><TableHead>Qty</TableHead>
-                <TableHead>Buying</TableHead><TableHead>Selling</TableHead>
+                <TableHead>Charge</TableHead><TableHead>Sumber biaya</TableHead><TableHead>Qty</TableHead>
+                <TableHead>Biaya beli</TableHead><TableHead>Harga jual</TableHead>
                 <TableHead>PPN</TableHead><TableHead className="text-right">Margin</TableHead>
               </TableRow></TableHeader>
               <TableBody>
                 {quo.lines.map((l) => {
-                  const m = Number(l.sellingPrice) - Number(l.buyingPrice);
+                  const cur = l.currency;
+                  const fx = Number(l.exchangeRate) || 1;
+                  const qty = Number(l.qty);
+                  const buyTotal = qty * Number(l.buyingPrice);
+                  const sellTotal = qty * Number(l.sellingPrice);
+                  const marginIdr = (sellTotal - buyTotal) * fx;
+                  const source = l.vendor?.name ?? (l.vehicle ? `Armada ${l.vehicle.plate}` : "Belum ditentukan");
                   return (
                     <TableRow key={l.id}>
                       <TableCell><span className="font-medium">{l.chargeCode.code}</span> <span className="text-muted-foreground">{l.chargeCode.name}</span></TableCell>
-                      <TableCell>{formatNumber(Number(l.qty), 0)}</TableCell>
-                      <TableCell>{formatMoney(Number(l.buyingPrice), l.currency, 2)}</TableCell>
-                      <TableCell>{formatMoney(Number(l.sellingPrice), l.currency, 2)}</TableCell>
+                      <TableCell className="text-muted-foreground">{source}</TableCell>
+                      <TableCell>{formatNumber(qty, 0)}</TableCell>
+                      <TableCell>
+                        <div>{formatMoney(buyTotal, cur, 2)}</div>
+                        {cur !== "IDR" && <div className="text-xs text-muted-foreground">{formatIDR(buyTotal * fx)}</div>}
+                      </TableCell>
+                      <TableCell>
+                        <div>{formatMoney(sellTotal, cur, 2)}</div>
+                        {cur !== "IDR" && <div className="text-xs text-muted-foreground">{formatIDR(sellTotal * fx)}</div>}
+                      </TableCell>
                       <TableCell>{l.taxable ? <Badge variant="outline">11%</Badge> : <span className="text-muted-foreground">-</span>}</TableCell>
-                      <TableCell className="text-right text-success">{formatMoney(m, l.currency, 2)}</TableCell>
+                      <TableCell className={`text-right ${marginIdr < 0 ? "text-destructive" : "text-success"}`}>{formatIDR(marginIdr)}</TableCell>
                     </TableRow>
                   );
                 })}

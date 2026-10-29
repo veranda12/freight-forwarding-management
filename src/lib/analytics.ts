@@ -27,7 +27,7 @@ export async function getWorklist() {
   const in2 = new Date(now.getTime() + 2 * 86400000);
   const in7 = new Date(now.getTime() + 7 * 86400000);
 
-  const [departingSoon, cutoffSoon, blPending, arOverdue, apDueSoon] = await Promise.all([
+  const [departingSoon, cutoffSoon, blPending, arOverdue, apDueSoon, domLate, domPickup] = await Promise.all([
     prisma.job.findMany({
       where: { status: { in: ["BOOKED", "STUFFING"] }, etd: { lte: in3 } },
       orderBy: { etd: "asc" }, take: 8,
@@ -52,6 +52,17 @@ export async function getWorklist() {
       orderBy: { dueDate: "asc" }, take: 8,
       select: { id: true, number: true, total: true, amountPaid: true, dueDate: true, vendor: { select: { name: true } } },
     }),
+    // Domestik (modul terpisah): lewat estimasi tiba & belum dijemput
+    prisma.domesticShipment.findMany({
+      where: { status: { notIn: ["DELIVERED", "CANCELLED"] }, etaDate: { lt: now } },
+      orderBy: { etaDate: "asc" }, take: 8,
+      select: { id: true, number: true, etaDate: true, destCity: true, customer: { select: { name: true } } },
+    }),
+    prisma.domesticShipment.findMany({
+      where: { status: "BOOKED" },
+      orderBy: { createdAt: "asc" }, take: 8,
+      select: { id: true, number: true, pickupDate: true, createdAt: true, originCity: true, destCity: true, customer: { select: { name: true } } },
+    }),
   ]);
 
   return {
@@ -60,6 +71,8 @@ export async function getWorklist() {
     blPending: blPending.map((j) => ({ id: j.id, number: j.number, party: j.customer.name, date: j.etd?.toISOString() ?? null, extra: "B/L belum terbit" })),
     arOverdue: arOverdue.map((i) => ({ id: i.id, number: i.number, party: i.customer.name, date: i.dueDate.toISOString(), amount: Number(i.total) - Number(i.amountPaid) })),
     apDueSoon: apDueSoon.map((b) => ({ id: b.id, number: b.number, party: b.vendor.name, date: b.dueDate.toISOString(), amount: Number(b.total) - Number(b.amountPaid) })),
+    domLate: domLate.map((d) => ({ id: d.id, number: d.number, party: d.customer.name, date: d.etaDate?.toISOString() ?? null, extra: `ke ${d.destCity}` })),
+    domPickup: domPickup.map((d) => ({ id: d.id, number: d.number, party: d.customer.name, date: (d.pickupDate ?? d.createdAt).toISOString(), extra: `${d.originCity} → ${d.destCity}` })),
   };
 }
 

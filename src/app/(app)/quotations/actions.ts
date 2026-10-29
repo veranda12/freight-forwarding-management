@@ -8,10 +8,11 @@ import { assertCan } from "@/lib/auth-helpers";
 import { writeAudit } from "@/lib/audit";
 import { genJobNumber } from "@/lib/sequence";
 import { modeDirKey } from "@/lib/enums";
+import { resolveBuyingSource } from "@/lib/quote-source";
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
-type QuoLineInput = { chargeCodeId: string; qty: number; buyingPrice: number; sellingPrice: number; taxable: boolean };
+type QuoLineInput = { chargeCodeId: string; qty: number; buyingPrice: number; sellingPrice: number; taxable: boolean; costSource?: string; vendorId?: string | null; vehicleId?: string | null };
 type QuoInput = {
   customerId: string; ownerId?: string; mode: string; direction: string;
   currency: string; exchangeRate: number; validUntil: string; incoterm?: string;
@@ -55,6 +56,7 @@ export async function createQuotation(input: QuoInput): Promise<{ ok: boolean; e
             buyingPrice: new Prisma.Decimal(Number(l.buyingPrice) || 0),
             sellingPrice: new Prisma.Decimal(Number(l.sellingPrice) || 0),
             taxable: !!l.taxable, sortOrder: i,
+            ...resolveBuyingSource(l),
           })),
         },
       },
@@ -91,6 +93,7 @@ export async function convertQuotationToJob(quotationId: string): Promise<void> 
   });
   if (!quo) throw new Error("Quotation tidak ditemukan.");
   if (quo.job) redirect(`/jobs/${quo.job.id}`);
+  if (quo.status !== "ACCEPTED") throw new Error("Quotation harus berstatus Diterima sebelum dikonversi ke job.");
 
   const jobId = await prisma.$transaction(async (tx) => {
     const modeDir = modeDirKey(quo.mode, quo.direction);
@@ -104,6 +107,7 @@ export async function convertQuotationToJob(quotationId: string): Promise<void> 
       const qty = Number(ln.qty);
       const sell = Number(ln.sellingPrice);
       const buy = Number(ln.buyingPrice);
+      const src = resolveBuyingSource(ln);
       const sellIdr = r2(qty * sell * fx);
       const buyIdr = r2(qty * buy * fx);
       revenue += sellIdr; cost += buyIdr;
@@ -115,6 +119,7 @@ export async function convertQuotationToJob(quotationId: string): Promise<void> 
       });
       costings.push({
         side: "BUYING", chargeCodeId: ln.chargeCodeId, description: ln.chargeCode.code,
+        vendorId: src.vendorId, vehicleId: src.vehicleId,
         currency: ln.currency, exchangeRate: ln.exchangeRate, qty: ln.qty, unitPrice: ln.buyingPrice,
         amountForeign: new Prisma.Decimal(r2(qty * buy)), estimatedIdr: new Prisma.Decimal(buyIdr),
         actualIdr: new Prisma.Decimal(buyIdr), taxable: ln.taxable, sortOrder: order++,
@@ -141,7 +146,6 @@ export async function convertQuotationToJob(quotationId: string): Promise<void> 
       },
     });
 
-    await tx.quotation.update({ where: { id: quo.id }, data: { status: "ACCEPTED", decidedAt: new Date() } });
     return job.id;
   });
 

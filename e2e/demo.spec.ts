@@ -20,7 +20,7 @@ test.describe("Demo Freight Forwarding Management System", () => {
   test("1. Management melihat dashboard (worklist + KPI + grafik)", async ({ page }) => {
     await login(page, "manager@demo.com");
     await expect(page.getByRole("heading", { name: /Halo/ })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Butuh Aksi" })).toBeVisible(); // worklist operasional
+    await expect(page.getByRole("heading", { name: "Butuh Aksi · Ekspor-Impor", exact: true })).toBeVisible(); // worklist operasional
     await expect(page.getByText("Shipment aktif")).toBeVisible();       // KPI strip
     await expect(page.getByText("AR overdue").first()).toBeVisible();
     // minimal satu grafik Recharts ter-render (analitik sekunder)

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { type ColumnDef } from "@tanstack/react-table";
 import { DataTable } from "@/components/data-table";
 import { Badge } from "@/components/ui/badge";
@@ -12,7 +13,7 @@ export type PaymentRow = {
 
 export function PaymentsTable({ data }: { data: PaymentRow[] }) {
   const columns: ColumnDef<PaymentRow>[] = [
-    { accessorKey: "number", header: "No.", cell: ({ row }) => <span className="font-medium">{row.original.number}</span> },
+    { accessorKey: "number", header: "No.", cell: ({ row }) => <Link href={`/payments/${row.original.id}`} className="font-medium text-primary hover:underline">{row.original.number}</Link> },
     {
       accessorKey: "direction", header: "Jenis",
       cell: ({ row }) => row.original.direction === "RECEIPT"

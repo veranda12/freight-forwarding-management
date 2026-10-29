@@ -6,13 +6,14 @@ export type TBRow = {
   debit: number; credit: number;
 };
 
-async function accountNetMap(opts: { from?: Date; to?: Date } = {}) {
+async function accountNetMap(opts: { from?: Date; to?: Date; excludeClosing?: boolean } = {}) {
   const where: any = {};
   if (opts.from || opts.to) {
     where.entry = { date: {} };
     if (opts.from) where.entry.date.gte = opts.from;
     if (opts.to) where.entry.date.lte = opts.to;
   }
+  if (opts.excludeClosing) where.entry = { ...(where.entry ?? {}), source: { not: "CLOSING" } };
   const grouped = await prisma.journalLine.groupBy({
     by: ["accountId"],
     where,
@@ -42,7 +43,7 @@ export async function getTrialBalance(asOf?: Date): Promise<{ rows: TBRow[]; tot
 
 export type PLGroup = { code: string; name: string; amount: number };
 export async function getIncomeStatement(from?: Date, to?: Date) {
-  const { accounts, map } = await accountNetMap({ from, to });
+  const { accounts, map } = await accountNetMap({ from, to, excludeClosing: true });
   const revenue: PLGroup[] = [], expense: PLGroup[] = [];
   for (const a of accounts) {
     if (!a.isPostable) continue;

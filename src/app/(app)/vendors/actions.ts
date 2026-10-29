@@ -20,10 +20,15 @@ export async function saveVendor(values: Record<string, unknown>): Promise<Entit
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message };
   const d = parsed.data;
   const id = clean(values.id);
+  const rawRate = values.pph26Rate;
+  const pph26Rate = rawRate === "" || rawRate === null || rawRate === undefined ? null : Number(rawRate);
+  if (pph26Rate !== null && !(pph26Rate >= 0 && pph26Rate <= 100)) return { ok: false, error: "Tarif PPh 26 harus antara 0 dan 100." };
+  const isForeign = values.isForeign === true || values.isForeign === "true" || values.isForeign === "on";
   const data = {
     name: d.name, type: d.type, scacCode: clean(d.scacCode), npwp: clean(d.npwp),
     address: clean(d.address), city: clean(d.city), country: clean(d.country) ?? "Indonesia",
     phone: clean(d.phone), email: clean(d.email),
+    isForeign, pph26Rate, skdNumber: clean(values.skdNumber as string | undefined),
   };
   if (id) {
     await prisma.vendor.update({ where: { id }, data });

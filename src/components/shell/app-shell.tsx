@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { GlobalSearch } from "./global-search";
 import { ThemeToggle } from "./theme-toggle";
+import { TabsProvider, TabBar } from "./tabs-context";
 import { logoutAction } from "@/app/(app)/actions";
 
 type ShellUser = { name: string; email: string; role: Role };
@@ -38,11 +39,16 @@ export function AppShell({
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [groupState, setGroupState] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     try {
       const v = localStorage.getItem("sidebar-collapsed");
       if (v === "1") setCollapsed(true);
+    } catch {}
+    try {
+      const g = JSON.parse(localStorage.getItem("sidebar-groups") ?? "{}");
+      if (g && typeof g === "object") setGroupState(g);
     } catch {}
   }, []);
 
@@ -59,47 +65,77 @@ export function AppShell({
     });
   }
 
+  function toggleGroup(label: string, open: boolean) {
+    setGroupState((s) => {
+      const next = { ...s, [label]: !open };
+      try {
+        localStorage.setItem("sidebar-groups", JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  }
+
   const allow = new Set(allowed);
   const groups = NAV.map((g) => ({
     ...g,
     items: g.items.filter((i) => allow.has(i.resource)),
   })).filter((g) => g.items.length > 0);
+  // menu aktif = href terpanjang yang cocok (/domestic vs /domestic/check)
+  const activeHref = groups
+    .flatMap((g) => g.items.map((i) => i.href))
+    .filter((h) => pathname === h || pathname.startsWith(h + "/"))
+    .sort((a, b) => b.length - a.length)[0];
+
+  const activeGroup = groups.find((g) => g.items.some((i) => i.href === activeHref))?.label;
+  // grup yang terbuka: pilihan pengguna, atau grup aktif bila belum pernah diatur
+  const isGroupOpen = (label: string) => groupState[label] ?? label === activeGroup;
 
   const SidebarNav = (
-    <nav className="flex-1 space-y-4 overflow-y-auto scrollbar-thin px-3 py-4">
-      {groups.map((group) => (
-        <div key={group.label}>
-          {!collapsed && (
-            <p className="px-2 pb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-              {group.label}
-            </p>
-          )}
-          <ul className="space-y-0.5">
-            {group.items.map((item) => {
-              const active = pathname === item.href || pathname.startsWith(item.href + "/");
-              const Icon = item.icon;
-              return (
-                <li key={item.href}>
-                  <Link
-                    href={item.href}
-                    title={collapsed ? item.label : undefined}
-                    className={cn(
-                      "flex items-center gap-3 rounded-md px-2 py-2 text-sm font-medium transition-colors",
-                      active
-                        ? "bg-primary text-primary-foreground"
-                        : "text-foreground/70 hover:bg-accent hover:text-accent-foreground",
-                      collapsed && "justify-center"
-                    )}
-                  >
-                    <Icon className="h-4 w-4 shrink-0" />
-                    {!collapsed && <span className="truncate">{item.label}</span>}
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
-        </div>
-      ))}
+    <nav className="flex-1 space-y-2 overflow-y-auto scrollbar-thin px-3 py-4">
+      {groups.map((group) => {
+        const open = isGroupOpen(group.label);
+        return (
+          <div key={group.label}>
+            {!collapsed && (
+              <button
+                type="button"
+                onClick={() => toggleGroup(group.label, open)}
+                aria-expanded={open}
+                className="flex w-full items-center justify-between rounded px-2 py-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground"
+              >
+                <span>{group.label}</span>
+                <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", !open && "-rotate-90")} />
+              </button>
+            )}
+            {(collapsed || open) && (
+              <ul className="mt-0.5 space-y-0.5">
+                {group.items.map((item) => {
+                  const active = item.href === activeHref;
+                  const Icon = item.icon;
+                  return (
+                    <li key={item.href}>
+                      <Link
+                        href={item.href}
+                        title={collapsed ? item.label : undefined}
+                        className={cn(
+                          "flex items-center gap-3 rounded-md px-2 py-2 text-sm font-medium transition-colors",
+                          active
+                            ? "bg-primary text-primary-foreground"
+                            : "text-foreground/70 hover:bg-accent hover:text-accent-foreground",
+                          collapsed && "justify-center"
+                        )}
+                      >
+                        <Icon className="h-4 w-4 shrink-0" />
+                        {!collapsed && <span className="truncate">{item.label}</span>}
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+        );
+      })}
     </nav>
   );
 
@@ -111,6 +147,7 @@ export function AppShell({
   );
 
   return (
+    <TabsProvider>
     <div className="flex min-h-screen bg-background">
       {/* Sidebar desktop */}
       <aside
@@ -184,9 +221,13 @@ export function AppShell({
         </header>
 
         <main className="flex-1 p-4 sm:p-6">
-          <div className="mx-auto w-full max-w-[1400px] space-y-6">{children}</div>
+          <div className="mx-auto w-full max-w-[1400px] space-y-6">
+            <TabBar />
+            {children}
+          </div>
         </main>
       </div>
     </div>
+    </TabsProvider>
   );
 }

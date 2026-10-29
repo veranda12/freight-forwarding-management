@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { genDocNumber, SEQ } from "./sequence";
+import { assertNotLocked } from "./period-lock";
 
 type Tx = Prisma.TransactionClient;
 type JSource = Prisma.JournalEntryCreateInput["source"];
@@ -23,6 +24,7 @@ export async function postJournal(
     date2?: Date;
   }
 ): Promise<string> {
+  await assertNotLocked(tx, opts.date);
   const number = await genDocNumber(tx, SEQ.JOURNAL, opts.date);
   const totalDebit = r2(opts.lines.reduce((s, l) => s + (l.debit ?? 0), 0));
   const totalCredit = r2(opts.lines.reduce((s, l) => s + (l.credit ?? 0), 0));

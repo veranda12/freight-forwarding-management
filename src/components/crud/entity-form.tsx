@@ -74,7 +74,8 @@ export function EntityForm({
     e.preventDefault();
     if (!validate()) { toast.error("Lengkapi field yang wajib diisi."); return; }
     start(async () => {
-      const res = await action(values);
+      // id dari `initial` tidak ada di daftar field — sertakan agar mode edit meng-update, bukan membuat baru
+      const res = await action(initial.id ? { ...values, id: initial.id } : values);
       if (res.ok) {
         toast.success("Tersimpan.");
         router.push(res.redirect ?? backHref);

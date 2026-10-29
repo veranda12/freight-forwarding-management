@@ -6,6 +6,7 @@ export type Resource =
   | "vendors"
   | "agents"
   | "ports"
+  | "vehicles"
   | "currencies"
   | "charges"
   | "containers"
@@ -27,7 +28,10 @@ export type Resource =
   | "reports"
   | "users"
   | "settings"
-  | "audit";
+  | "audit"
+  | "domestic"
+  | "domesticTariffs"
+  | "weightRules";
 
 export type Action = "read" | "write";
 
@@ -45,6 +49,7 @@ const MATRIX: Record<Resource, { read: Role[]; write: Role[] }> = {
   vendors: { read: ["SALES", "OPERATION", "FINANCE"], write: ["OPERATION", "FINANCE"] },
   agents: { read: ["SALES", "OPERATION", "FINANCE"], write: ["OPERATION", "FINANCE"] },
   ports: { read: ALL, write: ["OPERATION"] },
+  vehicles: { read: ALL, write: ["OPERATION"] },
   currencies: { read: ALL, write: ["FINANCE"] },
   charges: { read: ["SALES", "OPERATION", "FINANCE"], write: ["FINANCE"] },
   containers: { read: ALL, write: ["OPERATION"] },
@@ -53,6 +58,11 @@ const MATRIX: Record<Resource, { read: Role[]; write: Role[] }> = {
   coa: { read: ["FINANCE"], write: ["FINANCE"] },
 
   rates: { read: ["SALES", "OPERATION"], write: ["SALES"] },
+  weightRules: { read: ALL, write: ["SALES", "OPERATION"] },
+
+  // Domestik — modul terpisah dari Ekspor-Impor
+  domestic: { read: ["SALES", "OPERATION", "DOCUMENTATION", "FINANCE"], write: ["OPERATION", "SALES"] },
+  domesticTariffs: { read: ["SALES", "OPERATION", "FINANCE"], write: ["SALES"] },
   quotations: { read: ["SALES", "OPERATION"], write: ["SALES"] },
 
   jobs: { read: ["SALES", "OPERATION", "DOCUMENTATION", "FINANCE"], write: ["OPERATION"] },

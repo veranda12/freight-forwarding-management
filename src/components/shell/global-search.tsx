@@ -2,19 +2,19 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Search, Loader2, Briefcase, Users, Container, FileText } from "lucide-react";
+import { Search, Loader2, Briefcase, Users, Container, FileText, Truck } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverAnchor } from "@/components/ui/popover";
 
 type Result = {
-  type: "job" | "customer" | "container" | "bl";
+  type: "job" | "customer" | "container" | "bl" | "stt";
   label: string;
   sublabel: string;
   href: string;
 };
 
-const ICON = { job: Briefcase, customer: Users, container: Container, bl: FileText };
+const ICON = { job: Briefcase, customer: Users, container: Container, bl: FileText, stt: Truck };
 
 export function GlobalSearch() {
   const router = useRouter();
