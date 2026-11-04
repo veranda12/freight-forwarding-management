@@ -182,6 +182,56 @@ enum JournalSource {
   DEPRECIATION
   FX_REVAL
   FLEET_COST
+  TAX_REMIT
+  CASH_ENTRY
+  BANK_TRANSFER
+}
+
+enum CashAccountKind {
+  BANK
+  CASH
+}
+
+enum TaxKind {
+  PPN
+  PPH23
+  PPH26
+}
+
+enum TaxRemitStatus {
+  POSTED
+  CANCELLED
+}
+
+/// Kelompok baris di cetakan invoice (ringkas = total per kelompok, detail = per baris).
+enum InvoiceSection {
+  FREIGHT
+  LOCAL
+  DOCUMENTATION
+  ADDITIONAL
+}
+
+/// Jalur pemeriksaan bea cukai impor.
+enum CustomsLane {
+  GREEN
+  YELLOW
+  RED
+}
+
+enum TariffBasis {
+  PER_CONTAINER
+  PER_BL
+  /// Per container, dikali kelebihan km di atas batas jarak.
+  PER_KM_OVER
+}
+
+enum TariffCondition {
+  /// Selalu dibuat otomatis.
+  ALWAYS
+  /// Dibuat otomatis hanya jika job jalur merah.
+  RED_LANE
+  /// Tidak dibuat otomatis (jika ada), ditambahkan saat dibutuhkan.
+  OPTIONAL
 }
 
 // ============================================================
@@ -264,6 +314,8 @@ model CompanySetting {
   bankAccount String?
   bankHolder  String?
   bankBranch  String?
+  signatoryName  String?
+  signatoryTitle String?
   updatedAt   DateTime @updatedAt
 }
 
@@ -323,6 +375,7 @@ model Customer {
   domesticShipments DomesticShipment[]
   invoices          Invoice[]
   payments          Payment[]
+  warehouses        Warehouse[]
 
   @@index([name])
 }
@@ -442,6 +495,10 @@ model ChargeCode {
   expenseAccountId String?
   expenseAccount   CoaAccount? @relation("ChargeExpense", fields: [expenseAccountId], references: [id])
   isActive         Boolean     @default(true)
+  invoiceSection   InvoiceSection?
+  /// Biaya aktual yang ditagih ulang sesuai kuitansi (as receipt), dicetak berarsir.
+  asReceipt        Boolean     @default(false)
+  rateCardItems    RateCardItem[]
 
   rates          Rate[]
   quotationLines QuotationLine[]
@@ -459,6 +516,7 @@ model ContainerType {
 
   jobContainers JobContainer[]
   rates         Rate[]
+  rateCardItems RateCardItem[]
 }
 
 model Commodity {
@@ -499,6 +557,7 @@ model CoaAccount {
 
   journalLines  JournalLine[]
   bankRecs      BankReconciliation[]
+  bankAccount   BankAccount?
   chargeRevenue ChargeCode[]         @relation("ChargeRevenue")
   chargeExpense ChargeCode[]         @relation("ChargeExpense")
 
@@ -537,7 +596,11 @@ model JournalLine {
   description  String?
   debit        Decimal      @default(0) @db.Decimal(18, 2)
   credit       Decimal      @default(0) @db.Decimal(18, 2)
+  /// Nilai dalam mata uang rekening valas (selalu positif, sisinya mengikuti debit/kredit). Kosong untuk akun IDR.
+  amountForeign Decimal?    @db.Decimal(18, 2)
   reconciledAt DateTime?
+
+  statementLine BankStatementLine?
 
   @@index([accountId])
 }
@@ -693,6 +756,13 @@ model Job {
   mawbNo String?
   hawbNo String?
 
+  // clearance & delivery
+  customsLane     CustomsLane?
+  warehouseId     String?
+  warehouse       Warehouse?   @relation(fields: [warehouseId], references: [id])
+  deliveryAddress String?
+  distanceKm      Decimal?     @db.Decimal(8, 1)
+
   // profitability (denormalized IDR)
   revenueIdr Decimal @default(0) @db.Decimal(18, 2)
   costIdr    Decimal @default(0) @db.Decimal(18, 2)
@@ -728,6 +798,11 @@ model JobContainer {
   containerType   ContainerType? @relation(fields: [containerTypeId], references: [id])
   grossWeightKg   Decimal?       @db.Decimal(18, 2)
   volumeCbm       Decimal?       @db.Decimal(18, 3)
+  /// Tujuan per container (1 B/L bisa ke beberapa penerima). Kosong = ikut tujuan job.
+  warehouseId     String?
+  warehouse       Warehouse?     @relation(fields: [warehouseId], references: [id])
+  deliveryAddress String?
+  distanceKm      Decimal?       @db.Decimal(8, 1)
 }
 
 model Milestone {
@@ -806,13 +881,22 @@ model CostingLine {
   estimatedIdr  Decimal    @default(0) @db.Decimal(18, 2)
   actualIdr     Decimal    @default(0) @db.Decimal(18, 2)
   taxable       Boolean    @default(true)
+  asReceipt     Boolean    @default(false)
+  /// Satuan untuk cetakan, misalnya 40HC, B/L, km.
+  unitLabel     String?
+  /// Dibuat dari rate card; dihitung ulang selama belum ditagih.
+  fromRateCard  Boolean    @default(false)
   invoiced      Boolean    @default(false)
+  /// Invoice yang menagih baris selling ini. Pembatalan invoice hanya membuka kembali baris miliknya.
+  invoiceId     String?
+  invoice       Invoice?   @relation("InvoiceCostings", fields: [invoiceId], references: [id], onDelete: SetNull)
   billed        Boolean    @default(false)
   sortOrder     Int        @default(0)
   recordedAt        DateTime?
   recordedJournalId String?
 
   @@index([jobId, side])
+  @@index([invoiceId])
 }
 
 // ============================================================
@@ -848,6 +932,7 @@ model Invoice {
 
   lines       InvoiceLine[]
   allocations PaymentAllocation[]
+  costingLines CostingLine[] @relation("InvoiceCostings")
 
   @@index([status])
   @@index([customerId])
@@ -865,6 +950,11 @@ model InvoiceLine {
   unitPrice    Decimal    @default(0) @db.Decimal(18, 2) // IDR
   amount       Decimal    @default(0) @db.Decimal(18, 2) // IDR
   taxable      Boolean    @default(true)
+  section      InvoiceSection?
+  asReceipt    Boolean    @default(false)
+  unitLabel    String?
+  note         String?
+  sortOrder    Int        @default(0)
 }
 
 model VendorBill {
@@ -951,6 +1041,9 @@ model Payment {
   notes          String?
   journalEntryId String?
   createdAt      DateTime         @default(now())
+
+  bankAccountId  String?
+  bankAccount    BankAccount?     @relation(fields: [bankAccountId], references: [id])
 
   allocations PaymentAllocation[]
 
@@ -1115,6 +1208,72 @@ model AccountingSetting {
   updatedAt   DateTime  @updatedAt
 }
 
+/// Master kas dan rekening bank. Setiap rekening punya satu akun COA sendiri,
+/// sehingga saldo, buku besar, dan rekonsiliasi bisa dilihat per rekening.
+model BankAccount {
+  id               String          @id @default(cuid())
+  kind             CashAccountKind @default(BANK)
+  name             String // nama tampilan, mis. "BCA Operasional"
+  bankName         String?
+  accountNo        String?
+  accountHolder    String?
+  branch           String?
+  currency         String          @default("IDR")
+  coaAccountId     String          @unique
+  coaAccount       CoaAccount      @relation(fields: [coaAccountId], references: [id])
+  isDefaultReceipt Boolean         @default(false)
+  isDefaultPayment Boolean         @default(false)
+  isActive         Boolean         @default(true)
+  notes            String?
+  createdAt        DateTime        @default(now())
+
+  payments       Payment[]
+  statementLines BankStatementLine[]
+}
+
+/// Mutasi rekening koran hasil import CSV. Dicocokkan ke baris jurnal rekening yang sama,
+/// otomatis (nominal sama, tanggal berdekatan) atau manual.
+model BankStatementLine {
+  id            String       @id @default(cuid())
+  bankAccountId String
+  bankAccount   BankAccount  @relation(fields: [bankAccountId], references: [id])
+  batchId       String
+  date          DateTime
+  description   String
+  reference     String?
+  amount        Decimal      @db.Decimal(18, 2) // + uang masuk, - uang keluar (mata uang rekening)
+  balance       Decimal?     @db.Decimal(18, 2) // saldo setelah mutasi, jika ada di file
+  matchedLineId String?      @unique
+  matchedLine   JournalLine? @relation(fields: [matchedLineId], references: [id], onDelete: SetNull)
+  matchedBy     String? // AUTO atau MANUAL
+  createdAt     DateTime     @default(now())
+
+  @@index([bankAccountId, date])
+}
+
+/// Setoran pajak per masa (bulan). Satu masa boleh punya beberapa setoran (pembetulan),
+/// tetapi total yang disetor tidak bisa melebihi pajak masa itu.
+model TaxRemittance {
+  id              String         @id @default(cuid())
+  kind            TaxKind
+  period          String // YYYY-MM
+  date            DateTime
+  amount          Decimal        @db.Decimal(18, 2) // dibayar ke kas negara
+  outAmount       Decimal        @default(0) @db.Decimal(18, 2) // PPN keluaran / PPh yang dinihilkan
+  inAmount        Decimal        @default(0) @db.Decimal(18, 2) // PPN masukan yang dikompensasikan
+  ntpn            String?
+  bankAccountId   String?
+  status          TaxRemitStatus @default(POSTED)
+  journalEntryId  String?
+  cancelJournalId String?
+  cancelledAt     DateTime?
+  cancelReason    String?
+  createdById     String?
+  createdAt       DateTime       @default(now())
+
+  @@index([kind, period])
+}
+
 model FiscalClosing {
   id             String   @id @default(cuid())
   fiscalYear     Int      @unique
@@ -1201,4 +1360,44 @@ model Vehicle {
 
   quotationLines QuotationLine[]
   costings       CostingLine[]
+}
+
+/// Gudang tujuan pengiriman milik customer, dengan jarak standar dari pelabuhan.
+model Warehouse {
+  id         String   @id @default(cuid())
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  name       String
+  address    String
+  city       String?
+  distanceKm Decimal? @db.Decimal(8, 1)
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  jobs       Job[]
+  containers JobContainer[]
+
+  @@index([customerId])
+}
+
+/// Rate card jual (tarif jasa) untuk membuat selling charge job secara otomatis.
+model RateCardItem {
+  id              String          @id @default(cuid())
+  chargeCodeId    String
+  chargeCode      ChargeCode      @relation(fields: [chargeCodeId], references: [id])
+  /// Kosong = berlaku untuk semua ukuran container.
+  containerTypeId String?
+  containerType   ContainerType?  @relation(fields: [containerTypeId], references: [id])
+  basis           TariffBasis
+  condition       TariffCondition @default(ALWAYS)
+  price           Decimal         @default(0) @db.Decimal(18, 2)
+  /// PER_KM_OVER: jarak yang sudah termasuk tarif dasar.
+  thresholdKm     Int?
+  taxable         Boolean         @default(false)
+  note            String?
+  sortOrder       Int             @default(0)
+  isActive        Boolean         @default(true)
+  createdAt       DateTime        @default(now())
+
+  @@index([chargeCodeId])
 }

@@ -1,9 +1,10 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { accountMap, ACC } from "./coa";
 import { jktKey, PPH23_RATE, PPN_RATE, pph26Of, r2 } from "./accounting-core";
-import { postJournal } from "./journal";
+import { postJournal, type JournalLineInput } from "./journal";
 import { genDocNumber, SEQ } from "./sequence";
 import { effectiveRate, IDR, latestRate } from "./fx";
+import { resolveCashAccount, assertCashCurrency } from "./cash-accounts";
 
 /** Vendor pelayaran dan maskapai (carrier asing) tidak dikenakan PPN masukan di sini. */
 const FOREIGN_CARRIER = ["SHIPPING_LINE", "AIRLINE"];
@@ -101,6 +102,7 @@ export type VendorPaymentInput = {
   date?: string;
   method?: string;
   reference?: string;
+  bankAccountId?: string | null; // rekening pembayar; kosong = rekening default pembayaran
 };
 
 /**
@@ -117,6 +119,8 @@ export async function recordVendorPaymentCore(db: PrismaClient, billId: string, 
   await db.$transaction(async (tx) => {
     const acc = await accountMap(tx);
     const number = await genDocNumber(tx, SEQ.PAYMENT, date);
+    const cash = await resolveCashAccount(tx, input.bankAccountId, "payment");
+    assertCashCurrency(cash, bill.currency, "pembayaran bill");
     const outIdr = r2(Number(bill.total) - Number(bill.amountPaid));
 
     if (bill.currency === IDR) {
@@ -126,7 +130,7 @@ export async function recordVendorPaymentCore(db: PrismaClient, billId: string, 
       const pay = await tx.payment.create({
         data: {
           number, direction: "PAYMENT", date, vendorId: bill.vendorId,
-          method: (input.method as any) ?? "TRANSFER", reference: input.reference, currency: IDR,
+          method: (input.method as any) ?? "TRANSFER", reference: input.reference, currency: IDR, bankAccountId: cash.bankAccountId,
           amount: new Prisma.Decimal(amount),
           allocations: { create: [{ billId: bill.id, amount: new Prisma.Decimal(amount) }] },
         },
@@ -135,7 +139,7 @@ export async function recordVendorPaymentCore(db: PrismaClient, billId: string, 
         date, description: `Pembayaran ${number} - ${bill.vendor.name}`, source: "PAYMENT", sourceId: pay.id,
         lines: [
           { accountId: acc[ACC.AP], debit: amount, description: `Pelunasan ${bill.number}` },
-          { accountId: acc[ACC.BANK], credit: amount, description: "Pembayaran bank" },
+          { accountId: cash.coaId, credit: amount, description: `Pembayaran dari ${cash.name}` },
         ],
         createdById: userId,
       });
@@ -162,15 +166,15 @@ export async function recordVendorPaymentCore(db: PrismaClient, billId: string, 
     const pay = await tx.payment.create({
       data: {
         number, direction: "PAYMENT", date, vendorId: bill.vendorId,
-        method: (input.method as any) ?? "TRANSFER", reference: input.reference,
+        method: (input.method as any) ?? "TRANSFER", reference: input.reference, bankAccountId: cash.bankAccountId,
         currency: bill.currency, exchangeRate: new Prisma.Decimal(payRate.toFixed(6)),
         amount: new Prisma.Decimal(cashIdr),
         allocations: { create: [{ billId: bill.id, amount: new Prisma.Decimal(bookedIdr), amountForeign: new Prisma.Decimal(aF) }] },
       },
     });
-    const lines: { accountId: string; debit?: number; credit?: number; description?: string }[] = [
+    const lines: JournalLineInput[] = [
       { accountId: acc[ACC.AP], debit: bookedIdr, description: `Pelunasan ${bill.number}` },
-      { accountId: acc[ACC.BANK], credit: cashIdr, description: `Pembayaran ${bill.currency} ${aF}` },
+      { accountId: cash.coaId, credit: cashIdr, description: `Pembayaran dari ${cash.name} ${bill.currency} ${aF}`, amountForeign: cash.currency === bill.currency ? aF : null },
     ];
     if (fx > 0) lines.push({ accountId: acc[ACC.FX], credit: fx, description: "Laba selisih kurs" });
     if (fx < 0) lines.push({ accountId: acc[ACC.FX], debit: -fx, description: "Rugi selisih kurs" });

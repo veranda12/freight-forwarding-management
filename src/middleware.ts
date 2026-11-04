@@ -10,5 +10,6 @@ export default middleware((req) => {
 });
 
 export const config = {
-  matcher: ["/((?!api/auth|_next/static|_next/image|favicon.ico|logo|track).*)"],
+  // api/log tanpa login: error di halaman login juga perlu tercatat.
+  matcher: ["/((?!api/auth|api/log|_next/static|_next/image|favicon.ico|logo|track).*)"],
 };

@@ -8,10 +8,10 @@ const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
 
 export const metadata: Metadata = {
   title: {
-    default: `${PRODUCT.name} — ${PRODUCT.tagline}`,
+    default: `${PRODUCT.name} ${PRODUCT.tagline}`,
     template: `%s · ${PRODUCT.name}`,
   },
-  description: `${PRODUCT.name} — sistem manajemen freight forwarding terpadu.`,
+  description: `${PRODUCT.name} sistem manajemen freight forwarding terpadu.`,
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

@@ -7,6 +7,7 @@ import { can } from "@/lib/rbac";
 import { formatIDR, formatDate, formatNumber } from "@/lib/format";
 import { latestRate } from "@/lib/fx";
 import { r2 } from "@/lib/accounting-core";
+import { cashAccountOptions } from "@/lib/cash-accounts";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -42,6 +43,7 @@ export default async function BillDetail({ params }: { params: Promise<{ id: str
   const isFx = bill.currency !== "IDR";
   const defaultPaymentRate = isFx ? await latestRate(prisma, bill.currency, new Date().toISOString().slice(0, 10)) : 1;
   const payable = bill.status !== "PAID" && bill.status !== "CANCELLED";
+  const cash = await cashAccountOptions(prisma, "payment");
 
   return (
     <div className="space-y-6">
@@ -59,6 +61,8 @@ export default async function BillDetail({ params }: { params: Promise<{ id: str
               outstandingForeign={outstandingForeign}
               bookedRate={Number(bill.exchangeRate)}
               defaultPaymentRate={defaultPaymentRate}
+              cashAccounts={cash.options}
+              defaultCashId={cash.defaultId}
             />
           )}
         </PageHeader>

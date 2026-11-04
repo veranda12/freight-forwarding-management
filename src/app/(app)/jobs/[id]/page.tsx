@@ -6,7 +6,7 @@ import {
 import { requireCan } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
 import { can } from "@/lib/rbac";
-import { MODE_LABELS, DIRECTION_LABELS } from "@/lib/enums";
+import { MODE_LABELS, DIRECTION_LABELS, LANE_LABELS } from "@/lib/enums";
 import { formatIDR, formatMoney, formatDate, formatNumber, formatPercent } from "@/lib/format";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
@@ -20,10 +20,13 @@ import { Breadcrumbs } from "@/components/breadcrumbs";
 import { cn } from "@/lib/utils";
 import { StatusControl } from "./status-control";
 import { MilestoneTimeline, type MilestoneItem } from "./milestone-timeline";
-import { CreateInvoiceButton } from "./create-invoice-button";
+import { CreateInvoiceButton, type ExtraChargeOpt } from "./create-invoice-button";
+import { ClearanceForm, ApplyRateCardButton } from "./clearance-form";
 import { CreateBillButton } from "./create-bill-button";
 import { FleetCostButton } from "./fleet-cost-button";
 import { ContainerForm } from "./container-form";
+import { ChargeForm, DeleteChargeButton, type ChargeFormOptions } from "./charge-form";
+import { chargeLockReason } from "@/lib/job-charges";
 
 export const dynamic = "force-dynamic";
 
@@ -67,10 +70,11 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
     where: { id },
     include: {
       customer: true,
+      warehouse: true,
       salesPic: { select: { name: true } },
       pol: true, pod: true, originAirport: true, destAirport: true,
       commodity: true,
-      containers: { include: { containerType: true } },
+      containers: { include: { containerType: true, warehouse: true } },
       milestones: { orderBy: { sortOrder: "asc" } },
       documents: { orderBy: { createdAt: "desc" } },
       booking: { include: { vendor: true } },
@@ -100,6 +104,47 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
   const canBill = can(user.role, "bills", "write");
   const canContainers = can(user.role, "containers", "write");
   const containerTypes = await prisma.containerType.findMany({ where: { isActive: true }, orderBy: { code: "asc" }, select: { id: true, code: true, name: true } });
+  const canCosting = can(user.role, "costing", "write") && job.status !== "CANCELLED";
+  let chargeOptions: ChargeFormOptions | null = null;
+  if (canCosting) {
+    const [charges, allCurrencies, vendors, vehicles] = await Promise.all([
+      prisma.chargeCode.findMany({ where: { isActive: true }, orderBy: { code: "asc" }, select: { id: true, code: true, name: true, defaultTaxable: true } }),
+      prisma.currency.findMany({ orderBy: { code: "asc" }, select: { code: true } }),
+      prisma.vendor.findMany({ where: { isActive: true }, orderBy: { name: "asc" }, select: { id: true, name: true, code: true } }),
+      prisma.vehicle.findMany({ where: { isActive: true }, orderBy: { plate: "asc" }, select: { id: true, plate: true, type: true } }),
+    ]);
+    const rateRows = await Promise.all(allCurrencies.filter((c) => c.code !== "IDR").map(async (c) => {
+      const r = await prisma.exchangeRate.findFirst({ where: { currencyCode: c.code }, orderBy: { date: "desc" }, select: { rate: true } });
+      return [c.code, r ? Number(r.rate) : 0] as const;
+    }));
+    chargeOptions = {
+      charges: charges.map((c) => ({ id: c.id, code: c.code, name: c.name, taxable: c.defaultTaxable })),
+      currencies: allCurrencies.map((c) => c.code),
+      rates: Object.fromEntries(rateRows.filter(([, r]) => r > 0)),
+      vendors: vendors.map((v) => ({ id: v.id, label: `${v.name} (${v.code})` })),
+      vehicles: vehicles.map((v) => ({ id: v.id, label: `${v.plate} · ${v.type}` })),
+    };
+  }
+  const warehouses = canWrite || canContainers
+    ? (await prisma.warehouse.findMany({ where: { customerId: job.customerId, isActive: true }, orderBy: { name: "asc" } }))
+        .map((w) => ({ id: w.id, name: w.name, address: w.address, city: w.city, distanceKm: w.distanceKm == null ? null : Number(w.distanceKm) }))
+    : [];
+  const jobDest = [job.warehouse?.name ?? job.deliveryAddress, job.distanceKm == null ? null : `${formatNumber(Number(job.distanceKm), 1)} km`].filter(Boolean).join(", ") || "belum diisi";
+  const unbilledSelling = selling.filter((c) => !c.invoiced);
+  let extraCharges: ExtraChargeOpt[] = [];
+  if (canInvoice && unbilledSelling.length > 0) {
+    const [codes, rateItems] = await Promise.all([
+      prisma.chargeCode.findMany({ where: { isActive: true }, orderBy: { code: "asc" }, select: { id: true, code: true, name: true, defaultTaxable: true, asReceipt: true } }),
+      prisma.rateCardItem.findMany({ where: { isActive: true }, orderBy: { sortOrder: "asc" } }),
+    ]);
+    extraCharges = codes.map((c) => {
+      const r = rateItems.find((i) => i.chargeCodeId === c.id);
+      return {
+        id: c.id, code: c.code, name: c.name, asReceipt: c.asReceipt, taxable: r ? r.taxable : c.defaultTaxable,
+        price: r && Number(r.price) > 0 ? Number(r.price) : null, unitLabel: r?.basis === "PER_BL" ? "B/L" : null,
+      };
+    });
+  }
   const revenue = Number(job.revenueIdr);
   const cost = Number(job.costIdr);
   const profit = Number(job.profitIdr);
@@ -219,6 +264,26 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
                 )}
               </CardContent>
             </Card>
+            <Card className="lg:col-span-2">
+              <CardHeader className="flex-row items-center justify-between">
+                <CardTitle className="text-base">Clearance & Delivery</CardTitle>
+                {canWrite && (
+                  <ClearanceForm jobId={job.id} warehouses={warehouses} initial={{
+                    customsLane: job.customsLane, warehouseId: job.warehouseId, deliveryAddress: job.deliveryAddress,
+                    distanceKm: job.distanceKm == null ? null : Number(job.distanceKm),
+                  }} />
+                )}
+              </CardHeader>
+              <CardContent>
+                <dl className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4">
+                  <Field label="Jalur bea cukai">{job.customsLane ? LANE_LABELS[job.customsLane] : "-"}</Field>
+                  <Field label="Gudang utama">{job.warehouse?.name ?? "-"}</Field>
+                  <Field label="Jarak utama">{job.distanceKm == null ? "-" : `${formatNumber(Number(job.distanceKm), 1)} km`}{job.containers.some((c) => c.distanceKm != null) ? <span className="block text-xs text-muted-foreground">Sebagian container punya jarak sendiri</span> : null}</Field>
+                  <Field label="Container">{job.containers.length ? summarizeContainers(job.containers) : "-"}</Field>
+                  <div className="col-span-2 sm:col-span-4"><Field label="Alamat kirim">{job.deliveryAddress ?? "-"}</Field></div>
+                </dl>
+              </CardContent>
+            </Card>
           </div>
         </TabsContent>
 
@@ -247,7 +312,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
             <Card>
               <CardHeader className="flex-row items-center justify-between">
                 <CardTitle className="text-base">Container</CardTitle>
-                {canContainers && <ContainerForm jobId={job.id} types={containerTypes} />}
+                {canContainers && <ContainerForm jobId={job.id} types={containerTypes} warehouses={warehouses} jobDest={jobDest} />}
               </CardHeader>
               <CardContent className="p-0">
                 {job.containers.length ? (
@@ -255,6 +320,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
                     <TableHeader><TableRow>
                       <TableHead>No. Container</TableHead><TableHead>Seal</TableHead>
                       <TableHead>Type</TableHead><TableHead>Gross Weight</TableHead><TableHead>Volume</TableHead>
+                      <TableHead>Tujuan</TableHead><TableHead className="text-right">Jarak</TableHead>
                       {canContainers && <TableHead className="text-right">Aksi</TableHead>}
                     </TableRow></TableHeader>
                     <TableBody>
@@ -265,13 +331,24 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
                           <TableCell><Badge variant="outline">{c.containerType?.code ?? "-"}</Badge></TableCell>
                           <TableCell>{c.grossWeightKg == null ? "-" : `${formatNumber(Number(c.grossWeightKg), 0)} kg`}</TableCell>
                           <TableCell>{c.volumeCbm == null ? "-" : `${formatNumber(Number(c.volumeCbm), 2)} cbm`}</TableCell>
+                          <TableCell className="max-w-64 text-xs">
+                            {c.deliveryAddress || c.warehouse
+                              ? <><span className="font-medium">{c.warehouse?.name ?? "Alamat khusus"}</span><span className="block text-muted-foreground">{c.deliveryAddress}</span></>
+                              : <span className="text-muted-foreground">Ikut job</span>}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            {c.distanceKm != null ? `${formatNumber(Number(c.distanceKm), 1)} km`
+                              : job.distanceKm != null ? <span className="text-muted-foreground">{formatNumber(Number(job.distanceKm), 1)} km</span> : "-"}
+                          </TableCell>
                           {canContainers && (
                             <TableCell className="text-right">
                               <ContainerForm jobId={job.id} types={containerTypes} initial={{
                                 id: c.id, containerNo: c.containerNo, sealNo: c.sealNo, containerTypeId: c.containerTypeId,
                                 grossWeightKg: c.grossWeightKg == null ? null : Number(c.grossWeightKg),
                                 volumeCbm: c.volumeCbm == null ? null : Number(c.volumeCbm),
-                              }} />
+                                warehouseId: c.warehouseId, deliveryAddress: c.deliveryAddress,
+                                distanceKm: c.distanceKm == null ? null : Number(c.distanceKm),
+                              }} warehouses={warehouses} jobDest={jobDest} />
                             </TableCell>
                           )}
                         </TableRow>
@@ -331,8 +408,22 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
         {/* COSTING */}
         <TabsContent value="costing">
           <div className="space-y-4">
-            <CostTable title="Selling (Revenue)" rows={selling} totalIdr={revenue} tone="success" />
-            <CostTable title="Buying (Cost)" rows={buying} totalIdr={cost} tone="destructive" recordable={canBill} />
+            {selling.length === 0 && buying.length === 0 && (
+              <p className="rounded-lg border border-dashed px-4 py-3 text-sm text-muted-foreground">
+                Job ini belum punya charge. Job dari quotation membawa charge-nya otomatis. Untuk job yang dibuat langsung, tambahkan charge selling (untuk invoice) dan buying (untuk bill vendor) di bawah.
+              </p>
+            )}
+            {canCosting && !isAir && (
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/30 px-4 py-3 text-sm">
+                <p className="text-muted-foreground">
+                  Selling charge bisa dihitung otomatis dari rate card: {job.containers.length ? summarizeContainers(job.containers) : "belum ada container"}
+                  {" · "}{job.customsLane ? LANE_LABELS[job.customsLane] : "jalur belum diisi"}{" · "}{job.distanceKm == null ? "jarak belum diisi" : `${formatNumber(Number(job.distanceKm), 1)} km`}.
+                </p>
+                <ApplyRateCardButton jobId={job.id} hasRateCardLines={selling.some((c) => c.fromRateCard && !c.invoiced)} />
+              </div>
+            )}
+            <CostTable title="Selling (Revenue)" side="SELLING" jobId={job.id} rows={selling} totalIdr={revenue} tone="success" chargeOptions={chargeOptions} />
+            <CostTable title="Buying (Cost)" side="BUYING" jobId={job.id} rows={buying} totalIdr={cost} tone="destructive" recordable={canBill} chargeOptions={chargeOptions} />
             <Card>
               <CardContent className="flex flex-wrap items-center justify-between gap-4 p-5">
                 <div><p className="text-sm text-muted-foreground">Gross Profit</p><p className={cn("text-2xl font-semibold", profit < 0 && "text-destructive")}>{formatIDR(profit)}</p></div>
@@ -349,7 +440,14 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
             <Card>
               <CardHeader className="flex-row items-center justify-between">
                 <CardTitle className="text-base">AR Invoice</CardTitle>
-                {canInvoice && job.costings.some((c) => c.side === "SELLING") && <CreateInvoiceButton jobId={job.id} currencies={currencies} />}
+                {canInvoice && unbilledSelling.length > 0 && (
+                  <CreateInvoiceButton jobId={job.id} currencies={currencies} extraCharges={extraCharges} lines={unbilledSelling.map((c) => ({
+                    id: c.id, code: c.chargeCode.code, name: c.chargeCode.name, description: c.description, qty: Number(c.qty), unitPrice: Number(c.unitPrice),
+                    currency: c.currency, rate: Number(c.exchangeRate), taxable: c.taxable, asReceipt: c.asReceipt, unitLabel: c.unitLabel,
+                  }))} />
+                )}
+                {canInvoice && selling.length > 0 && !selling.some((c) => !c.invoiced) && <span className="text-xs text-muted-foreground">Semua selling charge sudah ditagih</span>}
+                {canInvoice && selling.length === 0 && <span className="text-xs text-muted-foreground">Belum ada selling charge. Tambahkan di tab Costing.</span>}
               </CardHeader>
               <CardContent className="p-0">
                 {job.invoices.length ? (
@@ -424,34 +522,56 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
 }
 
 function CostTable({
-  title, rows, totalIdr, tone, recordable = false,
+  title, side, jobId, rows, totalIdr, tone, recordable = false, chargeOptions,
 }: {
   title: string;
-  rows: { id: string; chargeCode: { code: string; name: string }; description: string | null; vendor: { name: string } | null; vehicle: { plate: string } | null; currency: string; qty: any; unitPrice: any; amountForeign: any; actualIdr: any; recordedAt: Date | null }[];
+  side: "SELLING" | "BUYING";
+  jobId: string;
+  rows: {
+    id: string; side: string; chargeCodeId: string; chargeCode: { code: string; name: string }; description: string | null;
+    vendorId: string | null; vehicleId: string | null; vendor: { name: string } | null; vehicle: { plate: string } | null;
+    currency: string; exchangeRate: any; qty: any; unitPrice: any; amountForeign: any; actualIdr: any; taxable: boolean;
+    asReceipt: boolean; unitLabel: string | null; invoiced: boolean; billed: boolean; recordedAt: Date | null;
+  }[];
   totalIdr: number;
   tone: "success" | "destructive";
   recordable?: boolean;
+  chargeOptions: ChargeFormOptions | null;
 }) {
   return (
     <Card>
-      <CardHeader><CardTitle className="text-base">{title}</CardTitle></CardHeader>
+      <CardHeader className="flex-row items-center justify-between">
+        <CardTitle className="text-base">{title}</CardTitle>
+        {chargeOptions && <ChargeForm jobId={jobId} side={side} options={chargeOptions} />}
+      </CardHeader>
       <CardContent className="p-0">
         {rows.length ? (
           <Table>
             <TableHeader><TableRow>
               <TableHead>Charge</TableHead><TableHead>Vendor / Armada</TableHead><TableHead>Qty</TableHead>
               <TableHead>Harga</TableHead><TableHead>Valas</TableHead><TableHead className="text-right">IDR</TableHead>
+              <TableHead>Status</TableHead>
               {recordable && <TableHead className="text-right">Beban armada</TableHead>}
+              {chargeOptions && <TableHead className="text-right">Aksi</TableHead>}
             </TableRow></TableHeader>
             <TableBody>
-              {rows.map((r) => (
+              {rows.map((r) => {
+                const locked = chargeLockReason(r);
+                const status = side === "SELLING" ? (r.invoiced ? "Ditagih" : "Belum ditagih") : r.billed ? "Di-bill" : r.recordedAt ? "Dicatat" : "Belum di-bill";
+                return (
                 <TableRow key={r.id}>
-                  <TableCell><span className="font-medium">{r.chargeCode.code}</span> <span className="text-muted-foreground">{r.chargeCode.name}</span></TableCell>
+                  <TableCell>
+                    <span className="font-medium">{r.chargeCode.code}</span> <span className="text-muted-foreground">{r.chargeCode.name}</span>
+                    {r.taxable && <Badge variant="outline" className="ml-1.5 text-[10px]">PPN</Badge>}
+                    {r.asReceipt && <Badge variant="outline" className="ml-1 text-[10px]">As receipt</Badge>}
+                    {r.description && r.description !== r.chargeCode.code && <p className="text-xs text-muted-foreground">{r.description}</p>}
+                  </TableCell>
                   <TableCell className="text-muted-foreground">{r.vendor?.name ?? (r.vehicle ? `Armada ${r.vehicle.plate}` : "-")}</TableCell>
-                  <TableCell>{formatNumber(Number(r.qty), 0)}</TableCell>
+                  <TableCell className="whitespace-nowrap">{formatNumber(Number(r.qty), 0)}{r.unitLabel && <span className="text-muted-foreground"> × {r.unitLabel}</span>}</TableCell>
                   <TableCell>{formatMoney(Number(r.unitPrice), r.currency, r.currency === "IDR" ? 0 : 2)}</TableCell>
                   <TableCell>{formatMoney(Number(r.amountForeign), r.currency, r.currency === "IDR" ? 0 : 2)}</TableCell>
                   <TableCell className="text-right tabular-nums">{formatIDR(Number(r.actualIdr))}</TableCell>
+                  <TableCell><span className={cn("text-xs", locked ? "text-muted-foreground" : "text-warning")}>{status}</span></TableCell>
                   {recordable && (
                     <TableCell className="text-right">
                       {r.vehicle && !r.vendor
@@ -459,8 +579,22 @@ function CostTable({
                         : <span className="text-muted-foreground">-</span>}
                     </TableCell>
                   )}
+                  {chargeOptions && (
+                    <TableCell className="text-right">
+                      {locked ? <span className="text-xs text-muted-foreground" title={locked}>Terkunci</span> : (
+                        <span className="inline-flex gap-0.5">
+                          <ChargeForm jobId={jobId} side={side} options={chargeOptions} initial={{
+                            id: r.id, chargeCodeId: r.chargeCodeId, description: r.description, qty: Number(r.qty), unitPrice: Number(r.unitPrice),
+                            currency: r.currency, rate: Number(r.exchangeRate), taxable: r.taxable, vendorId: r.vendorId, vehicleId: r.vehicleId,
+                          }} />
+                          <DeleteChargeButton lineId={r.id} label={r.chargeCode.code} />
+                        </span>
+                      )}
+                    </TableCell>
+                  )}
                 </TableRow>
-              ))}
+                );
+              })}
             </TableBody>
           </Table>
         ) : <p className="p-5 text-sm text-muted-foreground">Tidak ada baris.</p>}
@@ -472,4 +606,11 @@ function CostTable({
       </div>
     </Card>
   );
+}
+
+/** Ringkas container per tipe, misalnya "3 × 40HC". */
+function summarizeContainers(containers: { containerType: { code: string } | null }[]) {
+  const counts = new Map<string, number>();
+  for (const c of containers) counts.set(c.containerType?.code ?? "?", (counts.get(c.containerType?.code ?? "?") ?? 0) + 1);
+  return [...counts.entries()].map(([code, n]) => `${n} × ${code}`).join(", ");
 }

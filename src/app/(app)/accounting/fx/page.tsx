@@ -81,7 +81,7 @@ export default async function FxPage({ searchParams }: { searchParams: Promise<R
               <TableBody>
                 {items.map((i) => (
                   <TableRow key={`${i.kind}-${i.id}`}>
-                    <TableCell><Badge variant="outline">{i.kind === "AR" ? "Piutang" : "Hutang"}</Badge></TableCell>
+                    <TableCell><Badge variant="outline">{i.kind === "AR" ? "Piutang" : i.kind === "AP" ? "Hutang" : "Saldo bank"}</Badge></TableCell>
                     <TableCell className="font-medium">{i.number}</TableCell>
                     <TableCell>{i.party}</TableCell>
                     <TableCell className="text-right tabular-nums">{i.currency} {i.outstandingForeign.toLocaleString("id-ID", { maximumFractionDigits: 2 })}</TableCell>

@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { assertCan } from "@/lib/auth-helpers";
 import { writeAudit } from "@/lib/audit";
 import { recordFleetCostCore } from "@/lib/fleet-cost";
+import { errorMessage } from "@/lib/action-error";
 
 type Result = { ok: true } | { ok: false; error: string };
 
@@ -18,6 +19,6 @@ export async function recordFleetCostAction(lineId: string, amountIdr?: number):
     revalidatePath("/accounting");
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Gagal mencatat beban armada." };
+    return { ok: false, error: errorMessage(e, "Gagal mencatat beban armada.") };
   }
 }

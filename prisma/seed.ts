@@ -7,6 +7,7 @@ import {
 } from "./seed-helpers";
 import { seedDomestic } from "./seed-domestic";
 import { seedAccountingExt } from "./seed-accounting-ext";
+import { seedClearance } from "./seed-clearance";
 
 const prisma = new PrismaClient();
 
@@ -117,6 +118,8 @@ async function main() {
     prisma.taxRate.deleteMany(),
   ]);
   await prisma.$transaction([
+    prisma.taxRemittance.deleteMany(),
+    prisma.bankAccount.deleteMany(),
     prisma.coaAccount.deleteMany(),
     prisma.auditLog.deleteMany(),
     prisma.sequence.deleteMany(),
@@ -221,6 +224,13 @@ async function main() {
   for (const [child, parent] of Object.entries(parentOf)) {
     await prisma.coaAccount.update({ where: { id: acc[child] }, data: { parentId: acc[parent] } });
   }
+  // Master kas & rekening: akun 1200 jadi rekening default, 1100 jadi kas kecil.
+  await prisma.bankAccount.createMany({
+    data: [
+      { kind: "BANK", name: "BCA Operasional", bankName: "Bank Central Asia (BCA)", accountNo: "0881234567", accountHolder: "PT Samudra Lintas Logistik", branch: "KCP Tanjung Priok", coaAccountId: acc["1200"], isDefaultReceipt: true, isDefaultPayment: true },
+      { kind: "CASH", name: "Kas Kecil", coaAccountId: acc["1100"] },
+    ],
+  });
 
   // ---------- Taxes ----------
   await prisma.taxRate.createMany({
@@ -1145,6 +1155,7 @@ async function main() {
   console.log("  • Ringkasan:", counts);
   await seedDomestic(prisma);
   await seedAccountingExt(prisma);
+  await seedClearance(prisma, { demo: true });
 
   console.log("✅ Seed selesai.");
 }

@@ -2,6 +2,7 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import { accountMap, ACC } from "./coa";
 import { FX_GAIN_LOSS, r2, revaluedIdr } from "./accounting-core";
 import { postJournal } from "./journal";
+import { cashBalances } from "./cash-accounts";
 
 export const IDR = "IDR";
 
@@ -25,7 +26,7 @@ export function effectiveRate(lines: { actualIdr: unknown; amountForeign: unknow
 }
 
 export type OpenForeignDoc = {
-  kind: "AR" | "AP";
+  kind: "AR" | "AP" | "BANK";
   id: string;
   number: string;
   party: string;
@@ -79,6 +80,18 @@ export async function computeRevaluation(db: PrismaClient | Prisma.TransactionCl
       outstandingForeign: outF, carryingIdr: carrying, rate: Number(b.exchangeRate), newRate, newCarryingIdr: newCarrying,
       adjustment: adj, effect: -adj });
   }
+  // Saldo rekening bank valas: nilai buku rupiah disesuaikan ke saldo valas x kurs baru.
+  for (const b of await cashBalances(db)) {
+    if (b.currency === IDR || !b.isActive) continue;
+    const newRate = rates[b.currency];
+    if (!(newRate > 0) || Math.abs(b.foreign) < 0.005) continue;
+    const newCarrying = revaluedIdr(b.foreign, newRate);
+    const adj = r2(newCarrying - b.idr);
+    if (Math.abs(adj) < 0.5) continue;
+    out.push({ kind: "BANK", id: b.coaId, number: b.coaCode, party: b.name, currency: b.currency,
+      outstandingForeign: b.foreign, carryingIdr: b.idr, rate: r2(b.idr / b.foreign), newRate, newCarryingIdr: newCarrying,
+      adjustment: adj, effect: adj });
+  }
   return out;
 }
 
@@ -94,8 +107,12 @@ export async function runRevaluation(db: PrismaClient, asOfKey: string, rates: R
   return db.$transaction(async (tx) => {
     const acc = await accountMap(tx);
     let arNet = 0, apNet = 0, fxNet = 0;
+    const bankAdj: { coaId: string; adj: number; name: string }[] = [];
     for (const it of items) {
-      if (it.kind === "AR") {
+      if (it.kind === "BANK") {
+        bankAdj.push({ coaId: it.id, adj: it.adjustment, name: it.party });
+        fxNet -= it.adjustment;
+      } else if (it.kind === "AR") {
         arNet += it.adjustment;
         fxNet -= it.adjustment;
         await tx.invoice.update({ where: { id: it.id }, data: { total: { increment: new Prisma.Decimal(it.adjustment) }, exchangeRate: new Prisma.Decimal(it.newRate.toFixed(6)) } });
@@ -112,6 +129,9 @@ export async function runRevaluation(db: PrismaClient, asOfKey: string, rates: R
     };
     push(ACC.AR, arNet, "Revaluasi piutang valas");
     push(ACC.AP, -apNet, "Revaluasi hutang valas");
+    for (const b of bankAdj) {
+      lines.push(b.adj > 0 ? { accountId: b.coaId, debit: b.adj, description: `Revaluasi saldo ${b.name}` } : { accountId: b.coaId, credit: -b.adj, description: `Revaluasi saldo ${b.name}` });
+    }
     push(FX_GAIN_LOSS, fxNet, "Laba/rugi selisih kurs (revaluasi)");
     const je = await postJournal(tx, {
       date: asOf, description: `Revaluasi kurs akhir periode ${asOfKey}`, source: "FX_REVAL", sourceId: asOfKey,

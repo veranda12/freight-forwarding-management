@@ -22,10 +22,11 @@ async function main() {
   const startedAt = new Date();
   const pph23 = Math.min(suggestPph23(outstanding), r2(outstanding * 0.5));
   const admin = Math.min(5000, r2(outstanding * 0.05));
-  const cash = r2(outstanding - pph23 - admin);
-  console.log(`   invoice ${inv.number}, sisa ${outstanding}: uang masuk ${cash}, PPh 23 ${pph23}, admin ${admin}`);
+  const other = Math.min(75000, r2(outstanding * 0.05));
+  const cash = r2(outstanding - pph23 - admin - other);
+  console.log(`   invoice ${inv.number}, sisa ${outstanding}: uang masuk ${cash}, PPh 23 ${pph23}, admin ${admin}, lain ${other}`);
 
-  await recordReceiptCore(db, inv.id, { amount: cash, deductions: { pph23, admin } });
+  await recordReceiptCore(db, inv.id, { amount: cash, deductions: { pph23, admin, other } });
   const pay = await db.payment.findFirst({ where: { allocations: { some: { invoiceId: inv.id } }, createdAt: { gte: startedAt } }, include: { allocations: true } });
   ok(!!pay && Math.abs(Number(pay.amount) - cash) < 0.01, "nominal pembayaran = uang masuk ke rekening");
   ok(!!pay && Math.abs(Number(pay.allocations[0].amount) - outstanding) < 0.01, "alokasi melunasi seluruh sisa (uang masuk + potongan)");
@@ -40,7 +41,9 @@ async function main() {
   const line = (code: string, f: "debit" | "credit") => r2(je?.lines.filter((l) => l.account.code === code).reduce((s, l) => s + Number(l[f]), 0) ?? 0);
   ok(line("1200", "debit") === cash, "bank didebit sebesar uang masuk");
   ok(line("1450", "debit") === pph23, "PPh 23 dibayar dimuka didebit");
-  ok(line("6300", "debit") === admin, "biaya admin didebit");
+  ok(line("6350", "debit") === admin, "biaya admin bank didebit ke 6350 Beban Administrasi Bank");
+  ok(line("6390", "debit") === other, "potongan lain didebit ke 6390 Beban Operasional Lain-lain");
+  ok(line("6300", "debit") === 0, "tidak ada lagi potongan yang masuk ke 6300 Administrasi & Umum");
   ok(line("1300", "credit") === outstanding, "piutang dikredit sebesar seluruh sisa");
 
   let over = false;

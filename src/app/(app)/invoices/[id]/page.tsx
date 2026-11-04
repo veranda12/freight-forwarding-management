@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Briefcase } from "lucide-react";
+import { Briefcase, Printer } from "lucide-react";
 import { requireCan } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
 import { can } from "@/lib/rbac";
@@ -8,6 +8,7 @@ import { formatIDR, formatDate, formatNumber } from "@/lib/format";
 import { InvoiceActions } from "./invoice-actions";
 import { latestRate } from "@/lib/fx";
 import { suggestPph23 } from "@/lib/receipt-deductions";
+import { cashAccountOptions } from "@/lib/cash-accounts";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -25,7 +26,7 @@ export default async function InvoiceDetail({ params }: { params: Promise<{ id: 
     where: { id },
     include: {
       customer: true, job: { select: { id: true, number: true } }, domesticShipment: { select: { id: true, number: true } },
-      lines: { include: { chargeCode: true } },
+      lines: { include: { chargeCode: true }, orderBy: { sortOrder: "asc" } },
       allocations: { include: { payment: true } },
     },
   });
@@ -38,6 +39,7 @@ export default async function InvoiceDetail({ params }: { params: Promise<{ id: 
   const outstanding = Number(inv.total) - Number(inv.amountPaid);
   const outstandingForeign = Number(inv.amountForeign) - Number(inv.amountPaidForeign);
   const defaultPaymentRate = inv.currency !== "IDR" ? await latestRate(prisma, inv.currency, new Date().toISOString().slice(0, 10)) : null;
+  const cash = await cashAccountOptions(prisma, "receipt");
   const pph23Suggest = suggestPph23(inv.lines.filter((l) => l.chargeCode.isPph23).reduce((s, l) => s + Number(l.amount), 0));
 
   return (
@@ -46,6 +48,9 @@ export default async function InvoiceDetail({ params }: { params: Promise<{ id: 
         <Breadcrumbs items={[{ label: "Invoice (AR)", href: "/invoices" }, { label: inv.number }]} />
         <PageHeader title={inv.number} description={`${inv.customer.name} · ${formatDate(inv.date)}`}>
           <InvoiceStatusBadge status={inv.status} />
+          <Button asChild variant="outline">
+            <a href={`/api/invoices/${inv.id}/pdf`} target="_blank" rel="noopener"><Printer /> Cetak Invoice</a>
+          </Button>
           <InvoiceActions
             invoiceId={inv.id}
             currency={inv.currency}
@@ -54,6 +59,8 @@ export default async function InvoiceDetail({ params }: { params: Promise<{ id: 
             bookedRate={Number(inv.exchangeRate)}
             defaultPaymentRate={defaultPaymentRate}
             pph23Suggest={pph23Suggest}
+            cashAccounts={cash.options}
+            defaultCashId={cash.defaultId}
             canWrite={can(user.role, "payments", "write") || can(user.role, "invoices", "write")}
             cancellable={can(user.role, "invoices", "write") && Number(inv.amountPaid) === 0 && inv.status !== "CANCELLED"}
           />
@@ -74,8 +81,12 @@ export default async function InvoiceDetail({ params }: { params: Promise<{ id: 
               <TableBody>
                 {inv.lines.map((l) => (
                   <TableRow key={l.id}>
-                    <TableCell><span className="font-medium">{l.chargeCode.code}</span> <span className="text-muted-foreground">{l.chargeCode.name}</span></TableCell>
-                    <TableCell>{formatNumber(Number(l.qty), 0)}</TableCell>
+                    <TableCell>
+                      <span className="font-medium">{l.chargeCode.code}</span> <span className="text-muted-foreground">{l.chargeCode.name}</span>
+                      {l.asReceipt && <Badge variant="outline" className="ml-1.5 text-[10px]">As receipt</Badge>}
+                      {l.note && <p className="text-xs text-muted-foreground">{l.note}</p>}
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap">{formatNumber(Number(l.qty), 0)}{l.unitLabel && <span className="text-muted-foreground"> × {l.unitLabel}</span>}</TableCell>
                     <TableCell>{formatIDR(Number(l.unitPrice))}</TableCell>
                     <TableCell>{l.taxable ? <Badge variant="outline">11%</Badge> : "-"}</TableCell>
                     <TableCell className="text-right tabular-nums">{formatIDR(Number(l.amount))}</TableCell>

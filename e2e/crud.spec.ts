@@ -10,6 +10,12 @@ async function login(page: Page, email: string) {
   await page.waitForURL("**/dashboard");
 }
 
+/** Sidebar dilipat per grup: buka grupnya dulu bila tertutup. */
+async function openGroup(page: Page, group: string) {
+  const btn = page.getByRole("button", { name: group, exact: true });
+  if ((await btn.getAttribute("aria-expanded")) === "false") await btn.click();
+}
+
 test.describe("CRUD Master & Form Manual", () => {
   // Vendor: create via UI (EntityForm generik)
   test("Admin membuat Vendor baru", async ({ page }) => {
@@ -64,6 +70,7 @@ test.describe("CRUD Master & Form Manual", () => {
   // Rate Management (halaman yang dulu 404) ada + form create render
   test("Sales membuka Rate Management & form baru", async ({ page }) => {
     await login(page, "sales@demo.com");
+    await openGroup(page, "Ekspor-Impor");
     await page.getByRole("link", { name: "Rate Management" }).click();
     await expect(page.getByRole("heading", { name: "Rate Management" })).toBeVisible();
     await page.getByRole("link", { name: /Rate Baru/ }).click();

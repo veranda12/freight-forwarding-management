@@ -51,3 +51,8 @@ graphify-out/
 docs/
 *.md
 !README.md
+# log aplikasi
+/logs/
+
+# logo & file unggahan
+/public/uploads/

@@ -2,6 +2,7 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import { accountMap, ACC } from "./coa";
 import { depreciationForPeriod, jktKey, r2 } from "./accounting-core";
 import { postJournal } from "./journal";
+import { resolveCashAccount, assertCashCurrency } from "./cash-accounts";
 
 const PERIOD_RE = /^\d{4}-\d{2}$/;
 
@@ -44,12 +45,14 @@ export async function createFixedAsset(db: PrismaClient, input: NewAssetInput, u
         cost: new Prisma.Decimal(cost), residualValue: new Prisma.Decimal(residual), usefulLifeMonths: life,
       },
     });
+    const cash = await resolveCashAccount(tx, null, "payment");
+    assertCashCurrency(cash, "IDR", "pembelian aset tetap");
     const je = await postJournal(tx, {
       date: acqDate, description: `Perolehan aset tetap ${code} - ${asset.name}`, source: "MANUAL", sourceId: asset.id,
       createdById: userId,
       lines: [
         { accountId: acc[ACC.FIXED_ASSET], debit: cost, description: `Aset ${code}` },
-        { accountId: acc[ACC.BANK], credit: cost, description: `Pembayaran perolehan ${code}` },
+        { accountId: cash.coaId, credit: cost, description: `Pembayaran perolehan ${code} dari ${cash.name}` },
       ],
     });
     await tx.fixedAsset.update({ where: { id: asset.id }, data: { acquisitionJournalId: je } });

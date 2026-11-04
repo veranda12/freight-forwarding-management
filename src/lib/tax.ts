@@ -1,7 +1,9 @@
-import type { PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 import { accountMap, ACC } from "./coa";
 import { jktKey, PPN_RATE, r2 } from "./accounting-core";
-import { postJournal } from "./journal";
+import { postJournal, reverseJournal, type JournalLineInput } from "./journal";
+import { resolveCashAccount, assertCashCurrency } from "./cash-accounts";
+import { isPeriod, periodLabel, periodRange, remainingForPeriod, masaStatus, TAX_LABEL, type MasaTotals, type TaxKindKey } from "./tax-period";
 
 /** Rekap pajak per rentang tanggal: PPN keluaran (invoice), PPN masukan dan PPh 23 (vendor bill). */
 export async function getTaxRecap(db: PrismaClient, fromKey: string, toKey: string) {
@@ -74,59 +76,130 @@ export async function getTaxRecap(db: PrismaClient, fromKey: string, toKey: stri
   };
 }
 
+type Db = PrismaClient | Prisma.TransactionClient;
+const EMPTY: MasaTotals = { ppnOut: 0, ppnIn: 0, pph23: 0, pph26: 0 };
+
 /**
- * Setor pajak ke kas negara.
- * PPN: saldo PPN keluaran dikurangi PPN masukan, sisanya dibayar lewat bank.
- * PPh 23: seluruh saldo PPh 23 yang sudah dipotong dibayar lewat bank.
+ * Pajak per masa dari buku besar: PPN keluaran (2100), PPN masukan (1400), PPh 23 (2200), PPh 26 (2250).
+ * Jurnal setor pajak dan tutup buku tidak ikut, jadi angka ini adalah pajak yang terjadi di masa itu,
+ * tidak terpengaruh tanggal setoran.
  */
-export async function remitTax(db: PrismaClient, kind: "PPN" | "PPH23" | "PPH26", dateKey: string, reference: string | undefined, userId?: string) {
+export async function masaTotals(db: Db, periods?: string[]): Promise<Map<string, MasaTotals>> {
+  const rows = await db.$queryRaw<{ code: string; period: string; d: Prisma.Decimal; c: Prisma.Decimal }[]>`
+    SELECT a."code" AS code,
+           to_char((e."date" AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Jakarta', 'YYYY-MM') AS period,
+           SUM(l."debit") AS d, SUM(l."credit") AS c
+    FROM "JournalLine" l
+    JOIN "JournalEntry" e ON e."id" = l."entryId"
+    JOIN "CoaAccount" a ON a."id" = l."accountId"
+    WHERE a."code" IN (${ACC.PPN_OUT}, ${ACC.PPN_IN}, ${ACC.PPH23}, ${ACC.PPH26})
+      AND e."source"::text NOT IN ('TAX_REMIT', 'CLOSING')
+    GROUP BY a."code", period`;
+  const map = new Map<string, MasaTotals>();
+  for (const r of rows) {
+    if (periods && !periods.includes(r.period)) continue;
+    const t = map.get(r.period) ?? { ...EMPTY };
+    const d = Number(r.d), c = Number(r.c);
+    if (r.code === ACC.PPN_OUT) t.ppnOut = r2(t.ppnOut + c - d);
+    if (r.code === ACC.PPN_IN) t.ppnIn = r2(t.ppnIn + d - c);
+    if (r.code === ACC.PPH23) t.pph23 = r2(t.pph23 + c - d);
+    if (r.code === ACC.PPH26) t.pph26 = r2(t.pph26 + c - d);
+    map.set(r.period, t);
+  }
+  return map;
+}
+
+async function postedRemits(db: Db, kind: TaxKindKey, period: string) {
+  const rows = await db.taxRemittance.findMany({ where: { kind, period, status: "POSTED" } });
+  return rows.map((r) => ({ amount: Number(r.amount), outAmount: Number(r.outAmount), inAmount: Number(r.inAmount) }));
+}
+
+/** Status setiap masa dalam satu tahun, untuk tiga jenis pajak. */
+export async function getTaxPeriods(db: PrismaClient, year: number, uptoPeriod: string) {
+  const periods = Array.from({ length: 12 }, (_, i) => `${year}-${String(i + 1).padStart(2, "0")}`).filter((p) => p <= uptoPeriod);
+  const [totals, remits] = await Promise.all([
+    masaTotals(db, periods),
+    db.taxRemittance.findMany({ where: { period: { in: periods } }, orderBy: [{ period: "desc" }, { createdAt: "desc" }] }),
+  ]);
+  const kinds: TaxKindKey[] = ["PPN", "PPH23", "PPH26"];
+  const rows = periods.slice().reverse().map((period) => {
+    const t = totals.get(period) ?? EMPTY;
+    const cells = Object.fromEntries(kinds.map((kind) => {
+      const posted = remits.filter((r) => r.kind === kind && r.period === period && r.status === "POSTED")
+        .map((r) => ({ amount: Number(r.amount), outAmount: Number(r.outAmount), inAmount: Number(r.inAmount) }));
+      return [kind, { ...remainingForPeriod(kind, t, posted), status: masaStatus(kind, t, posted) }];
+    })) as Record<TaxKindKey, ReturnType<typeof remainingForPeriod> & { status: ReturnType<typeof masaStatus> }>;
+    return { period, label: periodLabel(period), totals: t, cells };
+  });
+  const history = remits.map((r) => ({
+    id: r.id, kind: r.kind as TaxKindKey, period: r.period, periodLabel: periodLabel(r.period), date: r.date.toISOString(),
+    amount: Number(r.amount), ntpn: r.ntpn, status: r.status, cancelReason: r.cancelReason, journalEntryId: r.journalEntryId,
+  }));
+  return { rows, history };
+}
+
+/**
+ * Setor pajak untuk satu masa. Yang disetor hanya sisa yang belum disetor di masa itu,
+ * sehingga setor ulang atau setor dengan tanggal mundur tidak bisa membayar dua kali.
+ */
+export async function remitTaxPeriod(
+  db: PrismaClient,
+  input: { kind: TaxKindKey; period: string; dateKey: string; ntpn?: string; bankAccountId?: string | null },
+  userId?: string,
+) {
+  const { kind, period, dateKey } = input;
+  if (!["PPN", "PPH23", "PPH26"].includes(kind)) throw new Error("Jenis pajak tidak dikenal.");
+  if (!isPeriod(period)) throw new Error("Masa pajak tidak valid.");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) throw new Error("Tanggal setor tidak valid.");
+  const { start } = periodRange(period);
   const date = new Date(`${dateKey}T12:00:00+07:00`);
-  const upTo = new Date(`${dateKey}T23:59:59+07:00`);
+  if (date < start) throw new Error(`Tanggal setor tidak boleh sebelum awal masa ${periodLabel(period)}.`);
+  const ntpn = (input.ntpn ?? "").trim() || null;
+  const label = TAX_LABEL[kind];
 
   return db.$transaction(async (tx) => {
+    // Kunci per jenis pajak dan masa, supaya dua setoran bersamaan tidak sama-sama lolos.
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`tax:${kind}:${period}`}))`;
+    const t = (await masaTotals(tx, [period])).get(period) ?? EMPTY;
+    const r = remainingForPeriod(kind, t, await postedRemits(tx, kind, period));
+    if (r.out <= 0.5 && r.inn <= 0.5) throw new Error(`${label} masa ${periodLabel(period)} sudah disetor seluruhnya. Tidak ada sisa yang perlu disetor.`);
+    if (r.payable < -0.5) throw new Error(`PPN masa ${periodLabel(period)} lebih bayar ${Math.abs(r.payable).toLocaleString("id-ID")}. Kompensasi ke masa berikutnya belum didukung.`);
+
     const acc = await accountMap(tx);
-    const sumOf = async (code: string) => {
-      const agg = await tx.journalLine.aggregate({
-        where: { accountId: acc[code], entry: { date: { lte: upTo } } },
-        _sum: { debit: true, credit: true },
-      });
-      return { d: Number(agg._sum.debit ?? 0), c: Number(agg._sum.credit ?? 0) };
-    };
+    const cash = await resolveCashAccount(tx, input.bankAccountId, "payment");
+    assertCashCurrency(cash, "IDR", "setor pajak");
+    const taxAcc = kind === "PPN" ? ACC.PPN_OUT : kind === "PPH23" ? ACC.PPH23 : ACC.PPH26;
+    const payable = Math.max(0, r.payable);
+    const lines: JournalLineInput[] = [{ accountId: acc[taxAcc], debit: r.out, description: `Nihil ${label} masa ${period}` }];
+    if (kind === "PPN" && r.inn > 0) lines.push({ accountId: acc[ACC.PPN_IN], credit: r.inn, description: `Kompensasi PPN masukan masa ${period}` });
+    if (payable > 0) lines.push({ accountId: cash.coaId, credit: payable, description: `Setor ${label} masa ${period} ke kas negara dari ${cash.name}` });
 
-    if (kind === "PPN") {
-      const out = await sumOf(ACC.PPN_OUT);
-      const inn = await sumOf(ACC.PPN_IN);
-      const outBal = r2(out.c - out.d);
-      const inBal = r2(inn.d - inn.c);
-      const payable = r2(outBal - inBal);
-      if (outBal <= 0) throw new Error("Tidak ada PPN keluaran yang harus disetor.");
-      if (payable <= 0) throw new Error(`PPN masukan (${inBal}) lebih besar dari PPN keluaran (${outBal}). Tidak ada setoran; saldo menjadi lebih bayar.`);
-      const jeId = await postJournal(tx, {
-        date, description: `Setor PPN ${reference ?? dateKey}`, source: "MANUAL",
-        createdById: userId,
-        lines: [
-          { accountId: acc[ACC.PPN_OUT], debit: outBal, description: "Nihil PPN keluaran" },
-          { accountId: acc[ACC.PPN_IN], credit: inBal, description: "Kompensasi PPN masukan" },
-          { accountId: acc[ACC.BANK], credit: payable, description: "Setor PPN ke kas negara" },
-        ],
-      });
-      return { kind, amount: payable, journalEntryId: jeId };
-    }
-
-    const code = kind === "PPH26" ? ACC.PPH26 : ACC.PPH23;
-    const label = kind === "PPH26" ? "PPh 26" : "PPh 23";
-    const p = await sumOf(code);
-    const bal = r2(p.c - p.d);
-    if (bal <= 0) throw new Error(`Tidak ada ${label} yang harus disetor.`);
     const jeId = await postJournal(tx, {
-      date, description: `Setor ${label} ${reference ?? dateKey}`, source: "MANUAL",
-      createdById: userId,
-      lines: [
-        { accountId: acc[code], debit: bal, description: `Nihil ${label} dipotong` },
-        { accountId: acc[ACC.BANK], credit: bal, description: `Setor ${label} ke kas negara` },
-      ],
+      date, source: "TAX_REMIT", createdById: userId,
+      description: `Setor ${label} masa ${periodLabel(period)}${ntpn ? ` (NTPN ${ntpn})` : ""}`,
+      lines,
     });
-    return { kind, amount: bal, journalEntryId: jeId };
+    const row = await tx.taxRemittance.create({
+      data: {
+        kind, period, date, ntpn, createdById: userId, journalEntryId: jeId, bankAccountId: cash.bankAccountId,
+        amount: new Prisma.Decimal(payable), outAmount: new Prisma.Decimal(r.out), inAmount: new Prisma.Decimal(r.inn),
+      },
+    });
+    await tx.journalEntry.update({ where: { id: jeId }, data: { sourceId: row.id } });
+    return { id: row.id, kind, period, amount: payable };
+  });
+}
+
+/** Batalkan setoran: jurnalnya dibalik dan masa itu kembali berstatus belum disetor. */
+export async function cancelTaxRemittance(db: PrismaClient, id: string, reason: string, userId?: string) {
+  const why = reason.trim();
+  if (why.length < 3) throw new Error("Alasan pembatalan wajib diisi.");
+  return db.$transaction(async (tx) => {
+    const row = await tx.taxRemittance.findUnique({ where: { id } });
+    if (!row) throw new Error("Setoran tidak ditemukan.");
+    if (row.status === "CANCELLED") throw new Error("Setoran ini sudah dibatalkan.");
+    const revId = row.journalEntryId ? await reverseJournal(tx, row.journalEntryId, { reason: why, createdById: userId }) : null;
+    await tx.taxRemittance.update({ where: { id }, data: { status: "CANCELLED", cancelledAt: new Date(), cancelReason: why, cancelJournalId: revId } });
+    return { kind: row.kind as TaxKindKey, period: row.period, amount: Number(row.amount) };
   });
 }

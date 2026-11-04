@@ -1,49 +1,39 @@
 import { requireCan } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
+import { can } from "@/lib/rbac";
 import { PRODUCT } from "@/config/product";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { CompanyForm } from "./company-form";
 
 export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
-  await requireCan("settings", "read", { redirectTo: "/dashboard" });
+  const user = await requireCan("settings", "read", { redirectTo: "/dashboard" });
   const c = await prisma.companySetting.findFirst();
+  const v = (s: string | null | undefined) => s ?? "";
 
   return (
     <div className="space-y-6">
       <PageHeader title="Setting Perusahaan" description="Identitas perusahaan yang dipakai pada dokumen & invoice" />
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader><CardTitle className="text-base">Identitas</CardTitle></CardHeader>
-          <CardContent className="space-y-2 text-sm">
-            <Row label="Nama" value={c?.name} />
-            <Row label="NPWP" value={c?.npwp} />
-            <Row label="Alamat" value={c?.address} />
-            <Row label="Kota" value={c?.city} />
-            <Row label="Telepon" value={c?.phone} />
-            <Row label="Email" value={c?.email} />
-            <Row label="Website" value={c?.website} />
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader><CardTitle className="text-base">Rekening Bank</CardTitle></CardHeader>
-          <CardContent className="space-y-2 text-sm">
-            <Row label="Bank" value={c?.bankName} />
-            <Row label="No. Rekening" value={c?.bankAccount} />
-            <Row label="Atas Nama" value={c?.bankHolder} />
-            <Row label="Cabang" value={c?.bankBranch} />
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader><CardTitle className="text-base">Aplikasi</CardTitle></CardHeader>
-          <CardContent className="space-y-2 text-sm">
-            <Row label="Nama Produk" value={PRODUCT.name} />
-            <Row label="Versi" value={PRODUCT.version} />
-            <p className="pt-2 text-xs text-muted-foreground">Nama produk diubah dari <code className="rounded bg-muted px-1">src/config/product.ts</code>.</p>
-          </CardContent>
-        </Card>
-      </div>
+      <CompanyForm
+        canWrite={can(user.role, "settings", "write")}
+        hasLogo={!!c?.logoPath}
+        initial={{
+          name: v(c?.name), legalName: v(c?.legalName), npwp: v(c?.npwp), address: v(c?.address), city: v(c?.city),
+          phone: v(c?.phone), email: v(c?.email), website: v(c?.website),
+          bankName: v(c?.bankName), bankAccount: v(c?.bankAccount), bankHolder: v(c?.bankHolder), bankBranch: v(c?.bankBranch),
+          signatoryName: v(c?.signatoryName), signatoryTitle: v(c?.signatoryTitle),
+        }}
+      />
+      <Card className="max-w-xl">
+        <CardHeader><CardTitle className="text-base">Aplikasi</CardTitle></CardHeader>
+        <CardContent className="space-y-2 text-sm">
+          <Row label="Nama Produk" value={PRODUCT.name} />
+          <Row label="Versi" value={PRODUCT.version} />
+          <p className="pt-2 text-xs text-muted-foreground">Nama produk diubah dari <code className="rounded bg-muted px-1">src/config/product.ts</code>.</p>
+        </CardContent>
+      </Card>
     </div>
   );
 }

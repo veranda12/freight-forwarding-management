@@ -1,8 +1,9 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { accountMap, ACC } from "./coa";
 import { jktKey, PPN_RATE, r2 } from "./accounting-core";
-import { postJournal } from "./journal";
+import { postJournal, reverseJournal, type JournalLineInput } from "./journal";
 import { normalizeDeductions, type Deductions } from "./receipt-deductions";
+import { resolveCashAccount, assertCashCurrency } from "./cash-accounts";
 import { genDocNumber, SEQ } from "./sequence";
 import { effectiveRate, IDR, latestRate } from "./fx";
 
@@ -15,10 +16,14 @@ export type InvoiceOpts = { currency?: string; rate?: number };
 export async function createInvoiceFromJobCore(db: PrismaClient, jobId: string, userId?: string, opts: InvoiceOpts = {}): Promise<string> {
   const job = await db.job.findUnique({
     where: { id: jobId },
-    include: { customer: true, costings: { where: { side: "SELLING" }, include: { chargeCode: true } } },
+    // Hanya baris selling yang belum ditagih, supaya satu baris tidak masuk ke dua invoice.
+    include: { customer: true, costings: { where: { side: "SELLING", invoiced: false }, include: { chargeCode: true }, orderBy: { sortOrder: "asc" } } },
   });
   if (!job) throw new Error("Job tidak ditemukan.");
-  if (job.costings.length === 0) throw new Error("Tidak ada selling charge untuk ditagih.");
+  if (job.costings.length === 0) {
+    const any = await db.costingLine.count({ where: { jobId, side: "SELLING" } });
+    throw new Error(any > 0 ? "Semua selling charge job ini sudah ditagih. Tambah selling charge baru atau batalkan invoice sebelumnya." : "Tidak ada selling charge untuk ditagih.");
+  }
 
   const cur = (opts.currency || IDR).toUpperCase();
   let rate = 1;
@@ -36,7 +41,7 @@ export async function createInvoiceFromJobCore(db: PrismaClient, jobId: string, 
     let subtotal = 0, taxableBase = 0;
     const lineData: Prisma.InvoiceLineCreateManyInvoiceInput[] = [];
     const revByAccount: Record<string, number> = {};
-    for (const c of job.costings) {
+    for (const [i, c] of job.costings.entries()) {
       const amount = Number(c.actualIdr);
       subtotal += amount;
       if (c.taxable) taxableBase += amount;
@@ -46,6 +51,9 @@ export async function createInvoiceFromJobCore(db: PrismaClient, jobId: string, 
         chargeCodeId: c.chargeCodeId, description: c.chargeCode.name,
         qty: c.qty, unitPrice: new Prisma.Decimal(amount / (Number(c.qty) || 1)),
         amount: new Prisma.Decimal(amount), taxable: c.taxable,
+        // Snapshot untuk cetakan: kelompok, as receipt, satuan, dan keterangan baris.
+        section: c.chargeCode.invoiceSection, asReceipt: c.asReceipt, unitLabel: c.unitLabel,
+        note: c.description && c.description !== c.chargeCode.code ? c.description : null, sortOrder: i,
       });
     }
     subtotal = r2(subtotal); taxableBase = r2(taxableBase);
@@ -76,7 +84,9 @@ export async function createInvoiceFromJobCore(db: PrismaClient, jobId: string, 
       date, description: `AR Invoice ${number} - ${job.customer.name}`, source: "INVOICE", sourceId: inv.id, lines: jLines, createdById: userId,
     });
     await tx.invoice.update({ where: { id: inv.id }, data: { journalEntryId: jeId } });
-    await tx.costingLine.updateMany({ where: { jobId: job.id, side: "SELLING" }, data: { invoiced: true } });
+    // Tandai per baris yang ditagih. Syarat invoiced=false mencegah dua invoice bersamaan menagih baris yang sama.
+    const marked = await tx.costingLine.updateMany({ where: { id: { in: job.costings.map((c) => c.id) }, invoiced: false }, data: { invoiced: true, invoiceId: inv.id } });
+    if (marked.count !== job.costings.length) throw new Error("Selling charge job ini baru saja ditagih oleh invoice lain. Muat ulang halaman.");
     return inv.id;
   });
 }
@@ -89,6 +99,7 @@ export type ReceiptInput = {
   method?: string;
   reference?: string;
   deductions?: Deductions; // potongan IDR: PPh 23, biaya admin bank, potongan lain (invoice IDR saja)
+  bankAccountId?: string | null; // rekening penerima; kosong = rekening default penerimaan
 };
 
 /**
@@ -106,6 +117,8 @@ export async function recordReceiptCore(db: PrismaClient, invoiceId: string, inp
   await db.$transaction(async (tx) => {
     const acc = await accountMap(tx);
     const number = await genDocNumber(tx, SEQ.RECEIPT, date);
+    const cash = await resolveCashAccount(tx, input.bankAccountId, "receipt");
+    assertCashCurrency(cash, inv.currency, "penerimaan invoice");
 
     if (inv.currency === IDR) {
       const amount = r2(Number(input.amount));
@@ -114,21 +127,22 @@ export async function recordReceiptCore(db: PrismaClient, invoiceId: string, inp
       const applied = r2(amount + ded.total); // yang melunasi tagihan: uang masuk + potongan
       if (applied > outstanding + 0.5) throw new Error(`Penerimaan dan potongan melebihi sisa tagihan (${outstanding}).`);
       if (ded.pph23 > 0 && !acc[ACC.PPH23_CLAIM]) throw new Error(`Akun PPh 23 dibayar dimuka (${ACC.PPH23_CLAIM}) belum ada di COA.`);
-      if (ded.admin + ded.other > 0 && !acc[ACC.EXP_ADMIN]) throw new Error(`Akun beban administrasi (${ACC.EXP_ADMIN}) belum ada di COA.`);
+      if (ded.admin > 0 && !acc[ACC.EXP_BANK]) throw new Error(`Akun beban administrasi bank (${ACC.EXP_BANK}) belum ada di COA.`);
+      if (ded.other > 0 && !acc[ACC.EXP_OPS_OTHER]) throw new Error(`Akun beban operasional lain (${ACC.EXP_OPS_OTHER}) belum ada di COA.`);
       const pay = await tx.payment.create({
         data: {
           number, direction: "RECEIPT", date, customerId: inv.customerId,
-          method: (input.method as any) ?? "TRANSFER", reference: input.reference, currency: IDR,
+          method: (input.method as any) ?? "TRANSFER", reference: input.reference, currency: IDR, bankAccountId: cash.bankAccountId,
           amount: new Prisma.Decimal(amount),
           allocations: { create: [{ invoiceId: inv.id, amount: new Prisma.Decimal(applied) }] },
         },
       });
-      const lines: { accountId: string; debit?: number; credit?: number; description?: string }[] = [
-        { accountId: acc[ACC.BANK], debit: amount, description: "Penerimaan bank" },
+      const lines: JournalLineInput[] = [
+        { accountId: cash.coaId, debit: amount, description: `Penerimaan ${cash.name}` },
       ];
       if (ded.pph23 > 0) lines.push({ accountId: acc[ACC.PPH23_CLAIM], debit: ded.pph23, description: "PPh 23 dipotong pelanggan" });
-      if (ded.admin > 0) lines.push({ accountId: acc[ACC.EXP_ADMIN], debit: ded.admin, description: "Biaya admin bank" });
-      if (ded.other > 0) lines.push({ accountId: acc[ACC.EXP_ADMIN], debit: ded.other, description: "Potongan / biaya lain" });
+      if (ded.admin > 0) lines.push({ accountId: acc[ACC.EXP_BANK], debit: ded.admin, description: "Biaya admin bank" });
+      if (ded.other > 0) lines.push({ accountId: acc[ACC.EXP_OPS_OTHER], debit: ded.other, description: "Potongan / biaya lain" });
       lines.push({ accountId: acc[ACC.AR], credit: applied, description: `Pelunasan ${inv.number}` });
       const jeId = await postJournal(tx, {
         date, description: `Receipt ${number} - ${inv.customer.name}`, source: "RECEIPT", sourceId: pay.id,
@@ -159,14 +173,14 @@ export async function recordReceiptCore(db: PrismaClient, invoiceId: string, inp
     const pay = await tx.payment.create({
       data: {
         number, direction: "RECEIPT", date, customerId: inv.customerId,
-        method: (input.method as any) ?? "TRANSFER", reference: input.reference,
+        method: (input.method as any) ?? "TRANSFER", reference: input.reference, bankAccountId: cash.bankAccountId,
         currency: inv.currency, exchangeRate: new Prisma.Decimal(payRate.toFixed(6)),
         amount: new Prisma.Decimal(cashIdr),
         allocations: { create: [{ invoiceId: inv.id, amount: new Prisma.Decimal(bookedIdr), amountForeign: new Prisma.Decimal(aF) }] },
       },
     });
-    const lines: { accountId: string; debit?: number; credit?: number; description?: string }[] = [
-      { accountId: acc[ACC.BANK], debit: cashIdr, description: `Penerimaan bank ${inv.currency} ${aF}` },
+    const lines: JournalLineInput[] = [
+      { accountId: cash.coaId, debit: cashIdr, description: `Penerimaan ${cash.name} ${inv.currency} ${aF}`, amountForeign: cash.currency === inv.currency ? aF : null },
       { accountId: acc[ACC.AR], credit: bookedIdr, description: `Pelunasan ${inv.number}` },
     ];
     if (fx > 0) lines.push({ accountId: acc[ACC.FX], credit: fx, description: "Laba selisih kurs" });
@@ -185,5 +199,36 @@ export async function recordReceiptCore(db: PrismaClient, invoiceId: string, inp
         status: isFull || newPaidIdr >= Number(inv.total) - 0.5 ? "PAID" : "PARTIAL",
       },
     });
+  });
+}
+
+/**
+ * Batalkan invoice yang belum menerima pembayaran: jurnal dibalik, status CANCELLED,
+ * dan hanya baris selling milik invoice ini yang dibuka kembali untuk ditagih.
+ */
+export async function cancelInvoiceCore(db: PrismaClient, invoiceId: string, userId?: string) {
+  const inv = await db.invoice.findUnique({ where: { id: invoiceId } });
+  if (!inv) throw new Error("Invoice tidak ditemukan.");
+  if (inv.status === "CANCELLED") throw new Error("Sudah dibatalkan.");
+  if (Number(inv.amountPaid) > 0) throw new Error("Ada pembayaran, invoice tidak bisa dibatalkan.");
+  if (inv.journalEntryId) {
+    // Invoice valas yang sudah direvaluasi: nilai AR di jurnal asal tidak sama dengan total sekarang.
+    const arLine = await db.journalLine.findFirst({ where: { entryId: inv.journalEntryId, account: { code: ACC.AR } }, select: { debit: true } });
+    if (arLine && Math.abs(Number(arLine.debit) - Number(inv.total)) > 0.5) {
+      throw new Error("Invoice sudah direvaluasi kurs; pembatalan belum didukung. Hubungi admin.");
+    }
+  }
+  return db.$transaction(async (tx) => {
+    if (inv.journalEntryId) await reverseJournal(tx, inv.journalEntryId, { reason: "Invoice dibatalkan", createdById: userId });
+    await tx.invoice.update({ where: { id: inv.id }, data: { status: "CANCELLED" } });
+    // Buka kembali hanya baris selling milik invoice ini.
+    const own = await tx.costingLine.updateMany({ where: { invoiceId: inv.id }, data: { invoiced: false, invoiceId: null } });
+    let reopened = own.count;
+    // Data lama tanpa tautan: buka kembali hanya bila job tidak punya invoice aktif lain.
+    if (own.count === 0 && inv.jobId) {
+      const others = await tx.invoice.count({ where: { jobId: inv.jobId, id: { not: inv.id }, status: { not: "CANCELLED" } } });
+      if (others === 0) reopened = (await tx.costingLine.updateMany({ where: { jobId: inv.jobId, side: "SELLING", invoiceId: null }, data: { invoiced: false } })).count;
+    }
+    return { number: inv.number, reopened };
   });
 }

@@ -13,10 +13,11 @@ import { formatIDR } from "@/lib/format";
 import { recordVendorPaymentAction } from "./actions";
 
 export function PayBillButton({
-  billId, number, vendor, currency, outstanding, outstandingForeign, bookedRate, defaultPaymentRate,
+  billId, number, vendor, currency, outstanding, outstandingForeign, bookedRate, defaultPaymentRate, cashAccounts, defaultCashId,
 }: {
   billId: string; number: string; vendor: string; currency: string; outstanding: number; outstandingForeign: number;
   bookedRate: number; defaultPaymentRate: number | null;
+  cashAccounts: { id: string; label: string }[]; defaultCashId: string | null;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -25,6 +26,7 @@ export function PayBillButton({
   const [amount, setAmount] = useState(String(outstanding));
   const [amountF, setAmountF] = useState(String(outstandingForeign));
   const [payRate, setPayRate] = useState(defaultPaymentRate ? String(defaultPaymentRate) : "");
+  const [bankAccountId, setBankAccountId] = useState(defaultCashId ?? "");
   const [method, setMethod] = useState("TRANSFER");
   const [reference, setReference] = useState("");
 
@@ -35,8 +37,8 @@ export function PayBillButton({
   function submit() {
     start(async () => {
       const input = isFx
-        ? { amountForeign: Number(amountF), paymentRate: Number(payRate), method, reference }
-        : { amount: Number(amount), method, reference };
+        ? { amountForeign: Number(amountF), paymentRate: Number(payRate), method, reference, bankAccountId }
+        : { amount: Number(amount), method, reference, bankAccountId };
       const res = await recordVendorPaymentAction(billId, input);
       if (res.ok) { toast.success("Pembayaran vendor dicatat."); setOpen(false); router.refresh(); }
       else toast.error(res.error);
@@ -70,6 +72,12 @@ export function PayBillButton({
               <div className="flex justify-between font-medium"><span>{fx >= 0 ? "Laba selisih kurs" : "Rugi selisih kurs"}</span><span className="tabular-nums">{formatIDR(Math.abs(fx))}</span></div>
             </div>
           )}
+          <div className="space-y-1.5"><Label>Dibayar dari rekening</Label>
+            <Select value={bankAccountId} onValueChange={setBankAccountId}>
+              <SelectTrigger><SelectValue placeholder="Pilih kas atau rekening" /></SelectTrigger>
+              <SelectContent>{cashAccounts.map((a) => <SelectItem key={a.id} value={a.id}>{a.label}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
           <div className="space-y-1.5"><Label>Metode</Label>
             <Select value={method} onValueChange={setMethod}>
               <SelectTrigger><SelectValue /></SelectTrigger>
@@ -85,7 +93,7 @@ export function PayBillButton({
         </div>
         <DialogFooter>
           <DialogClose asChild><Button variant="ghost">Batal</Button></DialogClose>
-          <Button onClick={submit} disabled={pending}>{pending ? <Loader2 className="animate-spin" /> : null} Simpan</Button>
+          <Button onClick={submit} disabled={pending || !bankAccountId}>{pending ? <Loader2 className="animate-spin" /> : null} Simpan</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

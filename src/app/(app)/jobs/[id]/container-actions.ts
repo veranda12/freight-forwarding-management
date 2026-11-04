@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { assertCan } from "@/lib/auth-helpers";
 import { writeAudit } from "@/lib/audit";
 import { saveJobContainer, deleteJobContainer, type ContainerInput } from "@/lib/job-containers";
+import { errorMessage } from "@/lib/action-error";
 
 type Result = { ok: true } | { ok: false; error: string };
 
@@ -16,7 +17,7 @@ export async function saveJobContainerAction(jobId: string, input: ContainerInpu
     revalidatePath(`/jobs/${jobId}`);
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Gagal menyimpan container." };
+    return { ok: false, error: errorMessage(e, "Gagal menyimpan container.") };
   }
 }
 
@@ -28,6 +29,6 @@ export async function deleteJobContainerAction(jobId: string, containerId: strin
     revalidatePath(`/jobs/${jobId}`);
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Gagal menghapus container." };
+    return { ok: false, error: errorMessage(e, "Gagal menghapus container.") };
   }
 }

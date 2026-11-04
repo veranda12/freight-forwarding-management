@@ -17,10 +17,11 @@ import { formatIDR } from "@/lib/format";
 import { recordReceipt, cancelInvoice } from "../actions";
 
 export function InvoiceActions({
-  invoiceId, currency, outstanding, outstandingForeign, bookedRate, defaultPaymentRate, canWrite, cancellable, pph23Suggest,
+  invoiceId, currency, outstanding, outstandingForeign, bookedRate, defaultPaymentRate, canWrite, cancellable, pph23Suggest, cashAccounts, defaultCashId,
 }: {
   invoiceId: string; currency: string; outstanding: number; outstandingForeign: number;
   bookedRate: number; defaultPaymentRate: number | null; canWrite: boolean; cancellable: boolean; pph23Suggest: number;
+  cashAccounts: { id: string; label: string }[]; defaultCashId: string | null;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -32,6 +33,7 @@ export function InvoiceActions({
   const [pph23, setPph23] = useState(pph23Suggest > 0 ? String(pph23Suggest) : "0");
   const [admin, setAdmin] = useState("0");
   const [other, setOther] = useState("0");
+  const [bankAccountId, setBankAccountId] = useState(defaultCashId ?? "");
   const [method, setMethod] = useState("TRANSFER");
   const [reference, setReference] = useState("");
   const [confirmCancel, setConfirmCancel] = useState(false);
@@ -50,8 +52,8 @@ export function InvoiceActions({
   function submit() {
     start(async () => {
       const input = isFx
-        ? { amountForeign: Number(amountF), paymentRate: Number(payRate), method, reference }
-        : { amount: Number(amount), method, reference, deductions };
+        ? { amountForeign: Number(amountF), paymentRate: Number(payRate), method, reference, bankAccountId }
+        : { amount: Number(amount), method, reference, deductions, bankAccountId };
       const res = await recordReceipt(invoiceId, input);
       if (res.ok) { toast.success("Pembayaran dicatat."); setOpen(false); router.refresh(); }
       else toast.error(res.error ?? "Gagal.");
@@ -116,6 +118,12 @@ export function InvoiceActions({
                   <div className="flex justify-between font-medium"><span>{fx >= 0 ? "Laba selisih kurs" : "Rugi selisih kurs"}</span><span className="tabular-nums">{formatIDR(Math.abs(fx))}</span></div>
                 </div>
               )}
+              <div className="space-y-1.5"><Label>Diterima di rekening</Label>
+                <Select value={bankAccountId} onValueChange={setBankAccountId}>
+                  <SelectTrigger><SelectValue placeholder="Pilih kas atau rekening" /></SelectTrigger>
+                  <SelectContent>{cashAccounts.map((a) => <SelectItem key={a.id} value={a.id}>{a.label}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
               <div className="space-y-1.5"><Label>Metode</Label>
                 <Select value={method} onValueChange={setMethod}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
@@ -131,7 +139,7 @@ export function InvoiceActions({
             </div>
             <DialogFooter>
               <DialogClose asChild><Button variant="ghost">Batal</Button></DialogClose>
-              <Button onClick={submit} disabled={pending || over || cash <= 0}>{pending ? <Loader2 className="animate-spin" /> : null} Simpan</Button>
+              <Button onClick={submit} disabled={pending || over || cash <= 0 || !bankAccountId}>{pending ? <Loader2 className="animate-spin" /> : null} Simpan</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

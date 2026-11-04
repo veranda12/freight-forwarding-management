@@ -4,7 +4,7 @@
  */
 import { PrismaClient } from "@prisma/client";
 import { createBillFromJobCore } from "../../src/lib/payables";
-import { getTaxRecap, remitTax } from "../../src/lib/tax";
+import { getTaxRecap, getTaxPeriods, remitTaxPeriod } from "../../src/lib/tax";
 import { pph26Of } from "../../src/lib/accounting-core";
 
 const db = new PrismaClient();
@@ -52,10 +52,12 @@ async function main() {
   ok(after.totals.pph26 >= before.totals.pph26 + Number(bill.pph26Amount) - 0.01, "rekap PPh 26 bertambah");
   ok(after.balances.pph26Outstanding >= Number(bill.pph26Amount) - 0.01, "saldo PPh 26 belum disetor bertambah");
 
-  const r = await remitTax(db, "PPH26", "2026-12-31", "uji-pph26", undefined);
-  ok(Math.abs(r.amount - after.balances.pph26Outstanding) < 1 && await balanced(r.journalEntryId), `setor PPh 26 ${Math.round(r.amount).toLocaleString("id-ID")} seimbang`);
-  const final = await getTaxRecap(db, "2026-01-01", "2026-12-31");
-  ok(Math.abs(final.balances.pph26Outstanding) < 1, "saldo PPh 26 nol setelah disetor");
+  const masa = new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 7);
+  const r = await remitTaxPeriod(db, { kind: "PPH26", period: masa, dateKey: new Date().toISOString().slice(0, 10), ntpn: "uji-pph26" });
+  const remit = await db.taxRemittance.findUniqueOrThrow({ where: { id: r.id } });
+  ok(r.amount >= Number(bill.pph26Amount) - 0.01 && await balanced(remit.journalEntryId), `setor PPh 26 masa ${masa} ${Math.round(r.amount).toLocaleString("id-ID")} seimbang`);
+  const status = await getTaxPeriods(db, Number(masa.slice(0, 4)), masa);
+  ok(status.rows[0].cells.PPH26.status === "PAID", "PPh 26 masa ini berstatus sudah disetor");
 
   console.log(failures === 0 ? "ALL PASS" : `${failures} FAILURE(S)`);
 }

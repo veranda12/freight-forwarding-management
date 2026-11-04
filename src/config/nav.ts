@@ -4,7 +4,7 @@ import {
   Package, Percent, BookOpen, FileText, Briefcase, CalendarCheck, FileSignature,
   Calculator, Receipt, FileInput, StickyNote, Wallet, BookMarked, BarChart3,
   UserCog, Settings, History, MapPin, Truck, PackageCheck, Scale, Calculator as CalcIcon,
-  ArrowLeftRight, BookCheck, Landmark, GitCompare, RefreshCw,
+  ArrowLeftRight, BookCheck, Landmark, GitCompare, RefreshCw, Banknote, ArrowDownUp, NotebookPen, ListChecks, Bug,
 } from "lucide-react";
 
 export type NavItem = {
@@ -56,6 +56,8 @@ export const NAV: NavGroup[] = [
       { label: "Debit/Credit Note", href: "/notes", icon: StickyNote, resource: "notes" },
       { label: "Receipt & Payment", href: "/payments", icon: Wallet, resource: "payments" },
       { label: "Accounting", href: "/accounting", icon: BookMarked, resource: "accounting" },
+      { label: "Kas Masuk / Keluar", href: "/accounting/cash-entry", icon: ArrowDownUp, resource: "accounting" },
+      { label: "Jurnal Manual", href: "/accounting/manual-journal", icon: NotebookPen, resource: "accounting" },
       { label: "Arus Kas", href: "/accounting/cash-flow", icon: ArrowLeftRight, resource: "accounting" },
       { label: "Tutup Buku", href: "/accounting/closing", icon: BookCheck, resource: "accounting" },
       { label: "Aset Tetap", href: "/accounting/fixed-assets", icon: Building2, resource: "accounting" },
@@ -77,9 +79,11 @@ export const NAV: NavGroup[] = [
       { label: "Vendor", href: "/vendors", icon: Building2, resource: "vendors" },
       { label: "Overseas Agent", href: "/agents", icon: Globe2, resource: "agents" },
       { label: "Port & Airport", href: "/ports", icon: Anchor, resource: "ports" },
+      { label: "Kas & Rekening", href: "/bank-accounts", icon: Banknote, resource: "accounting" },
       { label: "Armada Sendiri", href: "/vehicles", icon: Truck, resource: "vehicles" },
       { label: "Currency & Kurs", href: "/currencies", icon: Coins, resource: "currencies" },
       { label: "Charge Code", href: "/charges", icon: Tags, resource: "charges" },
+      { label: "Rate Card", href: "/rate-card", icon: ListChecks, resource: "charges" },
       { label: "Aturan Berat", href: "/weight-rules", icon: Scale, resource: "weightRules" },
       { label: "Container Type", href: "/containers", icon: Container, resource: "containers" },
       { label: "Commodity", href: "/commodities", icon: Package, resource: "commodities" },
@@ -92,6 +96,7 @@ export const NAV: NavGroup[] = [
     items: [
       { label: "User Management", href: "/users", icon: UserCog, resource: "users" },
       { label: "Audit Log", href: "/audit", icon: History, resource: "audit" },
+      { label: "Log Error", href: "/logs", icon: Bug, resource: "audit" },
       { label: "Setting Perusahaan", href: "/settings", icon: Settings, resource: "settings" },
     ],
   },

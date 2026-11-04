@@ -10,6 +10,12 @@ async function login(page: Page, email: string) {
   await page.waitForURL("**/dashboard");
 }
 
+/** Sidebar dilipat per grup: buka grupnya dulu bila tertutup. */
+async function openGroup(page: Page, group: string) {
+  const btn = page.getByRole("button", { name: group, exact: true });
+  if ((await btn.getAttribute("aria-expanded")) === "false") await btn.click();
+}
+
 async function pick(page: Page, label: string, option: string | RegExp) {
   await page.getByRole("combobox", { name: label }).click();
   await page.getByRole("option", { name: option }).first().click();
@@ -20,6 +26,7 @@ test.describe("Domestik", () => {
     await login(page, "ops@demo.com");
 
     // menu Domestik terpisah dari Ekspor-Impor
+    await openGroup(page, "Domestik");
     await expect(page.getByRole("link", { name: "Pengiriman (STT)" })).toBeVisible();
     await page.getByRole("link", { name: "Cek Tarif" }).click();
     await page.waitForURL("**/domestic/check");

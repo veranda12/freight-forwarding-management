@@ -7,6 +7,10 @@ export type ContainerInput = {
   containerTypeId: string;
   grossWeightKg?: number | string | null;
   volumeCbm?: number | string | null;
+  /** Tujuan container; kosong = ikut tujuan job. */
+  warehouseId?: string | null;
+  deliveryAddress?: string | null;
+  distanceKm?: number | string | null;
 };
 
 /** Nilai huruf untuk digit cek ISO 6346: A=10, B=12, ... (kelipatan 11 dilewati). */
@@ -65,7 +69,10 @@ export function validateJobContainerInput(input: ContainerInput) {
   if (volumeCbm !== null && (volumeCbm < 0 || volumeCbm > 200)) {
     throw new Error("Volume harus antara 0 dan 200 cbm.");
   }
-  return { containerNo, sealNo, containerTypeId: input.containerTypeId, grossWeightKg, volumeCbm };
+  const distanceKm = optionalNumber(input.distanceKm, "Jarak");
+  if (distanceKm !== null && (distanceKm < 0 || distanceKm > 5000)) throw new Error("Jarak harus antara 0 dan 5.000 km.");
+  const deliveryAddress = (input.deliveryAddress ?? "").trim() || null;
+  return { containerNo, sealNo, containerTypeId: input.containerTypeId, grossWeightKg, volumeCbm, warehouseId: input.warehouseId || null, deliveryAddress, distanceKm };
 }
 
 /** Tambah atau ubah container pada job. Nomor container harus unik dalam satu job. */
@@ -80,12 +87,24 @@ export async function saveJobContainer(db: PrismaClient, jobId: string, input: C
   });
   if (dup) throw new Error(`Container ${v.containerNo} sudah ada di job ini.`);
 
+  // Gudang harus milik customer job. Alamat dan jarak kosong diisi dari master gudang.
+  const wh = v.warehouseId ? await db.warehouse.findUnique({ where: { id: v.warehouseId } }) : null;
+  if (v.warehouseId) {
+    const job = await db.job.findUnique({ where: { id: jobId }, select: { customerId: true } });
+    if (!wh || wh.customerId !== job?.customerId) throw new Error("Gudang bukan milik customer job ini.");
+  }
+  const deliveryAddress = v.deliveryAddress ?? (wh ? [wh.address, wh.city].filter(Boolean).join(", ") : null);
+  const distanceKm = v.distanceKm ?? (wh?.distanceKm != null ? Number(wh.distanceKm) : null);
+
   const data = {
     containerNo: v.containerNo,
     sealNo: v.sealNo,
     containerTypeId: v.containerTypeId,
     grossWeightKg: v.grossWeightKg === null ? null : new Prisma.Decimal(v.grossWeightKg),
     volumeCbm: v.volumeCbm === null ? null : new Prisma.Decimal(v.volumeCbm),
+    warehouseId: wh?.id ?? null,
+    deliveryAddress,
+    distanceKm: distanceKm === null ? null : new Prisma.Decimal(distanceKm),
   };
   if (input.id) {
     const existing = await db.jobContainer.findFirst({ where: { id: input.id, jobId }, select: { id: true } });

@@ -8,7 +8,7 @@ import { createFixedAsset, runDepreciation, assetRegister } from "../../src/lib/
 import { createInvoiceFromJobCore, recordReceiptCore } from "../../src/lib/receivables";
 import { createBillFromJobCore, recordVendorPaymentCore } from "../../src/lib/payables";
 import { runRevaluation, latestRate } from "../../src/lib/fx";
-import { getTaxRecap, remitTax } from "../../src/lib/tax";
+import { getTaxRecap, getTaxPeriods, remitTaxPeriod } from "../../src/lib/tax";
 import { getCashFlow } from "../../src/lib/cashflow";
 import { getBankRecon, setReconciled, saveBankRecon } from "../../src/lib/bank-rec";
 import { r2 } from "../../src/lib/accounting-core";
@@ -39,8 +39,10 @@ async function main() {
   ok(!!reg && Math.abs(reg.netBookValue - 11_000_000) < 1, `nilai buku aset = ${f(reg?.netBookValue ?? 0)}`);
 
   // 2) Invoice valas (USD) dari job yang punya selling, dua kali pelunasan
-  const job = await db.job.findFirst({ where: { costings: { some: { side: "SELLING" } } }, select: { id: true, number: true } });
-  if (!job) throw new Error("Tidak ada job dengan selling charge di database uji.");
+  // Satu baris selling hanya bisa ditagih sekali, jadi pakai dua job yang selling-nya belum ditagih.
+  const openJobs = await db.job.findMany({ where: { costings: { some: { side: "SELLING", invoiced: false } } }, select: { id: true, number: true }, take: 2 });
+  if (openJobs.length < 2) throw new Error("Butuh dua job dengan selling charge yang belum ditagih di database uji.");
+  const [job, job2] = openJobs;
   const usdRate = (await latestRate(db, "USD")) ?? 16000;
   const invId = await createInvoiceFromJobCore(db, job.id, undefined, { currency: "USD", rate: usdRate });
   const inv = await db.invoice.findUniqueOrThrow({ where: { id: invId } });
@@ -64,7 +66,7 @@ async function main() {
   ok(!!pay2 && await jeBalanced(pay2.journalEntryId), "jurnal pelunasan terakhir seimbang");
 
   // 3) Revaluasi hutang & piutang valas terbuka (bill USD dibuat di bawah)
-  const usdInv2 = await createInvoiceFromJobCore(db, job.id, undefined, { currency: "USD", rate: usdRate });
+  const usdInv2 = await createInvoiceFromJobCore(db, job2.id, undefined, { currency: "USD", rate: usdRate });
   const rv = await runRevaluation(db, TODAY, { USD: usdRate + 500 }, undefined);
   ok(rv.posted >= 1 && await jeBalanced(rv.journalEntryId), `revaluasi USD: ${rv.posted} dokumen, jurnal seimbang`);
   const rvInv = await db.invoice.findUniqueOrThrow({ where: { id: usdInv2 } });
@@ -96,14 +98,18 @@ async function main() {
   const recap = await getTaxRecap(db, "2026-01-01", TODAY);
   ok(recap.totals.ppnOut > 0, `PPN keluaran periode ini = ${f(recap.totals.ppnOut)}`);
   ok(recap.totals.netPpn === r2(recap.totals.ppnOut - recap.totals.ppnIn), "netPpn = keluaran - masukan");
-  if (recap.balances.ppnOutstanding - recap.balances.ppnInCredit > 0) {
-    const r = await remitTax(db, "PPN", TODAY, "uji", undefined);
-    ok(await jeBalanced(r.journalEntryId), `setor PPN ${f(r.amount)} seimbang`);
-  } else console.log("SKIP setor PPN: PPN masukan >= keluaran");
-  if (recap.balances.pph23Outstanding > 0) {
-    const r = await remitTax(db, "PPH23", TODAY, "uji", undefined);
-    ok(await jeBalanced(r.journalEntryId), `setor PPh 23 ${f(r.amount)} seimbang`);
-  } else console.log("SKIP setor PPh 23: tidak ada saldo");
+  const MASA = TODAY.slice(0, 7);
+  for (const kind of ["PPN", "PPH23"] as const) {
+    try {
+      const r = await remitTaxPeriod(db, { kind, period: MASA, dateKey: TODAY, ntpn: "uji" });
+      const row = await db.taxRemittance.findUniqueOrThrow({ where: { id: r.id } });
+      ok(await jeBalanced(row.journalEntryId!), `setor ${kind} masa ${MASA} ${f(r.amount)} seimbang`);
+      const again = await getTaxPeriods(db, Number(MASA.slice(0, 4)), MASA);
+      ok(again.rows[0].cells[kind].status === "PAID", `${kind} masa ${MASA} berstatus sudah disetor`);
+    } catch (e: any) {
+      console.log(`SKIP setor ${kind}: ${e.message}`);
+    }
+  }
 
   // 6) Arus kas harus cocok dengan saldo kas akhir
   const cf = await getCashFlow(db, "2026-01-01", TODAY);

@@ -5,7 +5,7 @@ import { assertNotLocked } from "./period-lock";
 type Tx = Prisma.TransactionClient;
 type JSource = Prisma.JournalEntryCreateInput["source"];
 
-export type JournalLineInput = { accountId: string; debit?: number; credit?: number; description?: string };
+export type JournalLineInput = { accountId: string; debit?: number; credit?: number; description?: string; amountForeign?: number | null };
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -41,6 +41,7 @@ export async function postJournal(
           debit: new Prisma.Decimal(r2(l.debit ?? 0)),
           credit: new Prisma.Decimal(r2(l.credit ?? 0)),
           description: l.description,
+          amountForeign: l.amountForeign ? new Prisma.Decimal(r2(Math.abs(l.amountForeign))) : null,
         })),
       },
     },
@@ -60,6 +61,7 @@ export async function reverseJournal(
   const original = await tx.journalEntry.findUnique({ where: { id: entryId }, include: { lines: true } });
   if (!original || original.isReversed || original.isReversal) return null;
   const date = opts.date ?? new Date();
+  await assertNotLocked(tx, date);
   const number = await genDocNumber(tx, SEQ.JOURNAL, date);
   const rev = await tx.journalEntry.create({
     data: {
@@ -72,6 +74,7 @@ export async function reverseJournal(
           debit: l.credit, // swap
           credit: l.debit,
           description: l.description,
+          amountForeign: l.amountForeign,
         })),
       },
     },

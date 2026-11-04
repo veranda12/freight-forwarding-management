@@ -17,7 +17,7 @@ export default async function CoaPage() {
   const accounts = await prisma.coaAccount.findMany({ orderBy: { code: "asc" } });
   return (
     <div className="space-y-6">
-      <PageHeader title="Chart of Accounts" description={`${accounts.length} akun — standar perusahaan jasa logistik`} />
+      <PageHeader title="Chart of Accounts" description={`${accounts.length} akun standar perusahaan jasa logistik`} />
       <Card>
         <CardContent className="p-0">
           <Table>

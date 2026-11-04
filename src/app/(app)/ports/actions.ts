@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { assertCan } from "@/lib/auth-helpers";
 import { writeAudit } from "@/lib/audit";
 import { savePort, saveAirport, type PortInput, type AirportInput } from "@/lib/ports";
+import { errorMessage } from "@/lib/action-error";
 
 type Result = { ok: true } | { ok: false; error: string };
 
@@ -17,7 +18,7 @@ export async function savePortAction(input: PortInput): Promise<Result> {
     revalidatePath("/jobs/new");
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Gagal menyimpan port." };
+    return { ok: false, error: errorMessage(e, "Gagal menyimpan port.") };
   }
 }
 
@@ -30,6 +31,6 @@ export async function saveAirportAction(input: AirportInput): Promise<Result> {
     revalidatePath("/jobs/new");
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Gagal menyimpan airport." };
+    return { ok: false, error: errorMessage(e, "Gagal menyimpan airport.") };
   }
 }

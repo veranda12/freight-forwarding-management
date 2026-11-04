@@ -6,6 +6,7 @@ import { assertCan } from "@/lib/auth-helpers";
 import { writeAudit } from "@/lib/audit";
 import { syncKurs } from "@/lib/kurs-sync";
 import { addCurrency, upsertRate, type NewCurrencyInput, type NewRateInput } from "@/lib/currencies";
+import { errorMessage } from "@/lib/action-error";
 
 export type SyncKursResult = { ok: true; date: string; updated: number; skipped: string[] } | { ok: false; error: string };
 
@@ -18,7 +19,7 @@ export async function syncKursAction(): Promise<SyncKursResult> {
     revalidatePath("/currencies");
     return { ok: true, date: r.date, updated: r.updated, skipped: r.skipped };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Gagal mengambil kurs." };
+    return { ok: false, error: errorMessage(e, "Gagal mengambil kurs.") };
   }
 }
 
@@ -33,7 +34,7 @@ export async function addCurrencyAction(input: NewCurrencyInput): Promise<Action
     revalidatePath("/currencies");
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Gagal menambah mata uang." };
+    return { ok: false, error: errorMessage(e, "Gagal menambah mata uang.") };
   }
 }
 
@@ -47,6 +48,6 @@ export async function addRateAction(input: NewRateInput): Promise<ActionResult> 
     revalidatePath("/accounting/fx");
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Gagal menyimpan kurs." };
+    return { ok: false, error: errorMessage(e, "Gagal menyimpan kurs.") };
   }
 }

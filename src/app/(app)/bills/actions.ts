@@ -5,9 +5,10 @@ import { prisma } from "@/lib/prisma";
 import { assertCan } from "@/lib/auth-helpers";
 import { writeAudit } from "@/lib/audit";
 import { createBillFromJobCore, recordVendorPaymentCore, type BillOpts, type VendorPaymentInput } from "@/lib/payables";
+import { errorMessage } from "@/lib/action-error";
 
 type Result<T = object> = ({ ok: true } & T) | { ok: false; error: string };
-const fail = (e: unknown): { ok: false; error: string } => ({ ok: false, error: e instanceof Error ? e.message : "Gagal." });
+const fail = (e: unknown): { ok: false; error: string } => ({ ok: false, error: errorMessage(e, "Gagal.") });
 
 /** Membuat vendor bill dari biaya beli job untuk satu vendor. */
 export async function createBillFromJobAction(jobId: string, vendorId: string, opts: BillOpts = {}): Promise<Result<{ id: string }>> {

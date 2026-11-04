@@ -9,16 +9,26 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger, DialogClose, DialogDescription } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import { saveJobContainerAction, deleteJobContainerAction } from "./container-actions";
+import type { WarehouseOpt } from "./clearance-form";
 
 type TypeOpt = { id: string; code: string; name: string };
 type Initial = {
   id: string; containerNo: string; sealNo: string | null; containerTypeId: string | null;
   grossWeightKg: number | null; volumeCbm: number | null;
+  warehouseId: string | null; deliveryAddress: string | null; distanceKm: number | null;
 };
 
-/** Dialog tambah (tanpa initial) atau ubah dan hapus (dengan initial) container job. */
-export function ContainerForm({ jobId, types, initial }: { jobId: string; types: TypeOpt[]; initial?: Initial }) {
+const SAME = "__job__";
+
+/**
+ * Dialog tambah (tanpa initial) atau ubah dan hapus (dengan initial) container job.
+ * Tujuan kosong berarti container ikut tujuan job (`jobDest`).
+ */
+export function ContainerForm({ jobId, types, initial, warehouses, jobDest }: {
+  jobId: string; types: TypeOpt[]; initial?: Initial; warehouses: WarehouseOpt[]; jobDest: string;
+}) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [open, setOpen] = useState(false);
@@ -27,10 +37,19 @@ export function ContainerForm({ jobId, types, initial }: { jobId: string; types:
   const [typeId, setTypeId] = useState(initial?.containerTypeId ?? "");
   const [gross, setGross] = useState(initial?.grossWeightKg?.toString() ?? "");
   const [vol, setVol] = useState(initial?.volumeCbm?.toString() ?? "");
+  const [whId, setWhId] = useState(initial?.warehouseId ?? SAME);
+  const [address, setAddress] = useState(initial?.deliveryAddress ?? "");
+  const [km, setKm] = useState(initial?.distanceKm?.toString() ?? "");
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   function reset() {
-    setContainerNo(""); setSealNo(""); setTypeId(""); setGross(""); setVol("");
+    setContainerNo(""); setSealNo(""); setTypeId(""); setGross(""); setVol(""); setWhId(SAME); setAddress(""); setKm("");
+  }
+
+  function pickWarehouse(id: string) {
+    setWhId(id);
+    const w = warehouses.find((x) => x.id === id);
+    if (w) { setAddress([w.address, w.city].filter(Boolean).join(", ")); if (w.distanceKm != null) setKm(String(w.distanceKm)); }
   }
 
   function save() {
@@ -40,6 +59,7 @@ export function ContainerForm({ jobId, types, initial }: { jobId: string; types:
         containerNo, sealNo, containerTypeId: typeId,
         grossWeightKg: gross === "" ? null : Number(gross),
         volumeCbm: vol === "" ? null : Number(vol),
+        warehouseId: whId === SAME ? null : whId, deliveryAddress: address, distanceKm: km === "" ? null : km,
       });
       if (res.ok) {
         toast.success(`Container ${containerNo.toUpperCase()} tersimpan.`);
@@ -97,6 +117,28 @@ export function ContainerForm({ jobId, types, initial }: { jobId: string; types:
           <div className="space-y-1.5">
             <Label>Volume (cbm, opsional)</Label>
             <Input type="number" min={0} step="0.01" value={vol} onChange={(e) => setVol(e.target.value)} />
+          </div>
+          <div className="col-span-2 border-t pt-3">
+            <p className="font-medium">Tujuan container</p>
+            <p className="text-xs text-muted-foreground">Kosongkan bila sama dengan tujuan job ({jobDest}). Jarak mengikuti surat jalan container ini.</p>
+          </div>
+          <div className="space-y-1.5">
+            <Label>Gudang tujuan</Label>
+            <Select value={whId} onValueChange={pickWarehouse}>
+              <SelectTrigger aria-label="Gudang tujuan container"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value={SAME}>Tidak dari master</SelectItem>
+                {warehouses.map((w) => <SelectItem key={w.id} value={w.id}>{w.name}{w.distanceKm != null ? ` · ${w.distanceKm} km` : ""}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label>Jarak (km)</Label>
+            <Input aria-label="Jarak container" type="number" min={0} step="0.1" value={km} onChange={(e) => setKm(e.target.value)} placeholder="Ikut job" />
+          </div>
+          <div className="col-span-2 space-y-1.5">
+            <Label>Alamat kirim</Label>
+            <Textarea aria-label="Alamat kirim container" rows={2} value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Ikut alamat job" />
           </div>
         </div>
         <DialogFooter className="sm:justify-between">

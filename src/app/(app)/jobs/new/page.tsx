@@ -23,8 +23,13 @@ export default async function NewJobPage() {
     <div className="space-y-6">
       <div>
         <Button asChild variant="ghost" size="sm" className="mb-2 -ml-2"><Link href="/jobs"><ArrowLeft /> Kembali</Link></Button>
-        <PageHeader title="Job Baru" description="Buat job/shipment manual (atau gunakan Convert dari Quotation)" />
+        <PageHeader title="Job Baru" description="Buat job/shipment langsung, tanpa quotation" />
       </div>
+      <p className="rounded-lg border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
+        Sudah ada quotation yang diterima customer? Buka quotation itu lalu klik <b>Convert ke Job</b>, supaya charge selling dan buying ikut tersalin.{" "}
+        <Link href="/quotations" className="font-medium text-primary hover:underline">Buka daftar quotation</Link>.
+        Job yang dibuat di sini belum punya charge. Tambahkan charge di tab <b>Costing</b> setelah job tersimpan, baru invoice dan bill bisa dibuat.
+      </p>
       <JobForm
         customers={customers.map((c) => ({ id: c.id, label: `${c.name} (${c.code})` }))}
         sales={sales.map((u) => ({ id: u.id, label: u.name }))}

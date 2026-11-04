@@ -5,13 +5,14 @@ import { requireCan } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
 import { can } from "@/lib/rbac";
 import { MODE_SHORT } from "@/lib/enums";
-import { formatIDR, formatDate } from "@/lib/format";
+import { formatIDR, formatDate, formatNumber } from "@/lib/format";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { JobStatusBadge } from "@/components/status-badge";
+import { WarehouseForm } from "./warehouse-form";
 
 export const dynamic = "force-dynamic";
 
@@ -22,18 +23,20 @@ export default async function CustomerDetail({ params }: { params: Promise<{ id:
     where: { id },
     include: {
       salesPic: { select: { name: true } }, contacts: true,
+      warehouses: { orderBy: [{ isActive: "desc" }, { name: "asc" }] },
       jobsAsCustomer: { orderBy: { openedAt: "desc" }, take: 10, select: { id: true, number: true, mode: true, status: true, openedAt: true, revenueIdr: true } },
       _count: { select: { jobsAsCustomer: true, invoices: true } },
     },
   });
   if (!c) notFound();
+  const canWrite = can(user.role, "customers", "write");
 
   return (
     <div className="space-y-6">
       <div>
         <Button asChild variant="ghost" size="sm" className="mb-2 -ml-2"><Link href="/customers"><ArrowLeft /> Kembali</Link></Button>
         <PageHeader title={c.name} description={`${c.code} · ${c.industry ?? "-"} · ${c.city ?? "-"}`}>
-          {can(user.role, "customers", "write") && (
+          {canWrite && (
             <Button asChild variant="outline"><Link href={`/customers/${c.id}/edit`}><Pencil /> Edit</Link></Button>
           )}
         </PageHeader>
@@ -73,6 +76,38 @@ export default async function CustomerDetail({ params }: { params: Promise<{ id:
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardHeader className="flex-row items-center justify-between">
+          <CardTitle className="text-base">Gudang Tujuan</CardTitle>
+          {canWrite && <WarehouseForm customerId={c.id} />}
+        </CardHeader>
+        <CardContent className="p-0">
+          {c.warehouses.length ? (
+            <Table>
+              <TableHeader><TableRow>
+                <TableHead>Nama</TableHead><TableHead>Alamat</TableHead><TableHead>Jarak standar</TableHead><TableHead>Status</TableHead>
+                {canWrite && <TableHead className="text-right">Aksi</TableHead>}
+              </TableRow></TableHeader>
+              <TableBody>
+                {c.warehouses.map((w) => (
+                  <TableRow key={w.id}>
+                    <TableCell className="font-medium">{w.name}</TableCell>
+                    <TableCell className="text-muted-foreground">{[w.address, w.city].filter(Boolean).join(", ")}</TableCell>
+                    <TableCell className="tabular-nums">{w.distanceKm == null ? "-" : `${formatNumber(Number(w.distanceKm), 1)} km`}</TableCell>
+                    <TableCell>{w.isActive ? <Badge variant="outline">Aktif</Badge> : <span className="text-xs text-muted-foreground">Nonaktif</span>}</TableCell>
+                    {canWrite && (
+                      <TableCell className="text-right">
+                        <WarehouseForm customerId={c.id} initial={{ id: w.id, name: w.name, address: w.address, city: w.city, distanceKm: w.distanceKm == null ? null : Number(w.distanceKm), isActive: w.isActive }} />
+                      </TableCell>
+                    )}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          ) : <p className="px-6 pb-6 text-sm text-muted-foreground">Belum ada gudang. Tambahkan gudang supaya alamat kirim dan jarak di job terisi otomatis.</p>}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader><CardTitle className="text-base">Job Terakhir</CardTitle></CardHeader>

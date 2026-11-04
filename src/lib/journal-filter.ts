@@ -1,13 +1,13 @@
 /** Filter pencarian jurnal. Murni (tanpa Prisma), aman dipakai di client maupun server. */
 
 export const JOURNAL_SOURCES = [
-  "INVOICE", "RECEIPT", "BILL", "PAYMENT", "MANUAL", "FLEET_COST",
+  "INVOICE", "RECEIPT", "BILL", "PAYMENT", "CASH_ENTRY", "BANK_TRANSFER", "TAX_REMIT", "MANUAL", "FLEET_COST",
   "DEBIT_NOTE", "CREDIT_NOTE", "FX", "FX_REVAL", "DEPRECIATION", "CLOSING",
 ] as const;
 
 export const SOURCE_LABEL: Record<string, string> = {
   INVOICE: "Invoice", RECEIPT: "Penerimaan", BILL: "Vendor bill", PAYMENT: "Bayar vendor",
-  MANUAL: "Manual, pajak, modal", FLEET_COST: "Beban armada", DEBIT_NOTE: "Debit note",
+  CASH_ENTRY: "Kas masuk/keluar", BANK_TRANSFER: "Transfer antar rekening", TAX_REMIT: "Setor pajak", MANUAL: "Jurnal manual, modal", FLEET_COST: "Beban armada", DEBIT_NOTE: "Debit note",
   CREDIT_NOTE: "Credit note", FX: "Selisih kurs", FX_REVAL: "Revaluasi kurs",
   DEPRECIATION: "Penyusutan", CLOSING: "Tutup buku",
 };

@@ -27,6 +27,8 @@ export const ACC = {
   REV_OTHER: "4900",
   EXP_OTHER: "5900",
   EXP_ADMIN: "6300",
+  EXP_BANK: "6350", // biaya admin bank dan biaya transfer
+  EXP_OPS_OTHER: "6390", // potongan atau biaya lain saat penerimaan
   PPH23_CLAIM: "1450",
   FX: "7100",
 } as const;

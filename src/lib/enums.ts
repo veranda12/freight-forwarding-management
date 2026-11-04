@@ -10,6 +10,10 @@ import type {
   NoteStatus,
   DomesticMode,
   DomesticStatus,
+  CustomsLane,
+  InvoiceSection,
+  TariffBasis,
+  TariffCondition,
 } from "@prisma/client";
 
 type BadgeVariant = "default" | "secondary" | "outline" | "success" | "warning" | "destructive" | "muted";
@@ -204,4 +208,31 @@ export const WEIGHT_RULE_MODE_LABELS: Record<string, string> = {
   UDARA: "Udara",
   DARAT: "Darat",
   LAUT: "Laut",
+};
+
+export const LANE_LABELS: Record<CustomsLane, string> = {
+  GREEN: "Jalur hijau",
+  YELLOW: "Jalur kuning",
+  RED: "Jalur merah",
+};
+
+/** Judul kelompok di cetakan invoice (bahasa Inggris). */
+export const SECTION_LABELS: Record<InvoiceSection, string> = {
+  FREIGHT: "Freight Charges",
+  LOCAL: "Local & Port Charges",
+  DOCUMENTATION: "Documentation, Filing & Service Fees",
+  ADDITIONAL: "Additional Costs",
+};
+export const SECTION_ORDER: InvoiceSection[] = ["FREIGHT", "LOCAL", "DOCUMENTATION", "ADDITIONAL"];
+
+export const BASIS_LABELS: Record<TariffBasis, string> = {
+  PER_CONTAINER: "Per container",
+  PER_BL: "Per B/L",
+  PER_KM_OVER: "Per km di atas batas, per container",
+};
+
+export const CONDITION_LABELS: Record<TariffCondition, string> = {
+  ALWAYS: "Selalu",
+  RED_LANE: "Hanya jalur merah",
+  OPTIONAL: "Jika ada (manual)",
 };

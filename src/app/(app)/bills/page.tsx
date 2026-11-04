@@ -4,6 +4,7 @@ import { can } from "@/lib/rbac";
 import { formatIDR } from "@/lib/format";
 import { latestRate } from "@/lib/fx";
 import { r2 } from "@/lib/accounting-core";
+import { cashAccountOptions } from "@/lib/cash-accounts";
 import { PageHeader } from "@/components/page-header";
 import { StatStrip } from "@/components/stat-strip";
 import { BillsTable, type BillRow } from "./bills-table";
@@ -12,6 +13,7 @@ export const dynamic = "force-dynamic";
 
 export default async function BillsPage() {
   const user = await requireCan("bills", "read");
+  const cash = await cashAccountOptions(prisma, "payment");
   const bills = await prisma.vendorBill.findMany({ orderBy: { date: "desc" }, include: { vendor: { select: { name: true } } } });
   const today = new Date().toISOString().slice(0, 10);
   const rateCache = new Map<string, number | null>();
@@ -44,7 +46,7 @@ export default async function BillsPage() {
         { label: "Outstanding AP", value: formatIDR(outstandingTotal), tone: "warning" },
         { label: "PPh 23 dipotong", value: formatIDR(pphTotal) },
       ]} />
-      <BillsTable data={rows} canPay={can(user.role, "payments", "write")} />
+      <BillsTable data={rows} canPay={can(user.role, "payments", "write")} cashAccounts={cash.options} defaultCashId={cash.defaultId} />
     </div>
   );
 }

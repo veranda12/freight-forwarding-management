@@ -1,7 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
 import { CASH_CATEGORY_LABEL, cashCategoryOf, type CashCategory, r2 } from "./accounting-core";
-
-export const CASH_CODES = ["1100", "1200"] as const;
+import { cashCoaIds } from "./cash-accounts";
 
 export const CASH_SECTIONS: { key: "OPERASI" | "INVESTASI" | "PENDANAAN" | "LAINNYA"; label: string; categories: CashCategory[] }[] = [
   { key: "OPERASI", label: "Aktivitas operasi", categories: ["OPERASI_PELANGGAN", "OPERASI_VENDOR", "OPERASI_BEBAN", "OPERASI_PAJAK", "OPERASI_LAINNYA"] },
@@ -19,7 +18,7 @@ export async function getCashFlow(db: PrismaClient, fromKey: string, toKey: stri
   const from = new Date(`${fromKey}T00:00:00+07:00`);
   const to = new Date(`${toKey}T23:59:59+07:00`);
   const accounts = await db.coaAccount.findMany({ select: { id: true, code: true, type: true } });
-  const cashIds = new Set(accounts.filter((a) => (CASH_CODES as readonly string[]).includes(a.code)).map((a) => a.id));
+  const cashIds = await cashCoaIds(db); // semua kas dan rekening dari master Kas & Rekening
   const byId = new Map(accounts.map((a) => [a.id, a]));
 
   const balance = async (before?: Date, upTo?: Date) => {

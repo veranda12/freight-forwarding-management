@@ -15,6 +15,12 @@ async function login(page: Page, email: string) {
   await page.waitForURL("**/dashboard");
 }
 
+/** Sidebar dilipat per grup: buka grupnya dulu bila tertutup. */
+async function openGroup(page: Page, group: string) {
+  const btn = page.getByRole("button", { name: group, exact: true });
+  if ((await btn.getAttribute("aria-expanded")) === "false") await btn.click();
+}
+
 test.describe("Demo Freight Forwarding Management System", () => {
   // 1) MANAGEMENT — Dashboard terisi angka & grafik
   test("1. Management melihat dashboard (worklist + KPI + grafik)", async ({ page }) => {
@@ -30,7 +36,10 @@ test.describe("Demo Freight Forwarding Management System", () => {
   // 2) RBAC — Sales tidak boleh akses modul keuangan
   test("2. RBAC: Sales tidak melihat & tidak bisa buka Accounting", async ({ page }) => {
     await login(page, "sales@demo.com");
+    await openGroup(page, "Ekspor-Impor");
     await expect(page.getByRole("link", { name: "Quotation" })).toBeVisible();
+    await openGroup(page, "Finance"); // Sales melihat Costing dan Invoice, tetapi tidak Accounting
+    await expect(page.getByRole("link", { name: "Costing" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Accounting" })).toHaveCount(0);
     // akses langsung via URL → dialihkan ke dashboard (bukan error)
     await page.goto("/accounting");
@@ -40,6 +49,7 @@ test.describe("Demo Freight Forwarding Management System", () => {
   // 3) OPERATION — buka Job, telusuri tab, lihat costing, generate PDF
   test("3. Operation: detail Job, costing, dan dokumen PDF", async ({ page }) => {
     await login(page, "ops@demo.com");
+    await openGroup(page, "Ekspor-Impor");
     await page.getByRole("link", { name: "Job / Shipment" }).click();
     await expect(page.getByRole("heading", { name: "Job / Shipment" })).toBeVisible();
 
@@ -60,7 +70,8 @@ test.describe("Demo Freight Forwarding Management System", () => {
   // 4) FINANCE — Accounting: Trial Balance & Neraca BALANCE
   test("4. Finance: Trial Balance & Neraca seimbang", async ({ page }) => {
     await login(page, "finance@demo.com");
-    await page.getByRole("link", { name: "Accounting" }).click();
+    await openGroup(page, "Finance");
+    await page.getByRole("link", { name: "Accounting", exact: true }).click();
     await expect(page.getByRole("tab", { name: "Trial Balance" })).toBeVisible();
     await expect(page.getByText("Balance ✓").first()).toBeVisible();
 
@@ -71,12 +82,18 @@ test.describe("Demo Freight Forwarding Management System", () => {
   // 5) FINANCE — alur uang: buat Invoice dari Job → catat pembayaran → jurnal
   test("5. Finance: buat Invoice dari Job lalu catat pembayaran", async ({ page }) => {
     await login(page, "finance@demo.com");
-    await page.goto("/jobs");
-    await page.locator("table tbody tr").first().click();
-    await page.waitForURL(/\/jobs\/.+/);
-
-    await page.getByRole("tab", { name: /Invoices/ }).click();
+    // Cari job yang masih punya selling charge belum ditagih (satu baris hanya bisa ditagih sekali).
+    let found = false;
+    for (let i = 0; i < 25 && !found; i++) {
+      await page.goto("/jobs");
+      await page.locator("table tbody tr").nth(i).click();
+      await page.waitForURL(/\/jobs\/.+/);
+      await page.getByRole("tab", { name: /Invoices/ }).click();
+      found = (await page.getByRole("button", { name: /Buat Invoice dari Job/ }).count()) > 0;
+    }
+    expect(found, "ada job dengan selling charge yang belum ditagih").toBe(true);
     await page.getByRole("button", { name: /Buat Invoice dari Job/ }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Buat Invoice", exact: true }).click();
     await page.waitForURL(/\/invoices\/.+/);
 
     // invoice baru → catat pembayaran penuh

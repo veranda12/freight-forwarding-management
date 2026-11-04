@@ -22,7 +22,7 @@ export default async function CashFlowPage({ searchParams }: { searchParams: Pro
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Laporan Arus Kas" description="Metode langsung, dari mutasi kas dan bank (akun 1100 dan 1200)">
+      <PageHeader title="Laporan Arus Kas" description="Metode langsung, dari mutasi semua kas dan rekening bank. Transfer antar rekening tidak dihitung">
         <form method="get" className="flex flex-wrap items-end gap-2">
           <label className="text-sm text-muted-foreground">Dari
             <input type="date" name="from" defaultValue={from} className="ml-2 h-9 rounded-md border bg-background px-2 text-sm" />

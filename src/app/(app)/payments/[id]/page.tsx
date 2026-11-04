@@ -22,6 +22,7 @@ export default async function PaymentDetail({ params }: { params: Promise<{ id: 
     include: {
       customer: { select: { name: true, code: true } },
       vendor: { select: { name: true, code: true } },
+      bankAccount: { select: { name: true, accountNo: true, kind: true } },
       allocations: {
         include: {
           invoice: { select: { id: true, number: true } },
@@ -91,6 +92,7 @@ export default async function PaymentDetail({ params }: { params: Promise<{ id: 
             <CardContent className="space-y-2 text-sm">
               <Row label="Tanggal" value={formatDate(pay.date)} muted />
               <Row label="Metode" value={METHOD_LABEL[pay.method] ?? pay.method} muted />
+              <Row label={isReceipt ? "Diterima di" : "Dibayar dari"} value={pay.bankAccount ? `${pay.bankAccount.name}${pay.bankAccount.accountNo ? ` · ${pay.bankAccount.accountNo}` : ""}` : "-"} muted />
               <Row label="Referensi" value={pay.reference ?? "-"} muted />
               <Row label="Currency" value={pay.currency} muted />
               {isFx && <Row label="Kurs" value={formatNumber(Number(pay.exchangeRate), 2)} muted />}

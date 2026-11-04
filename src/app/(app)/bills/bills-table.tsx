@@ -14,7 +14,7 @@ export type BillRow = {
   currency: string; outstanding: number; outstandingForeign: number; bookedRate: number; defaultPaymentRate: number | null;
 };
 
-export function BillsTable({ data, canPay }: { data: BillRow[]; canPay: boolean }) {
+export function BillsTable({ data, canPay, cashAccounts, defaultCashId }: { data: BillRow[]; canPay: boolean; cashAccounts: { id: string; label: string }[]; defaultCashId: string | null; }) {
   const columns: ColumnDef<BillRow>[] = [
     { accessorKey: "number", header: "No. Bill", cell: ({ row }) => <Link href={`/bills/${row.original.id}`} className="font-medium text-primary hover:underline">{row.original.number}</Link> },
     { accessorKey: "vendor", header: "Vendor" },
@@ -36,6 +36,7 @@ export function BillsTable({ data, canPay }: { data: BillRow[]; canPay: boolean 
             billId={b.id} number={b.number} vendor={b.vendor} currency={b.currency}
             outstanding={b.outstanding} outstandingForeign={b.outstandingForeign}
             bookedRate={b.bookedRate} defaultPaymentRate={b.defaultPaymentRate}
+            cashAccounts={cashAccounts} defaultCashId={defaultCashId}
           />
         );
       },

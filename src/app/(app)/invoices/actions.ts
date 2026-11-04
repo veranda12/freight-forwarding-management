@@ -5,15 +5,23 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { assertCan } from "@/lib/auth-helpers";
 import { writeAudit } from "@/lib/audit";
-import { reverseJournal } from "@/lib/journal";
-import { ACC } from "@/lib/coa";
-import { createInvoiceFromJobCore, recordReceiptCore, type InvoiceOpts, type ReceiptInput } from "@/lib/receivables";
+import { prepareInvoiceCharges, type InvoicePrep } from "@/lib/job-charges";
+import { cancelInvoiceCore, createInvoiceFromJobCore, recordReceiptCore, type InvoiceOpts, type ReceiptInput } from "@/lib/receivables";
+import { errorMessage } from "@/lib/action-error";
 
-/** Buat AR Invoice dari selling costing sebuah job (IDR, atau valas dengan kurs tagihan). */
-export async function createInvoiceFromJob(jobId: string, opts: InvoiceOpts = {}): Promise<void> {
+/**
+ * Buat AR Invoice dari selling costing sebuah job (IDR, atau valas dengan kurs tagihan).
+ * `prep` menyesuaikan nilai aktual dan menambah biaya lain sebelum invoice dibuat.
+ */
+export async function createInvoiceFromJob(jobId: string, opts: InvoiceOpts = {}, prep: InvoicePrep = {}): Promise<void> {
   const user = await assertCan("invoices", "write");
   const job = await prisma.job.findUnique({ where: { id: jobId }, select: { number: true } });
   if (!job) throw new Error("Job tidak ditemukan.");
+  if (prep.updates?.length || prep.extras?.length) {
+    await assertCan("costing", "write");
+    await prepareInvoiceCharges(prisma, jobId, prep);
+    await writeAudit({ entity: "Job", entityId: jobId, action: "INVOICE_PREP", summary: `${prep.updates?.length ?? 0} baris disesuaikan, ${prep.extras?.length ?? 0} biaya ditambah`, userId: user.id });
+  }
   const invoiceId = await createInvoiceFromJobCore(prisma, jobId, user.id, opts);
   const cur = opts.currency && opts.currency !== "IDR" ? ` (${opts.currency})` : "";
   await writeAudit({ entity: "Invoice", entityId: invoiceId, action: "CREATE_FROM_JOB", summary: `${job.number}${cur}`, userId: user.id });
@@ -28,7 +36,7 @@ export async function recordReceipt(invoiceId: string, input: ReceiptInput): Pro
   try {
     await recordReceiptCore(prisma, invoiceId, input, user.id);
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Gagal mencatat pembayaran." };
+    return { ok: false, error: errorMessage(e, "Gagal mencatat pembayaran.") };
   }
   const inv = await prisma.invoice.findUnique({ where: { id: invoiceId }, select: { number: true, currency: true } });
   const summary = inv?.currency && inv.currency !== "IDR"
@@ -44,29 +52,12 @@ export async function recordReceipt(invoiceId: string, input: ReceiptInput): Pro
 
 export async function cancelInvoice(invoiceId: string): Promise<{ ok: boolean; error?: string }> {
   const user = await assertCan("invoices", "write");
-  const inv = await prisma.invoice.findUnique({ where: { id: invoiceId } });
-  if (!inv) return { ok: false, error: "Invoice tidak ditemukan." };
-  if (Number(inv.amountPaid) > 0) return { ok: false, error: "Ada pembayaran — tidak bisa dibatalkan." };
-  if (inv.status === "CANCELLED") return { ok: false, error: "Sudah dibatalkan." };
-
-  if (inv.journalEntryId) {
-    // Invoice valas yang sudah direvaluasi: nilai AR di jurnal asal tidak sama dengan total sekarang.
-    const arLine = await prisma.journalLine.findFirst({
-      where: { entryId: inv.journalEntryId, account: { code: ACC.AR } },
-      select: { debit: true },
-    });
-    if (arLine && Math.abs(Number(arLine.debit) - Number(inv.total)) > 0.5) {
-      return { ok: false, error: "Invoice sudah direvaluasi kurs; pembatalan belum didukung. Hubungi admin." };
-    }
+  try {
+    const r = await cancelInvoiceCore(prisma, invoiceId, user.id);
+    await writeAudit({ entity: "Invoice", entityId: invoiceId, action: "CANCEL", summary: `Reversal ${r.number}, ${r.reopened} baris selling dibuka kembali`, userId: user.id });
+  } catch (e) {
+    return { ok: false, error: errorMessage(e, "Gagal membatalkan invoice.") };
   }
-
-  await prisma.$transaction(async (tx) => {
-    if (inv.journalEntryId) await reverseJournal(tx, inv.journalEntryId, { reason: "Invoice dibatalkan", createdById: user.id });
-    await tx.invoice.update({ where: { id: inv.id }, data: { status: "CANCELLED" } });
-    await tx.costingLine.updateMany({ where: { jobId: inv.jobId ?? undefined, side: "SELLING" }, data: { invoiced: false } });
-  });
-
-  await writeAudit({ entity: "Invoice", entityId: invoiceId, action: "CANCEL", summary: `Reversal ${inv.number}`, userId: user.id });
   revalidatePath(`/invoices/${invoiceId}`);
   revalidatePath("/invoices");
   revalidatePath("/accounting");
