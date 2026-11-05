@@ -96,6 +96,14 @@ export function can(role: Role | undefined | null, resource: Resource, action: A
   return entry.write.includes(role);
 }
 
+/**
+ * Convert quotation → job menyentuh dua modul: pemilik quotation (Sales) dan pembuat job (Operation) sama-sama boleh.
+ * Dipakai oleh tombol di halaman quotation DAN oleh server action, supaya syarat keduanya tidak bisa berbeda lagi.
+ */
+export function canConvertQuotation(role: Role | undefined | null): boolean {
+  return can(role, "quotations", "write") || can(role, "jobs", "write");
+}
+
 export function resourcesForRole(role: Role): Resource[] {
   return (Object.keys(MATRIX) as Resource[]).filter((r) => can(role, r, "read"));
 }

@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, Briefcase } from "lucide-react";
 import { requireCan } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
-import { can } from "@/lib/rbac";
+import { can, canConvertQuotation } from "@/lib/rbac";
 import { MODE_LABELS, DIRECTION_LABELS } from "@/lib/enums";
 import { formatMoney, formatIDR, formatDate, formatPercent, formatNumber } from "@/lib/format";
 import { PageHeader } from "@/components/page-header";
@@ -20,6 +20,7 @@ export default async function QuotationDetail({ params }: { params: Promise<{ id
   const { id } = await params;
   const user = await requireCan("quotations", "read");
   const canWrite = can(user.role, "quotations", "write");
+  const canConvert = canConvertQuotation(user.role);
 
   const quo = await prisma.quotation.findUnique({
     where: { id },
@@ -39,7 +40,7 @@ export default async function QuotationDetail({ params }: { params: Promise<{ id
         </Button>
         <PageHeader title={quo.number} description={`${quo.customer.name} · ${MODE_LABELS[quo.mode]} · ${DIRECTION_LABELS[quo.direction]}`}>
           <QuoStatusBadge status={quo.status} />
-          {canWrite && <QuoActions id={quo.id} status={quo.status} hasJob={!!quo.job} />}
+          {(canWrite || canConvert) && <QuoActions id={quo.id} status={quo.status} hasJob={!!quo.job} canWrite={canWrite} canConvert={canConvert} />}
         </PageHeader>
         {quo.job && (
           <Link href={`/jobs/${quo.job.id}`} className="mt-2 inline-flex items-center gap-1.5 text-sm text-primary hover:underline">

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { can, resourcesForRole } from "@/lib/rbac";
+import { can, canConvertQuotation, resourcesForRole } from "@/lib/rbac";
 
 describe("RBAC — can()", () => {
   it("ADMIN boleh segalanya", () => {
@@ -44,5 +44,20 @@ describe("RBAC — can()", () => {
     const sales = resourcesForRole("SALES");
     expect(sales).toContain("quotations");
     expect(sales).not.toContain("accounting");
+  });
+});
+
+describe("RBAC — canConvertQuotation() (D-07)", () => {
+  it("Sales (pemilik quotation), Operation (pembuat job), dan Admin boleh convert", () => {
+    expect(canConvertQuotation("SALES")).toBe(true);
+    expect(canConvertQuotation("OPERATION")).toBe(true);
+    expect(canConvertQuotation("ADMIN")).toBe(true);
+  });
+
+  it("Management, Finance, Documentation, dan tanpa login tidak boleh", () => {
+    expect(canConvertQuotation("MANAGEMENT")).toBe(false);
+    expect(canConvertQuotation("FINANCE")).toBe(false);
+    expect(canConvertQuotation("DOCUMENTATION")).toBe(false);
+    expect(canConvertQuotation(undefined)).toBe(false);
   });
 });
