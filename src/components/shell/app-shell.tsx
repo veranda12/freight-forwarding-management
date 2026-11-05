@@ -144,7 +144,7 @@ export function AppShell({
   );
 
   return (
-    <TabsProvider>
+    <TabsProvider allowed={allowed} owner={user.email}>
     <div className="flex min-h-screen bg-background">
       {/* Sidebar desktop */}
       <aside

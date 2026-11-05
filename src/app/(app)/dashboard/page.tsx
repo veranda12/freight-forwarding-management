@@ -1,7 +1,7 @@
 import {
   Ship, FileWarning, AlertTriangle, ArrowUpCircle, CalendarClock, Truck, PackageOpen,
 } from "lucide-react";
-import { requirePerm, hasPerm } from "@/lib/auth-helpers";
+import { requirePerm, hasPerm, hasAnyPerm } from "@/lib/auth-helpers";
 import { billScope, customerScope, domesticScope, invoiceScope, jobScope, quotationScope } from "@/lib/data-scope";
 import { getDashboardData, getWorklist } from "@/lib/analytics";
 import { formatIDR } from "@/lib/format";
@@ -23,6 +23,8 @@ export default async function DashboardPage() {
 
   // Kartu/panel hanya untuk modul yang boleh dilihat user.
   const seeJobs = hasPerm(user, "jobs.view");
+  // angka uang job (revenue/profit) mengikuti izin yang sama dengan kolom keuangan di daftar job dan halaman Costing
+  const seeMoney = seeJobs && hasAnyPerm(user, ["jobs.viewFinancials", "costing.view"]);
   const seeDocs = hasPerm(user, "documents.view");
   const seeInvoices = hasPerm(user, "invoices.view");
   const seeBills = hasPerm(user, "bills.view");
@@ -31,8 +33,8 @@ export default async function DashboardPage() {
   const kpis: { label: string; value: string; tone?: string; show: boolean }[] = [
     { label: "Shipment aktif", value: String(d.kpis.activeJobs), show: seeJobs },
     { label: "Shipment bln ini", value: String(d.kpis.monthJobs), show: seeJobs },
-    { label: "Revenue bln ini", value: formatIDR(d.kpis.monthRevenue), show: seeJobs },
-    { label: "Gross profit bln ini", value: formatIDR(d.kpis.monthProfit), show: seeJobs },
+    { label: "Revenue bln ini", value: formatIDR(d.kpis.monthRevenue), show: seeMoney },
+    { label: "Gross profit bln ini", value: formatIDR(d.kpis.monthProfit), show: seeMoney },
     { label: "Invoice bln ini", value: formatIDR(d.kpis.monthInvoiced), show: seeInvoices },
     { label: "AR overdue", value: formatIDR(d.kpis.overdueAmount), tone: "text-destructive", show: seeInvoices },
     { label: "Customer", value: String(d.kpis.totalCustomers), show: hasPerm(user, "customers.view") },
@@ -94,14 +96,14 @@ export default async function DashboardPage() {
             <CardHeader className="py-3"><CardTitle className="text-sm">Distribusi Mode</CardTitle><CardDescription>12 bulan terakhir</CardDescription></CardHeader>
             <CardContent><ModePieChart data={d.modePie} /></CardContent>
           </Card>
-          <Card className="lg:col-span-2">
+          {seeMoney && <Card className="lg:col-span-2">
             <CardHeader className="py-3"><CardTitle className="text-sm">Revenue vs Cost vs Profit</CardTitle><CardDescription>Per bulan (IDR)</CardDescription></CardHeader>
             <CardContent><RevenueCostChart data={d.revCostSeries} /></CardContent>
-          </Card>
-          <Card>
+          </Card>}
+          {seeMoney && <Card>
             <CardHeader className="py-3"><CardTitle className="text-sm">Top 10 Customer</CardTitle><CardDescription>Berdasarkan revenue</CardDescription></CardHeader>
             <CardContent><TopCustomerChart data={d.topCustomers} /></CardContent>
-          </Card>
+          </Card>}
         </div>
       </div>}
     </div>

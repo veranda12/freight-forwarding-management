@@ -94,12 +94,12 @@ export function RoleEditor({ groups, mode, roleId, initial, readOnly }: Props) {
             <Label htmlFor="r-desc">Deskripsi</Label>
             <Textarea id="r-desc" value={description} onChange={(e) => setDescription(e.target.value)} rows={2} maxLength={500} disabled={readOnly} />
           </div>
-          <p className="text-xs text-muted-foreground sm:col-span-2">
+          <div className="text-xs text-muted-foreground sm:col-span-2">
             <Badge variant="outline">Menu</Badge> boleh membuka menu · <Badge>Tombol</Badge> boleh menjalankan aksi ·{" "}
             <Badge variant="warning">Persetujuan</Badge> kirim/terima/batal/posting · <Badge variant="destructive">Dokumen sendiri</Badge> boleh memproses
             dokumen yang ia buat/ajukan sendiri (maker-checker) · <Badge variant="success">Semua data</Badge> tanpa ini user hanya melihat data miliknya
             (Sales PIC atau pembuat).
-          </p>
+          </div>
         </CardContent>
       </Card>
 

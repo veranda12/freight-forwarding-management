@@ -60,7 +60,7 @@ export default async function CustomerDetail({ params }: { params: Promise<{ id:
           <CardContent className="space-y-3 text-sm">
             {c.contacts.map((ct) => (
               <div key={ct.id} className="rounded-md border p-3">
-                <p className="font-medium">{ct.name} {ct.isPrimary && <Badge variant="outline" className="ml-1">Primary</Badge>}</p>
+                <div className="font-medium">{ct.name} {ct.isPrimary && <Badge variant="outline" className="ml-1">Primary</Badge>}</div>
                 <p className="text-muted-foreground">{ct.position}</p>
                 <p className="text-muted-foreground">{ct.phone} · {ct.email}</p>
               </div>
