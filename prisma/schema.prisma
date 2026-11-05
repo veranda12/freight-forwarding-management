@@ -6,7 +6,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "mysql"
   url      = env("DATABASE_URL")
 }
 
@@ -246,7 +246,7 @@ model User {
   role          Role      @default(OPERATION)
   phone         String?
   isActive      Boolean   @default(true)
-  image         String?
+  image         String?   @db.Text
   emailVerified DateTime?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
@@ -267,12 +267,12 @@ model Account {
   type              String
   provider          String
   providerAccountId String
-  refresh_token     String?
-  access_token      String?
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
   expires_at        Int?
   token_type        String?
   scope             String?
-  id_token          String?
+  id_token          String? @db.Text
   session_state     String?
   user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -300,23 +300,23 @@ model VerificationToken {
 // ============================================================
 
 model CompanySetting {
-  id          String   @id @default(cuid())
-  name        String
-  legalName   String?
-  npwp        String?
-  address     String?
-  city        String?
-  phone       String?
-  email       String?
-  website     String?
-  logoPath    String?
-  bankName    String?
-  bankAccount String?
-  bankHolder  String?
-  bankBranch  String?
+  id             String   @id @default(cuid())
+  name           String
+  legalName      String?
+  npwp           String?
+  address        String?  @db.Text
+  city           String?
+  phone          String?
+  email          String?
+  website        String?
+  logoPath       String?  @db.Text
+  bankName       String?
+  bankAccount    String?
+  bankHolder     String?
+  bankBranch     String?
   signatoryName  String?
   signatoryTitle String?
-  updatedAt   DateTime @updatedAt
+  updatedAt      DateTime @updatedAt
 }
 
 model Sequence {
@@ -334,7 +334,7 @@ model AuditLog {
   entity    String
   entityId  String
   action    String
-  summary   String?
+  summary   String?  @db.Text
   changes   Json?
   userId    String?
   user      User?    @relation(fields: [userId], references: [id])
@@ -353,7 +353,7 @@ model Customer {
   code          String   @unique
   name          String
   npwp          String?
-  address       String?
+  address       String?  @db.Text
   city          String?
   country       String   @default("Indonesia")
   phone         String?
@@ -398,7 +398,7 @@ model Vendor {
   name           String
   type           VendorType
   npwp           String?
-  address        String?
+  address        String?         @db.Text
   city           String?
   country        String          @default("Indonesia")
   phone          String?
@@ -427,7 +427,7 @@ model OverseasAgent {
   name      String
   country   String
   city      String
-  address   String?
+  address   String?  @db.Text
   email     String?
   phone     String?
   isActive  Boolean  @default(true)
@@ -482,22 +482,22 @@ model ExchangeRate {
 }
 
 model ChargeCode {
-  id               String      @id @default(cuid())
-  code             String      @unique
+  id               String          @id @default(cuid())
+  code             String          @unique
   name             String
-  description      String?
-  defaultTaxable   Boolean     @default(true) // PPN applies
-  isPph23          Boolean     @default(false) // service subject to PPh23 on AP
-  isPph26          Boolean     @default(false) // PPh 26 atas pembayaran ke vendor luar negeri
-  pph26Rate        Decimal     @default(20) @db.Decimal(5, 2) // tarif PPh 26 (%)
+  description      String?         @db.Text
+  defaultTaxable   Boolean         @default(true) // PPN applies
+  isPph23          Boolean         @default(false) // service subject to PPh23 on AP
+  isPph26          Boolean         @default(false) // PPh 26 atas pembayaran ke vendor luar negeri
+  pph26Rate        Decimal         @default(20) @db.Decimal(5, 2) // tarif PPh 26 (%)
   revenueAccountId String?
-  revenueAccount   CoaAccount? @relation("ChargeRevenue", fields: [revenueAccountId], references: [id])
+  revenueAccount   CoaAccount?     @relation("ChargeRevenue", fields: [revenueAccountId], references: [id])
   expenseAccountId String?
-  expenseAccount   CoaAccount? @relation("ChargeExpense", fields: [expenseAccountId], references: [id])
-  isActive         Boolean     @default(true)
+  expenseAccount   CoaAccount?     @relation("ChargeExpense", fields: [expenseAccountId], references: [id])
+  isActive         Boolean         @default(true)
   invoiceSection   InvoiceSection?
   /// Biaya aktual yang ditagih ulang sesuai kuitansi (as receipt), dicetak berarsir.
-  asReceipt        Boolean     @default(false)
+  asReceipt        Boolean         @default(false)
   rateCardItems    RateCardItem[]
 
   rates          Rate[]
@@ -568,7 +568,7 @@ model JournalEntry {
   id           String        @id @default(cuid())
   number       String        @unique
   date         DateTime
-  description  String
+  description  String        @db.Text
   source       JournalSource @default(MANUAL)
   sourceId     String?
   isPosted     Boolean       @default(true)
@@ -588,17 +588,17 @@ model JournalEntry {
 }
 
 model JournalLine {
-  id           String       @id @default(cuid())
-  entryId      String
-  entry        JournalEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
-  accountId    String
-  account      CoaAccount   @relation(fields: [accountId], references: [id])
-  description  String?
-  debit        Decimal      @default(0) @db.Decimal(18, 2)
-  credit       Decimal      @default(0) @db.Decimal(18, 2)
+  id            String       @id @default(cuid())
+  entryId       String
+  entry         JournalEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  accountId     String
+  account       CoaAccount   @relation(fields: [accountId], references: [id])
+  description   String?      @db.Text
+  debit         Decimal      @default(0) @db.Decimal(18, 2)
+  credit        Decimal      @default(0) @db.Decimal(18, 2)
   /// Nilai dalam mata uang rekening valas (selalu positif, sisinya mengikuti debit/kredit). Kosong untuk akun IDR.
-  amountForeign Decimal?    @db.Decimal(18, 2)
-  reconciledAt DateTime?
+  amountForeign Decimal?     @db.Decimal(18, 2)
+  reconciledAt  DateTime?
 
   statementLine BankStatementLine?
 
@@ -652,7 +652,7 @@ model Quotation {
   exchangeRate  Decimal         @default(1) @db.Decimal(18, 6)
   validUntil    DateTime
   status        QuotationStatus @default(DRAFT)
-  notes         String?
+  notes         String?         @db.Text
   // denormalized totals (IDR)
   totalSelling  Decimal         @default(0) @db.Decimal(18, 2)
   totalBuying   Decimal         @default(0) @db.Decimal(18, 2)
@@ -683,7 +683,7 @@ model QuotationLine {
   quotation    Quotation  @relation(fields: [quotationId], references: [id], onDelete: Cascade)
   chargeCodeId String
   chargeCode   ChargeCode @relation(fields: [chargeCodeId], references: [id])
-  description  String?
+  description  String?    @db.Text
   currency     String     @default("USD")
   exchangeRate Decimal    @default(1) @db.Decimal(18, 6)
   qty          Decimal    @default(1) @db.Decimal(18, 2)
@@ -713,11 +713,11 @@ model Job {
 
   // parties (snapshot text + optional refs)
   shipperName      String?
-  shipperAddress   String?
+  shipperAddress   String? @db.Text
   consigneeName    String?
-  consigneeAddress String?
+  consigneeAddress String? @db.Text
   notifyName       String?
-  notifyAddress    String?
+  notifyAddress    String? @db.Text
 
   // routing
   polId           String?
@@ -732,7 +732,7 @@ model Job {
   incoterm         String?
   commodityId      String?
   commodity        Commodity? @relation(fields: [commodityId], references: [id])
-  goodsDescription String?
+  goodsDescription String?    @db.Text
 
   // transport details
   vesselName String?
@@ -760,7 +760,7 @@ model Job {
   customsLane     CustomsLane?
   warehouseId     String?
   warehouse       Warehouse?   @relation(fields: [warehouseId], references: [id])
-  deliveryAddress String?
+  deliveryAddress String?      @db.Text
   distanceKm      Decimal?     @db.Decimal(8, 1)
 
   // profitability (denormalized IDR)
@@ -801,7 +801,7 @@ model JobContainer {
   /// Tujuan per container (1 B/L bisa ke beberapa penerima). Kosong = ikut tujuan job.
   warehouseId     String?
   warehouse       Warehouse?     @relation(fields: [warehouseId], references: [id])
-  deliveryAddress String?
+  deliveryAddress String?        @db.Text
   distanceKm      Decimal?       @db.Decimal(8, 1)
 }
 
@@ -815,7 +815,7 @@ model Milestone {
   plannedAt DateTime?
   actualAt  DateTime?
   isDone    Boolean   @default(false)
-  note      String?
+  note      String?   @db.Text
   userId    String?
   user      User?     @relation(fields: [userId], references: [id])
   sortOrder Int       @default(0)
@@ -831,7 +831,7 @@ model JobDocument {
   kind       DocumentKind @default(OTHER)
   title      String
   fileName   String
-  filePath   String
+  filePath   String       @db.Text
   fileSize   Int          @default(0)
   mimeType   String?
   uploadedBy String?
@@ -853,7 +853,7 @@ model Booking {
   siCutoff         DateTime?
   vgmCutoff        DateTime?
   confirmedAt      DateTime?
-  note             String?
+  note             String?       @db.Text
   createdAt        DateTime      @default(now())
 }
 
@@ -862,36 +862,36 @@ model Booking {
 // ============================================================
 
 model CostingLine {
-  vehicleId     String?
-  vehicle       Vehicle?   @relation(fields: [vehicleId], references: [id])
-  id            String     @id @default(cuid())
-  jobId         String
-  job           Job        @relation(fields: [jobId], references: [id], onDelete: Cascade)
-  side          ChargeSide
-  chargeCodeId  String
-  chargeCode    ChargeCode @relation(fields: [chargeCodeId], references: [id])
-  description   String?
-  vendorId      String?
-  vendor        Vendor?    @relation(fields: [vendorId], references: [id])
-  currency      String     @default("IDR")
-  exchangeRate  Decimal    @default(1) @db.Decimal(18, 6)
-  qty           Decimal    @default(1) @db.Decimal(18, 2)
-  unitPrice     Decimal    @default(0) @db.Decimal(18, 2) // foreign per unit
-  amountForeign Decimal    @default(0) @db.Decimal(18, 2)
-  estimatedIdr  Decimal    @default(0) @db.Decimal(18, 2)
-  actualIdr     Decimal    @default(0) @db.Decimal(18, 2)
-  taxable       Boolean    @default(true)
-  asReceipt     Boolean    @default(false)
+  vehicleId         String?
+  vehicle           Vehicle?   @relation(fields: [vehicleId], references: [id])
+  id                String     @id @default(cuid())
+  jobId             String
+  job               Job        @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  side              ChargeSide
+  chargeCodeId      String
+  chargeCode        ChargeCode @relation(fields: [chargeCodeId], references: [id])
+  description       String?    @db.Text
+  vendorId          String?
+  vendor            Vendor?    @relation(fields: [vendorId], references: [id])
+  currency          String     @default("IDR")
+  exchangeRate      Decimal    @default(1) @db.Decimal(18, 6)
+  qty               Decimal    @default(1) @db.Decimal(18, 2)
+  unitPrice         Decimal    @default(0) @db.Decimal(18, 2) // foreign per unit
+  amountForeign     Decimal    @default(0) @db.Decimal(18, 2)
+  estimatedIdr      Decimal    @default(0) @db.Decimal(18, 2)
+  actualIdr         Decimal    @default(0) @db.Decimal(18, 2)
+  taxable           Boolean    @default(true)
+  asReceipt         Boolean    @default(false)
   /// Satuan untuk cetakan, misalnya 40HC, B/L, km.
-  unitLabel     String?
+  unitLabel         String?
   /// Dibuat dari rate card; dihitung ulang selama belum ditagih.
-  fromRateCard  Boolean    @default(false)
-  invoiced      Boolean    @default(false)
+  fromRateCard      Boolean    @default(false)
+  invoiced          Boolean    @default(false)
   /// Invoice yang menagih baris selling ini. Pembatalan invoice hanya membuka kembali baris miliknya.
-  invoiceId     String?
-  invoice       Invoice?   @relation("InvoiceCostings", fields: [invoiceId], references: [id], onDelete: SetNull)
-  billed        Boolean    @default(false)
-  sortOrder     Int        @default(0)
+  invoiceId         String?
+  invoice           Invoice?   @relation("InvoiceCostings", fields: [invoiceId], references: [id], onDelete: SetNull)
+  billed            Boolean    @default(false)
+  sortOrder         Int        @default(0)
   recordedAt        DateTime?
   recordedJournalId String?
 
@@ -924,15 +924,15 @@ model Invoice {
   amountForeign      Decimal           @default(0) @db.Decimal(18, 2)
   amountPaidForeign  Decimal           @default(0) @db.Decimal(18, 2)
   status             InvoiceStatus     @default(UNPAID)
-  notes              String?
+  notes              String?           @db.Text
   journalEntryId     String?
   postedAt           DateTime?
   createdAt          DateTime          @default(now())
   updatedAt          DateTime          @updatedAt
 
-  lines       InvoiceLine[]
-  allocations PaymentAllocation[]
-  costingLines CostingLine[] @relation("InvoiceCostings")
+  lines        InvoiceLine[]
+  allocations  PaymentAllocation[]
+  costingLines CostingLine[]       @relation("InvoiceCostings")
 
   @@index([status])
   @@index([customerId])
@@ -940,21 +940,21 @@ model Invoice {
 }
 
 model InvoiceLine {
-  id           String     @id @default(cuid())
+  id           String          @id @default(cuid())
   invoiceId    String
-  invoice      Invoice    @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  invoice      Invoice         @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   chargeCodeId String
-  chargeCode   ChargeCode @relation(fields: [chargeCodeId], references: [id])
-  description  String?
-  qty          Decimal    @default(1) @db.Decimal(18, 2)
-  unitPrice    Decimal    @default(0) @db.Decimal(18, 2) // IDR
-  amount       Decimal    @default(0) @db.Decimal(18, 2) // IDR
-  taxable      Boolean    @default(true)
+  chargeCode   ChargeCode      @relation(fields: [chargeCodeId], references: [id])
+  description  String?         @db.Text
+  qty          Decimal         @default(1) @db.Decimal(18, 2)
+  unitPrice    Decimal         @default(0) @db.Decimal(18, 2) // IDR
+  amount       Decimal         @default(0) @db.Decimal(18, 2) // IDR
+  taxable      Boolean         @default(true)
   section      InvoiceSection?
-  asReceipt    Boolean    @default(false)
+  asReceipt    Boolean         @default(false)
   unitLabel    String?
-  note         String?
-  sortOrder    Int        @default(0)
+  note         String?         @db.Text
+  sortOrder    Int             @default(0)
 }
 
 model VendorBill {
@@ -980,7 +980,7 @@ model VendorBill {
   amountPaidForeign Decimal    @default(0) @db.Decimal(18, 2)
   ppnAmount         Decimal    @default(0) @db.Decimal(18, 2)
   status            BillStatus @default(UNPAID)
-  notes             String?
+  notes             String?    @db.Text
   journalEntryId    String?
   postedAt          DateTime?
   createdAt         DateTime   @default(now())
@@ -1000,7 +1000,7 @@ model BillLine {
   bill         VendorBill @relation(fields: [billId], references: [id], onDelete: Cascade)
   chargeCodeId String
   chargeCode   ChargeCode @relation(fields: [chargeCodeId], references: [id])
-  description  String?
+  description  String?    @db.Text
   qty          Decimal    @default(1) @db.Decimal(18, 2)
   unitPrice    Decimal    @default(0) @db.Decimal(18, 2)
   amount       Decimal    @default(0) @db.Decimal(18, 2)
@@ -1018,7 +1018,7 @@ model Note {
   exchangeRate   Decimal        @default(1) @db.Decimal(18, 6)
   amountForeign  Decimal        @default(0) @db.Decimal(18, 2)
   amountIdr      Decimal        @default(0) @db.Decimal(18, 2)
-  description    String?
+  description    String?        @db.Text
   status         NoteStatus     @default(ISSUED)
   journalEntryId String?
   createdAt      DateTime       @default(now())
@@ -1038,12 +1038,12 @@ model Payment {
   currency       String           @default("IDR")
   exchangeRate   Decimal          @default(1) @db.Decimal(18, 6)
   amount         Decimal          @default(0) @db.Decimal(18, 2) // IDR total
-  notes          String?
+  notes          String?          @db.Text
   journalEntryId String?
   createdAt      DateTime         @default(now())
 
-  bankAccountId  String?
-  bankAccount    BankAccount?     @relation(fields: [bankAccountId], references: [id])
+  bankAccountId String?
+  bankAccount   BankAccount? @relation(fields: [bankAccountId], references: [id])
 
   allocations PaymentAllocation[]
 
@@ -1078,7 +1078,7 @@ model WeightRule {
   roundingKg          Decimal   @default(1) @db.Decimal(18, 2) // pembulatan ke atas kelipatan ini
   roundingToleranceKg Decimal   @default(0) @db.Decimal(18, 2) // sisa ≤ toleransi dibulatkan ke bawah (mis. 0,3 kg)
   minVolumeCbm        Decimal   @default(0) @db.Decimal(18, 4) // volume minimum yang ditagih (CBM)
-  note                String?
+  note                String?   @db.Text
   updatedAt           DateTime  @updatedAt
 
   @@unique([scope, mode])
@@ -1098,7 +1098,7 @@ model DomesticTariff {
   leadTimeMin Int // hari
   leadTimeMax Int
   isActive    Boolean      @default(true)
-  note        String?
+  note        String?      @db.Text
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
 
@@ -1120,11 +1120,11 @@ model DomesticShipment {
 
   shipperName      String
   shipperPhone     String?
-  shipperAddress   String?
+  shipperAddress   String? @db.Text
   consigneeName    String
   consigneePhone   String?
-  consigneeAddress String?
-  goodsDescription String?
+  consigneeAddress String? @db.Text
+  goodsDescription String? @db.Text
   declaredValue    Decimal @default(0) @db.Decimal(18, 2)
 
   // snapshot perhitungan saat STT dibuat
@@ -1156,8 +1156,8 @@ model DomesticShipment {
   etaDate     DateTime?
   deliveredAt DateTime?
   receivedBy  String? // bukti terima (POD)
-  podNote     String?
-  notes       String?
+  podNote     String?   @db.Text
+  notes       String?   @db.Text
   createdById String?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
@@ -1180,7 +1180,7 @@ model DomesticPackage {
   widthCm     Decimal          @db.Decimal(10, 2)
   heightCm    Decimal          @db.Decimal(10, 2)
   weightKg    Decimal          @db.Decimal(18, 2) // berat aktual per koli
-  description String?
+  description String?          @db.Text
   sortOrder   Int              @default(0)
 }
 
@@ -1190,7 +1190,7 @@ model DomesticEvent {
   shipment   DomesticShipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
   status     DomesticStatus
   location   String?
-  note       String?
+  note       String?          @db.Text
   at         DateTime         @default(now())
   userId     String?
 
@@ -1224,7 +1224,7 @@ model BankAccount {
   isDefaultReceipt Boolean         @default(false)
   isDefaultPayment Boolean         @default(false)
   isActive         Boolean         @default(true)
-  notes            String?
+  notes            String?         @db.Text
   createdAt        DateTime        @default(now())
 
   payments       Payment[]
@@ -1239,7 +1239,7 @@ model BankStatementLine {
   bankAccount   BankAccount  @relation(fields: [bankAccountId], references: [id])
   batchId       String
   date          DateTime
-  description   String
+  description   String       @db.Text
   reference     String?
   amount        Decimal      @db.Decimal(18, 2) // + uang masuk, - uang keluar (mata uang rekening)
   balance       Decimal?     @db.Decimal(18, 2) // saldo setelah mutasi, jika ada di file
@@ -1267,7 +1267,7 @@ model TaxRemittance {
   journalEntryId  String?
   cancelJournalId String?
   cancelledAt     DateTime?
-  cancelReason    String?
+  cancelReason    String?        @db.Text
   createdById     String?
   createdAt       DateTime       @default(now())
 
@@ -1354,7 +1354,7 @@ model Vehicle {
   capacityKg  Decimal? @db.Decimal(18, 2)
   capacityCbm Decimal? @db.Decimal(18, 3)
   driverName  String?
-  notes       String?
+  notes       String?  @db.Text
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
 
@@ -1368,7 +1368,7 @@ model Warehouse {
   customerId String
   customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
   name       String
-  address    String
+  address    String   @db.Text
   city       String?
   distanceKm Decimal? @db.Decimal(8, 1)
   isActive   Boolean  @default(true)
@@ -1394,7 +1394,7 @@ model RateCardItem {
   /// PER_KM_OVER: jarak yang sudah termasuk tarif dasar.
   thresholdKm     Int?
   taxable         Boolean         @default(false)
-  note            String?
+  note            String?         @db.Text
   sortOrder       Int             @default(0)
   isActive        Boolean         @default(true)
   createdAt       DateTime        @default(now())

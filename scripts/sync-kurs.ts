@@ -5,9 +5,10 @@
  * dari folder proyek.
  */
 import { PrismaClient } from "@prisma/client";
+import { PRISMA_CLIENT_OPTIONS } from "../src/lib/prisma-options";
 import { syncKurs } from "../src/lib/kurs-sync";
 
-const db = new PrismaClient();
+const db = new PrismaClient(PRISMA_CLIENT_OPTIONS);
 
 syncKurs(db)
   .then((r) => {

@@ -7,6 +7,7 @@
  *   npx tsx prisma/seed-clearance.ts [--demo]   (juga dipanggil di akhir prisma/seed.ts)
  */
 import { Prisma, PrismaClient, type InvoiceSection, type TariffBasis, type TariffCondition } from "@prisma/client";
+import { PRISMA_CLIENT_OPTIONS } from "../src/lib/prisma-options";
 import { applyRateCard } from "../src/lib/rate-card";
 import { prepareInvoiceCharges } from "../src/lib/job-charges";
 import { createInvoiceFromJobCore } from "../src/lib/receivables";
@@ -179,7 +180,7 @@ async function seedDemoShipment(prisma: PrismaClient, spec: DemoSpec): Promise<v
 
 // Jalan langsung: npx tsx prisma/seed-clearance.ts [--demo]
 if (require.main === module) {
-  const prisma = new PrismaClient();
+  const prisma = new PrismaClient(PRISMA_CLIENT_OPTIONS);
   seedClearance(prisma, { demo: process.argv.includes("--demo") })
     .then(() => console.log("✅ Rate card clearance siap."))
     .catch((e) => { console.error(e); process.exit(1); })

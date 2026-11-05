@@ -7,6 +7,7 @@
  * tarif domestik per kota, dan ±36 STT demo. Tidak mengubah data Ekspor-Impor.
  */
 import { PrismaClient, Prisma, type DomesticMode, type DomesticStatus } from "@prisma/client";
+import { PRISMA_CLIENT_OPTIONS } from "../src/lib/prisma-options";
 import { DEFAULT_WEIGHT_RULES, quoteDomestic } from "../src/lib/chargeable";
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -268,7 +269,7 @@ export async function seedDomestic(prisma: PrismaClient) {
 }
 
 if (require.main === module) {
-  const prisma = new PrismaClient();
+  const prisma = new PrismaClient(PRISMA_CLIENT_OPTIONS);
   seedDomestic(prisma)
     .then(() => console.log("✅ Seed domestik selesai."))
     .catch((e) => { console.error(e); process.exit(1); })

@@ -7,6 +7,7 @@
  * 6310 sampai 6390: beban operasional yang dipisah dari 6300 Administrasi & Umum
  */
 import { PrismaClient, type AccountType, type NormalBalance } from "@prisma/client";
+import { PRISMA_CLIENT_OPTIONS } from "../src/lib/prisma-options";
 
 const DEFS: { code: string; name: string; type: AccountType; normalBalance: NormalBalance; parent?: string }[] = [
   { code: "1400", name: "PPN Masukan", type: "ASSET", normalBalance: "DEBIT" },
@@ -33,7 +34,7 @@ export async function seedAccountingExt(prisma: PrismaClient): Promise<void> {
 
 // Jalan langsung: npx tsx prisma/seed-accounting-ext.ts
 if (require.main === module) {
-  const prisma = new PrismaClient();
+  const prisma = new PrismaClient(PRISMA_CLIENT_OPTIONS);
   seedAccountingExt(prisma)
     .then(() => console.log("✅ Akun COA accounting tambahan siap."))
     .catch((e) => { console.error(e); process.exit(1); })

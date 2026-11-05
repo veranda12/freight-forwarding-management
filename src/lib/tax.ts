@@ -3,6 +3,7 @@ import { accountMap, ACC } from "./coa";
 import { jktKey, PPN_RATE, r2 } from "./accounting-core";
 import { postJournal, reverseJournal, type JournalLineInput } from "./journal";
 import { resolveCashAccount, assertCashCurrency } from "./cash-accounts";
+import { nextCounter } from "./sequence";
 import { isPeriod, periodLabel, periodRange, remainingForPeriod, masaStatus, TAX_LABEL, type MasaTotals, type TaxKindKey } from "./tax-period";
 
 /** Rekap pajak per rentang tanggal: PPN keluaran (invoice), PPN masukan dan PPh 23 (vendor bill). */
@@ -85,16 +86,18 @@ const EMPTY: MasaTotals = { ppnOut: 0, ppnIn: 0, pph23: 0, pph26: 0 };
  * tidak terpengaruh tanggal setoran.
  */
 export async function masaTotals(db: Db, periods?: string[]): Promise<Map<string, MasaTotals>> {
+  // Tanggal disimpan UTC; Asia/Jakarta tetap +07:00 (tanpa DST), jadi CONVERT_TZ memakai offset dan tidak butuh
+  // tabel zona waktu MariaDB (yang di hosting bersama sering kosong).
   const rows = await db.$queryRaw<{ code: string; period: string; d: Prisma.Decimal; c: Prisma.Decimal }[]>`
-    SELECT a."code" AS code,
-           to_char((e."date" AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Jakarta', 'YYYY-MM') AS period,
-           SUM(l."debit") AS d, SUM(l."credit") AS c
-    FROM "JournalLine" l
-    JOIN "JournalEntry" e ON e."id" = l."entryId"
-    JOIN "CoaAccount" a ON a."id" = l."accountId"
-    WHERE a."code" IN (${ACC.PPN_OUT}, ${ACC.PPN_IN}, ${ACC.PPH23}, ${ACC.PPH26})
-      AND e."source"::text NOT IN ('TAX_REMIT', 'CLOSING')
-    GROUP BY a."code", period`;
+    SELECT a.\`code\` AS code,
+           DATE_FORMAT(CONVERT_TZ(e.\`date\`, '+00:00', '+07:00'), '%Y-%m') AS \`period\`,
+           SUM(l.\`debit\`) AS d, SUM(l.\`credit\`) AS c
+    FROM \`JournalLine\` l
+    JOIN \`JournalEntry\` e ON e.\`id\` = l.\`entryId\`
+    JOIN \`CoaAccount\` a ON a.\`id\` = l.\`accountId\`
+    WHERE a.\`code\` IN (${ACC.PPN_OUT}, ${ACC.PPN_IN}, ${ACC.PPH23}, ${ACC.PPH26})
+      AND e.\`source\` NOT IN ('TAX_REMIT', 'CLOSING')
+    GROUP BY a.\`code\`, \`period\``;
   const map = new Map<string, MasaTotals>();
   for (const r of rows) {
     if (periods && !periods.includes(r.period)) continue;
@@ -158,8 +161,10 @@ export async function remitTaxPeriod(
   const label = TAX_LABEL[kind];
 
   return db.$transaction(async (tx) => {
-    // Kunci per jenis pajak dan masa, supaya dua setoran bersamaan tidak sama-sama lolos.
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`tax:${kind}:${period}`}))`;
+    // Kunci per jenis pajak dan masa, supaya dua setoran bersamaan tidak sama-sama lolos: baris Sequence
+    // (LOCK:TAX:<jenis>, tahun, bulan masa) terkunci sampai commit. Transaksi kedua menunggu di sini, lalu
+    // (READ COMMITTED, lihat lib/prisma-options.ts) membaca setoran yang baru di-commit dan ditolak.
+    await nextCounter(tx, `LOCK:TAX:${kind}`, start);
     const t = (await masaTotals(tx, [period])).get(period) ?? EMPTY;
     const r = remainingForPeriod(kind, t, await postedRemits(tx, kind, period));
     if (r.out <= 0.5 && r.inn <= 0.5) throw new Error(`${label} masa ${periodLabel(period)} sudah disetor seluruhnya. Tidak ada sisa yang perlu disetor.`);

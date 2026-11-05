@@ -11,7 +11,8 @@ export async function GET(req: NextRequest) {
   const q = req.nextUrl.searchParams.get("q")?.trim() ?? "";
   if (q.length < 2) return NextResponse.json([]);
 
-  const like = { contains: q, mode: "insensitive" as const };
+  // Tanpa `mode: "insensitive"`: collation MariaDB (utf8mb4_unicode_ci) sudah tidak membedakan huruf besar/kecil.
+  const like = { contains: q };
   const canDomestic = can((session.user as { role?: Role }).role, "domestic", "read");
 
   const [jobs, customers, containers, stts] = await Promise.all([

@@ -18,9 +18,11 @@ async function buildWhere(db: PrismaClient, f: JournalFilter): Promise<Prisma.Jo
   if (f.q) {
     and.push({
       OR: [
-        { number: { contains: f.q, mode: "insensitive" } },
-        { description: { contains: f.q, mode: "insensitive" } },
-        { lines: { some: { description: { contains: f.q, mode: "insensitive" } } } },
+        // Collation MariaDB utf8mb4_unicode_ci tidak membedakan huruf besar/kecil, jadi `mode: "insensitive"` tidak perlu
+        // (dan memang tidak didukung Prisma untuk MySQL/MariaDB).
+        { number: { contains: f.q } },
+        { description: { contains: f.q } },
+        { lines: { some: { description: { contains: f.q } } } },
       ],
     });
   }
@@ -33,8 +35,8 @@ async function buildWhere(db: PrismaClient, f: JournalFilter): Promise<Prisma.Jo
   if (f.min !== undefined || f.max !== undefined) {
     // Nilai jurnal = total debit. Disaring di SQL karena Prisma tidak bisa memfilter hasil agregat.
     const rows = await db.$queryRaw<{ entryId: string }[]>`
-      SELECT "entryId" FROM "JournalLine" GROUP BY "entryId"
-      HAVING SUM("debit") >= CAST(${f.min ?? 0} AS numeric) AND SUM("debit") <= CAST(${f.max ?? 1e15} AS numeric)`;
+      SELECT \`entryId\` FROM \`JournalLine\` GROUP BY \`entryId\`
+      HAVING SUM(\`debit\`) >= CAST(${f.min ?? 0} AS DECIMAL(24,6)) AND SUM(\`debit\`) <= CAST(${f.max ?? 1e15} AS DECIMAL(24,6))`;
     and.push({ id: { in: rows.map((r) => r.entryId) } });
   }
   return and.length ? { AND: and } : {};

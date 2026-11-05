@@ -1,4 +1,5 @@
 import { PrismaClient, Prisma } from "@prisma/client";
+import { PRISMA_CLIENT_OPTIONS } from "../src/lib/prisma-options";
 import { faker } from "@faker-js/faker/locale/id_ID";
 import bcrypt from "bcryptjs";
 import {
@@ -9,7 +10,7 @@ import { seedDomestic } from "./seed-domestic";
 import { seedAccountingExt } from "./seed-accounting-ext";
 import { seedClearance } from "./seed-clearance";
 
-const prisma = new PrismaClient();
+const prisma = new PrismaClient(PRISMA_CLIENT_OPTIONS);
 
 // ============================================================
 // Numbering tracker (persisted to Sequence at the end)
