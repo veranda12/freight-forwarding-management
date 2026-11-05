@@ -1,38 +1,59 @@
 # CargoFlow — Freight Forwarding Management System
 
-Sistem manajemen freight forwarding (Sea FCL/LCL, Air, Land, Customs Clearance) untuk PT Samudra Lintas Logistik — dibangun dengan **Next.js 15, Prisma, PostgreSQL, Tailwind + shadcn/ui, Auth.js v5**. Data demo realistis via seed deterministik.
+Sistem manajemen freight forwarding (Sea FCL/LCL, Air, Land, Customs Clearance) untuk PT Samudra Lintas Logistik — dibangun dengan **Next.js 15, Prisma, MariaDB, Tailwind + shadcn/ui, Auth.js v5**. Data demo realistis via seed deterministik.
 
 > Nama produk dapat diganti dari satu file: `src/config/product.ts`.
+
+> Database dipindah dari PostgreSQL ke **MariaDB** (November 2026) agar bisa di-host di hosting bersama. Migrasi
+> PostgreSQL lama diarsipkan di `prisma/migrations-postgresql-archive/`. Detail keputusan di `DECISIONS.md`.
 
 ## 1. Prasyarat
 
 - Node.js 20+
-- PostgreSQL 16/17 berjalan lokal di `localhost:5432` (tanpa Docker)
+- **MariaDB 10.11 atau lebih baru** (diuji di 12.3 LTS dan 10.11 LTS), InnoDB, `utf8mb4`, tanpa Docker
 
 ## 2. Instalasi
 
 ```bash
 npm install
+npx prisma generate   # npm 11 tidak menjalankan skrip postinstall Prisma secara otomatis
 ```
 
 ### Siapkan database
 
-Buat user & database khusus (jalankan sekali — sesuaikan path psql Anda):
+Buat database `ffms` (+ `ffms_test` untuk uji integrasi) dan user `ffms`/`ffms123` (jalankan sekali sebagai root,
+sesuaikan port):
 
 ```bash
-"C:\Program Files\PostgreSQL\17\bin\psql" -U postgres -h localhost -c "CREATE USER ffms WITH PASSWORD 'ffms123'; CREATE DATABASE ffms OWNER ffms;"
+mariadb -u root -p -h 127.0.0.1 -P 3306 < scripts/setup-db.sql
 ```
 
-`.env` sudah berisi `DATABASE_URL="postgresql://ffms:ffms123@localhost:5432/ffms?schema=public"`.
-Jika memakai kredensial lain, cukup ubah `DATABASE_URL`.
+Buat `.env` (tidak ikut git):
+
+```
+DATABASE_URL="mysql://ffms:ffms123@127.0.0.1:3306/ffms"
+AUTH_SECRET="<string acak, mis. hasil: openssl rand -base64 32>"
+```
 
 ### Migrasi + seed
 
 ```bash
-npx prisma migrate dev --name init
-npx prisma db seed
+npx prisma migrate deploy   # terapkan migrasi yang ada (baseline MariaDB)
+npx prisma db seed          # isi data demo ke database kosong
 npm run dev
 ```
+
+> Seed ulang di atas database yang sudah terisi saat ini gagal (FK `DomesticShipment_customerId_fkey`). Untuk mengisi
+> ulang, kosongkan database dulu (`npm run db:reset` — **menghapus seluruh isi database**).
+
+### Hosting (syarat minimum)
+
+- Node.js 20+ yang bisa menjalankan aplikasi persisten (mis. cPanel "Setup Node.js App" / CloudLinux). Hosting yang
+  hanya mendukung PHP **tidak bisa** menjalankan aplikasi ini.
+- MariaDB ≥ 10.11 dengan InnoDB, `utf8mb4`, `sql_mode` berisi `STRICT_TRANS_TABLES`, `lower_case_table_names=0`
+  (bawaan Linux). Database & user dibuat lewat panel hosting; `scripts/setup-db.sql` hanya untuk lokal.
+- Build (`npm run build`) dikerjakan di mesin lokal/CI, bukan di hosting (butuh RAM besar).
+- `binaryTargets` Prisma (`schema.prisma`) disesuaikan dengan OS hosting saat hosting sudah dipilih.
 
 Buka http://localhost:3000
 
@@ -78,6 +99,9 @@ Master Data (Customer, Vendor, Overseas Agent, Port & Airport, Currency & Kurs, 
 - Uang = `Decimal(18,2)`, kurs = `Decimal(18,6)` — tidak pernah float.
 - Timezone `Asia/Jakarta`; format Rupiah & tanggal locale Indonesia.
 - Penomoran dokumen via tabel `Sequence` (aman dari race), di dalam transaksi DB.
+- Semua transaksi DB memakai isolasi **READ COMMITTED** (`src/lib/prisma-options.ts`), bukan bawaan MariaDB
+  (REPEATABLE READ).
+- Pencarian & unique tidak membedakan huruf besar/kecil (collation `utf8mb4_unicode_ci`).
 - Jurnal selalu seimbang; pembatalan via **reversal** (jurnal tidak dihapus).
 - Seed deterministik (`faker.seed`), nomor kontainer ISO 6346 valid, Trial Balance balance.
 
@@ -89,7 +113,7 @@ Lihat `PLAN.md` (rencana) dan `DECISIONS.md` (keputusan desain) untuk detail.
 npm run dev          # jalankan dev server
 npm run build        # production build
 npm run typecheck    # tsc --noEmit
-npm run db:seed      # ulang seed (idempoten)
+npm run db:seed      # isi data demo (ke database kosong)
 npm run db:studio    # Prisma Studio
 npm run test         # unit test (Vitest)
 npm run test:e2e     # end-to-end test (Playwright)
@@ -98,7 +122,11 @@ npm run test:e2e     # end-to-end test (Playwright)
 ## 8. Testing
 
 - **Unit (Vitest)** — `npm run test`: RBAC, format mata uang/tanggal, enum, check digit ISO 6346, dan perhitungan berat kena biaya (28 test).
-- **E2E (Playwright)** — `npm run test:e2e`: 14 skenario (termasuk alur Domestik & Aturan Berat di `e2e/domestic.spec.ts`) menelusuri UI nyata (dashboard, RBAC, Job+PDF, Accounting balance, buat Invoice→bayar, tracking publik, CRUD Vendor/Commodity, form Quotation & Job). Detail & flow demo ada di `DEMO.md`.
+- **Integrasi** — skrip `tests/integration/*.ts` dijalankan dengan `tsx` terhadap database **uji** (salinan, mis.
+  `ffms_test`), bukan database demo: `DATABASE_URL=mysql://ffms:ffms123@127.0.0.1:3306/ffms_test node node_modules/tsx/dist/cli.mjs tests/integration/verify-mariadb.ts`.
+  `verify-mariadb.ts` menguji risiko khusus MariaDB (teks panjang, pencarian, penomoran & setor pajak paralel, zona
+  waktu, presisi Decimal, utf8mb4). Laporan uji perpindahan database: `docs/qa/mariadb-migration-report.md`.
+- **E2E (Playwright)** — `npm run test:e2e` (sekali pasang browser: `npx playwright install chromium`): 17 skenario (termasuk alur Domestik & Aturan Berat di `e2e/domestic.spec.ts`) menelusuri UI nyata (dashboard, RBAC, Job+PDF, Accounting balance, buat Invoice→bayar, tracking publik, CRUD Vendor/Commodity, form Quotation & Job). Detail & flow demo ada di `DEMO.md`.
 
 ## 9. CRUD & Form Manual
 

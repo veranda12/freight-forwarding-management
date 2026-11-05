@@ -7,8 +7,20 @@ Format: **Keputusan** — _alasan_.
 
 - **Next.js 15 (bukan 16)** — `create-next-app` terbaru memasang Next 16 yang punya breaking changes. Spec meminta Next 15, jadi di-pin ke `^15.1.4` untuk prediktabilitas dan kompatibilitas penuh dengan ekosistem (Auth.js v5, shadcn/ui).
 - **Tailwind CSS v3 (bukan v4)** — shadcn/ui paling stabil di Tailwind v3; menghindari kejutan konfigurasi `@theme` v4. Variabel warna pakai HSL ala shadcn.
-- **Tanpa Docker** — permintaan user: pakai PostgreSQL lokal (service `postgresql-x64-17` di port 5432) langsung. Tidak ada `docker-compose.yml`.
-- **PostgreSQL lokal** — koneksi via `DATABASE_URL`. Default memakai user khusus `ffms` (dibuat manual sekali) agar tidak bergantung ke password superuser `postgres`.
+- **Tanpa Docker** — permintaan user: database lokal dijalankan langsung. Tidak ada `docker-compose.yml`.
+- ~~PostgreSQL lokal~~ — digantikan MariaDB (lihat bagian berikut). Default tetap memakai user khusus `ffms`.
+
+## Database: MariaDB (sejak 2026-11-05, branch `feat/mariadb-migration`)
+
+- **MariaDB, bukan PostgreSQL** — _klien butuh hosting murah; VPS di luar anggaran, dan hosting bersama umumnya hanya menyediakan MariaDB/MySQL._ Provider Prisma `mysql`. Target minimum **MariaDB 10.11** (versi umum di hosting); diuji di **12.3 LTS** (lokal) dan **10.11 LTS**. Jangan memakai fitur khusus 11.x/12.x.
+- **Riwayat migrasi dimulai ulang** — 14 migrasi PostgreSQL diarsipkan di `prisma/migrations-postgresql-archive/` (SQL-nya khusus PG); `prisma/migrations/` dimulai dari satu baseline MariaDB. _Belum ada data produksi; perubahan data di migrasi lama sudah dibuat ulang oleh seed._
+- **Isolasi transaksi READ COMMITTED untuk semua PrismaClient** (`src/lib/prisma-options.ts`) — _logika transaksi ditulis untuk semantik PostgreSQL. Di REPEATABLE READ (bawaan MariaDB) transaksi yang menunggu kunci lalu membaca ulang memakai snapshot lama: di 10.11 dua setoran pajak paralel bisa sama-sama lolos (setor ganda), di 12.3 transaksi yang kalah gagal dengan error 1020. Terbukti lewat uji kontrol negatif._ Setiap `new PrismaClient()` baru wajib memakai `PRISMA_CLIENT_OPTIONS`.
+- **Kunci setor pajak = baris `Sequence` `LOCK:TAX:<jenis>` per masa** (pengganti `pg_advisory_xact_lock`) — _memakai `nextCounter` yang sudah ada; kunci baris ditahan sampai commit dan aman di connection pool (berbeda dengan `GET_LOCK` yang terikat koneksi)._
+- **`nextCounter` mencoba ulang sekali saat P2002** — _upsert Prisma di MySQL = baca lalu tulis, sehingga dua transaksi yang membuat baris pertama sebuah key bisa bentrok; di MariaDB statement gagal tidak membatalkan transaksi, jadi percobaan kedua aman._
+- **Kolom teks bebas = `@db.Text`** (alamat, catatan, deskripsi, token) — _`String` Prisma di MySQL menjadi `VARCHAR(191)`; kolom kode/nomor/nama tetap VARCHAR agar bisa di-index._
+- **Collation `utf8mb4_unicode_ci`** — _pencarian dan unique tidak membedakan huruf besar/kecil (kode `ABC` dan `abc` dianggap sama); `mode: "insensitive"` Prisma tidak didukung di MySQL dan tidak diperlukan._
+- **Raw SQL memakai backtick dan `CONVERT_TZ(…, '+00:00', '+07:00')`** — _Asia/Jakarta tanpa DST, jadi offset tetap tidak butuh tabel zona waktu (sering kosong di hosting)._
+- **Lokal di Windows: `lower_case_table_names=2`** — _agar nama tabel tetap PascalCase seperti di hosting Linux (`=0`)._
 
 ## Domain / Akuntansi
 

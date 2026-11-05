@@ -1,0 +1,162 @@
+# Laporan QA — Migrasi Database PostgreSQL → MariaDB
+
+| | |
+|---|---|
+| Proyek | CargoFlow (FFMS) |
+| Branch | `feat/mariadb-migration` (dari `main` @ `4cbf3e4`) |
+| Tanggal uji | 2026-11-05 (WIB) |
+| Penguji | Claude Code (atas permintaan Andhika) |
+| Status akhir | **LULUS dengan catatan**: tidak ada regresi akibat perpindahan database; 4 cacat lama dicatat terpisah |
+
+## 1. Latar belakang dan ruang lingkup
+
+Klien butuh hosting murah, dan VPS di luar anggaran. Hosting bersama umumnya hanya menyediakan MariaDB/MySQL, sehingga
+database dipindah dari PostgreSQL 17 ke MariaDB. Target lokal adalah **MariaDB 12.3 LTS** (rilis LTS terbaru, GA Mei 2026).
+Kandidat hosting belum ada, jadi kompatibilitas juga diuji di **MariaDB 10.11 LTS**, versi yang umum di hosting.
+
+**Dalam cakupan:** skema & migrasi Prisma, kode akses data (raw SQL, transaksi, penomoran, pencarian), seed, skrip uji
+integrasi, dan dokumentasi. **Di luar cakupan:** deploy ke hosting, pemindahan data produksi (belum ada; data masih
+demo), serta perbaikan cacat lama yang ditemukan (dicatat di §6).
+
+## 2. Lingkungan uji
+
+| Komponen | Versi / konfigurasi |
+|---|---|
+| OS | Windows 11 Pro (laptop pengembang, RAM bebas ±0,9–2,8 GB) |
+| Node.js / Next.js / Prisma / Playwright | 24.21.0 / 15.5.27 / 6.19.3 / 1.63.0 (Chromium headless shell) |
+| MariaDB utama | **12.3.3** portabel, port 3307, `innodb_buffer_pool_size=128M`, `utf8mb4_unicode_ci`, `lower_case_table_names=2`, sql_mode strict bawaan, isolasi server bawaan REPEATABLE-READ |
+| MariaDB kompatibilitas | **10.11.19** portabel, port 3308, konfigurasi sama |
+| Baseline | PostgreSQL 17 (data seed pertama 2026-11-05, unit test, typecheck, lint) |
+| Database | `ffms` (demo, untuk E2E/smoke) dan `ffms_test` (salinan `ffms` via `mariadb-dump`, untuk uji integrasi) |
+
+Kedua MariaDB berupa ZIP resmi `archive.mariadb.org` (SHA256 cocok), dipasang di `D:\my-room\tools\` di luar repo dan
+tanpa service Windows.
+
+## 3. Analisis risiko (hasil kajian kode) dan pemetaan ke kasus uji
+
+| ID | Risiko | Perubahan | Diuji oleh |
+|---|---|---|---|
+| T1 | Migrasi PG (`CREATE TYPE`, `::`, `gen_random_uuid()`) tidak jalan di MariaDB | Arsip `prisma/migrations-postgresql-archive/`, baseline baru `20261105120000_mariadb_baseline` | S-03, S-04 |
+| T2 | `String` → `VARCHAR(191)`: teks panjang gagal disimpan | 47 kolom teks bebas `@db.Text` | TC-01 |
+| T3 | Isolasi REPEATABLE READ (MariaDB) vs READ COMMITTED (PG) | `PRISMA_CLIENT_OPTIONS` (`src/lib/prisma-options.ts`) di semua PrismaClient | TC-04 + kontrol negatif B |
+| T4 | `pg_advisory_xact_lock` tidak ada | Kunci baris `Sequence` `LOCK:TAX:<jenis>` lewat `nextCounter` | TC-04 |
+| T5 | Raw SQL PG (`to_char`, `AT TIME ZONE`, `::`, `"…"`) | `masaTotals` dan filter nominal jurnal ditulis ulang | TC-05, S-07 |
+| T6 | `mode: "insensitive"` tidak didukung Prisma MySQL | Dihapus; collation `_ci` | TC-02, S-07 |
+| T7 | Upsert MySQL bukan `ON CONFLICT` → P2002 saat bersamaan | `nextCounter` coba ulang sekali | TC-03 + kontrol negatif A |
+| T8 | Skrip QA integrasi memakai SQL PG | Di-port (`audit-ledger`, `report-balance`, guard `DATABASE()`) | S-05 |
+| T9 | Collation `_ci`: unique/pencarian tak membedakan huruf besar/kecil | Diterima & didokumentasikan | TC-02, TC-02b |
+| T10 | `lower_case_table_names` Windows vs Linux | Lokal `=2`; syarat hosting `=0` didokumentasikan | — (konfigurasi) |
+| — | Presisi uang & kurs, utf8mb4, invarian jurnal | — | TC-06, TC-07, TC-08 |
+
+## 4. Kriteria
+
+- **Masuk:** branch dibuat, kode lolos typecheck, server MariaDB uji berjalan, DB kosong.
+- **Keluar:** semua uji lulus atau setara baseline PG; tidak ada regresi; setiap kegagalan punya akar masalah yang
+  terbukti dan diklasifikasikan.
+
+## 5. Hasil uji
+
+### 5.1 Ringkasan
+
+| ID | Tingkat | Uji | Baseline PG | MariaDB 12.3 | MariaDB 10.11 |
+|---|---|---|---|---|---|
+| S-01 | Statis | `npm run typecheck` | lulus | **lulus** | — |
+| S-02 | Statis | `npm run lint` | gagal 294 (konfigurasi ESLint, D-01) | gagal 294, **identik** | — |
+| S-03 | Migrasi | `prisma validate` + `migrate deploy` ke DB kosong | — | **lulus** | **lulus** |
+| S-04 | Migrasi | `migrate diff` DB ↔ skema (drift) | — | **tanpa beda** | **tanpa beda** |
+| S-05 | Seed | `prisma db seed` ke DB kosong | TB 55.545.131.020,23 seimbang | **identik** (41 dtk) | **identik** |
+| S-06 | Unit | `npm run test` (Vitest) | 169/169 | **169/169** | (tidak bergantung DB) |
+| S-07 | Integrasi | 23 skrip `tests/integration` di `ffms_test` | tidak dijalankan¹ | 20 lulus, 3 gagal (cacat lama, §6) | 20 lulus, 3 gagal (sama persis) |
+| S-08 | Risiko | `verify-mariadb.ts` TC-01…TC-08 (20 asersi) | n/a | **20/20** | **20/20** |
+| S-09 | E2E | Playwright 17 skenario (build produksi) | tidak dijalankan¹ | **17/17** | — |
+| S-10 | Smoke | Login 6 role × 43 halaman menu + endpoint kueri yang diubah | — | **0 error HTTP, 0 error log** | — |
+| S-11 | Kontrol negatif | Membuktikan TC-03/TC-04 mendeteksi risikonya | n/a | lihat §5.3 | lihat §5.3 |
+
+¹ Atas keputusan pemilik, DB PostgreSQL tidak di-reset (seed ulang gagal karena D-02 dan sebagian data demo PG terhapus).
+Pembanding PG = keluaran seed pertama (jumlah baris per entitas, Trial Balance, total invoice clearance), unit test,
+typecheck, dan lint. Seluruh angka seed di MariaDB 12.3 dan 10.11 **identik** dengan pembanding itu: user 8,
+customer 60, vendor 20, agen 15, job 300, invoice 292, bill 292, payment 440, jurnal 1.055, quotation 25; invoice clearance
+49.847.370 dan 42.411.546.
+
+### 5.2 Kasus uji risiko (`tests/integration/verify-mariadb.ts`)
+
+| ID | Langkah | Harapan | 12.3 | 10.11 |
+|---|---|---|---|---|
+| TC-01 | Simpan alamat customer 1.010 karakter dan deskripsi jurnal + baris 1.920 karakter | Tersimpan utuh | lulus | lulus |
+| TC-02 | `contains` huruf kecil/besar pada nama customer, nomor job; `searchJournals` "catatan PANJANG" vs "CATATAN panjang" | Hasil sama | lulus | lulus |
+| TC-02b | Buat customer kode `zzt-…` saat `ZZT-…` sudah ada | Ditolak P2002 (unique `_ci`, perilaku terdokumentasi) | lulus | lulus |
+| TC-03 | 20 transaksi paralel `genDocNumber` pada key baru | Tanpa error; nomor unik 1..20 | lulus | lulus |
+| TC-04 | 2 `remitTaxPeriod` paralel, masa sama: PPh 23 (kunci baru), PPN (kunci baru), PPh 23 setelah batal (kunci lama) | Tepat 1 berhasil, 1 ditolak "sudah disetor seluruhnya" | lulus (3/3) | lulus (3/3) |
+| TC-05 | Jurnal PPN tgl terakhir 23.30 WIB dan tgl 1 00.30 WIB | Masuk masa yang benar | lulus | lulus |
+| TC-06 | Debit 9.876.543.210.123,45; kurs 16.234,123456 | Bolak-balik tanpa pembulatan | lulus | lulus |
+| TC-07 | Nama customer berisi emoji, aksara Han, diakritik | Tersimpan utuh (utf8mb4) | lulus | lulus |
+| TC-08 | Jurnal tidak seimbang; posting di periode terkunci; reversal | Ditolak / ditolak / pembalik seimbang | lulus | lulus |
+
+### 5.3 Kontrol negatif (membuktikan perbaikan memang diperlukan)
+
+Skrip `Claude outputs/mariadb/negative-control.ts` (di luar git) menjalankan skenario yang sama **tanpa** perbaikan:
+
+| Skenario | MariaDB 12.3 | MariaDB 10.11 |
+|---|---|---|
+| A. 20 upsert `Sequence` paralel pada key baru tanpa coba ulang | 6/20 gagal P2002 | 7/20 gagal P2002 |
+| B. 2 setor PPh 23 paralel, client **tanpa** READ COMMITTED | 1 berhasil, 1 gagal **error sistem 1020** "Record has changed since last read" (`innodb_snapshot_isolation`, bawaan sejak 11.6) | **2 berhasil, 2 POSTED = SETOR PAJAK GANDA** (2/2 percobaan) |
+
+Temuan tambahan: di REPEATABLE READ, coba ulang P2002 pada `nextCounter` juga **tidak** menolong, karena snapshot lama
+tidak melihat baris yang baru di-commit. Kedua perbaikan (READ COMMITTED + coba ulang) diperlukan bersama.
+
+### 5.4 Smoke per role (MariaDB 12.3, build produksi)
+
+| Role | Halaman 200 | Redirect RBAC | Error |
+|---|---|---|---|
+| Admin | 43 | 0 | 0 |
+| Sales | 34 | 9 | 0 |
+| Operation | 35 | 8 | 0 |
+| Documentation | 32 | 11 | 0 |
+| Finance | 39 | 4 | 0 |
+| Management | 43 | 0 | 0 |
+
+Endpoint kueri yang diubah: `/api/search?q=job/sea` = `?q=JOB/SEA` (840 byte, identik); `/api/accounting/journals`
+dengan `q` + `min`/`max` (raw SQL) memberi hasil identik untuk "PELUNASAN"/"pelunasan"; `/accounting/tax`
+(`masaTotals`) 200. Log aplikasi (`logs/app-2026-11-05.log`) tanpa error baru.
+
+## 6. Cacat yang ditemukan
+
+Tidak ada cacat yang disebabkan perpindahan database. Semua di bawah ini **sudah ada sebelumnya** dan tidak bergantung
+pada jenis database. Belum diperbaiki karena di luar cakupan; usul perbaikan disertakan.
+
+| ID | Severity | Temuan | Bukti / akar masalah | Usul |
+|---|---|---|---|---|
+| D-01 | Rendah | `npm run lint` gagal 294 error `Definition for rule '@typescript-eslint/no-unused-vars' was not found` | `.eslintrc.json` memakai aturan plugin `@typescript-eslint` yang tidak dimuat konfigurasi `next/core-web-vitals`. Identik di baseline PG | Tambah `plugin:@typescript-eslint/recommended` atau hapus aturan itu |
+| D-02 | Sedang | `prisma db seed` gagal bila DB sudah berisi (README dulu menyebut "idempoten") | `prisma/seed.ts` menghapus `Customer` sebelum `DomesticShipment` → P2003 FK `DomesticShipment_customerId_fkey`; transaksi hapus sebelumnya sudah ter-commit sehingga data demo terhapus sebagian. Terjadi di PG saat baseline | Hapus tabel domestik (dan anak lain) sebelum `customer.deleteMany()` |
+| D-03 | Sedang | Instalasi baru tidak punya vendor luar negeri → PPh 26 tidak pernah aktif; `verify-pph26` gagal "Tidak ada biaya beli dari vendor luar negeri", `simulate-panduan-e2e` gagal "Maersk Line ditandai vendor luar negeri" | `Vendor.isForeign` hanya diisi UPDATE di migrasi lama `20261028090000_pph26_foreign_vendor`, yang pada DB kosong berjalan sebelum seed. Seed tidak mengisinya. Dengan UPDATE yang sama diterapkan manual: `verify-pph26` **10/10 lulus** di MariaDB | Seed mengisi `isForeign: true` untuk SHIPPING_LINE/AIRLINE |
+| D-04 | Rendah | 6 nomor container demo tidak lolos ISO 6346 (`verify-job-containers`) | Ditulis tangan di `prisma/seed-clearance.ts` (mis. `MSCU1234565`, `CAIU1234567`, `TGHU7654321`, `MSCU2034561`, `TGBU2087654`, `MEDU4412873`) dengan digit cek salah | Ganti dengan nomor yang digit ceknya benar |
+| D-05 | Rendah | `simulate-panduan-e2e` "laba berjalan naik 5.000.000 − 6.500 − 2.750.000" gagal bila dijalankan sebelum 12.00 WIB | Kas keluar 2.750.000 bertanggal hari ini 12.00 WIB (`src/lib/cash-entry.ts:44`), sedangkan neraca diambil per "sekarang" (10.44 WIB) → jurnal belum terhitung; selisih aktual persis 2.750.000 (4.993.500 vs 2.243.500). Uji bergantung jam | Ambil neraca per akhir hari, bukan `new Date()` |
+| D-06 | Info | Pada instalasi baru, 12 `ChargeCode` ber-`invoiceSection` NULL | UPDATE di migrasi lama `20261105090000_invoice_print_rate_card` berjalan sebelum seed (sama di PG) | Seed mengisi `invoiceSection` |
+
+## 7. Perubahan perilaku yang disengaja (perlu diketahui pengguna)
+
+1. **Pencarian dan unique tidak membedakan huruf besar/kecil.** Kode customer `ABC` dan `abc` dianggap sama
+   (sebelumnya di PG unique membedakannya).
+2. **Urutan NULL**: pada urutan naik MariaDB menaruh NULL di awal (PG di akhir). Hanya ditemukan pengurutan pada kolom
+   non-null (`code`, `name`), jadi tidak berdampak saat ini.
+3. Tabel `Sequence` kini juga berisi baris kunci `LOCK:TAX:PPN|PPH23|PPH26` per masa. Tidak ditampilkan di UI.
+
+## 8. Risiko sisa dan rekomendasi
+
+| Risiko | Rekomendasi |
+|---|---|
+| Hosting belum dipilih; aplikasi Next.js butuh Node.js persisten | Pilih hosting dengan "Setup Node.js App" (CloudLinux/cPanel) + MariaDB ≥ 10.11; uji ulang `verify-mariadb.ts` dan smoke di hosting sebelum go-live |
+| Konfigurasi MariaDB hosting (sql_mode non-strict, `lower_case_table_names`) | Cek `SELECT @@sql_mode, @@lower_case_table_names` di hosting; strict wajib agar data tidak terpotong diam-diam |
+| Prisma query engine di OS hosting | Tambahkan `binaryTargets` yang sesuai (mis. `rhel-openssl-1.0.x`/`debian-openssl-3.0.x`) saat hosting diketahui |
+| `PrismaClient` baru tanpa `PRISMA_CLIENT_OPTIONS` | Aturan di `DECISIONS.md`; pertimbangkan lint rule/ulasan kode |
+| Perbedaan concurrency lain di luar alur yang diuji | Isolasi kini sama dengan PG; uji beban ringan di hosting bila ada fitur paralel baru |
+| E2E baseline PG tidak tersedia | E2E MariaDB 17/17 lulus; pembanding E2E PG tidak dibutuhkan untuk keputusan go/no-go |
+
+## 9. Artefak
+
+- Kode & migrasi: commit `4ddefcf`, `10ed14b`, `5bfe3bd` di branch `feat/mariadb-migration` (belum di-push).
+- Log mentah (di luar git): `Claude outputs/mariadb/` → `baseline-pg/`, `mariadb-12.3/` (seed, unit, lint, build,
+  e2e, smoke, integration), `mariadb-10.11/` (migrate, seed, integration, negative-control), `negative-control*.log`.
+- Alat uji (di luar git): `run-integration.sh`, `smoke-roles.sh`, `negative-control.ts`.
+- Server uji lokal: `D:\my-room\tools\mariadb-12.3.3-winx64` (data `mariadb-12.3-data`, port 3307) dan
+  `mariadb-10.11.19-winx64` (port 3308); kata sandi root acak di `mariadb-*-root-password.txt` di folder yang sama.
