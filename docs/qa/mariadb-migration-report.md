@@ -6,7 +6,7 @@
 | Branch | `feat/mariadb-migration` (dari `main` @ `4cbf3e4`) |
 | Tanggal uji | 2026-11-05 (WIB) |
 | Penguji | Claude Code (atas permintaan Andhika) |
-| Status akhir | **LULUS dengan catatan**: tidak ada regresi akibat perpindahan database; 4 cacat lama dicatat terpisah |
+| Status akhir | **LULUS**: tidak ada regresi akibat perpindahan database; 6 cacat lama yang ditemukan (D-01…D-06) sudah diperbaiki dan diuji ulang (§10) |
 
 ## 1. Latar belakang dan ruang lingkup
 
@@ -122,7 +122,7 @@ dengan `q` + `min`/`max` (raw SQL) memberi hasil identik untuk "PELUNASAN"/"pelu
 ## 6. Cacat yang ditemukan
 
 Tidak ada cacat yang disebabkan perpindahan database. Semua di bawah ini **sudah ada sebelumnya** dan tidak bergantung
-pada jenis database. Belum diperbaiki karena di luar cakupan; usul perbaikan disertakan.
+pada jenis database. Tabel ini adalah kondisi saat ditemukan; semuanya sudah diperbaiki sesudahnya (lihat §10).
 
 | ID | Severity | Temuan | Bukti / akar masalah | Usul |
 |---|---|---|---|---|
@@ -154,9 +154,37 @@ pada jenis database. Belum diperbaiki karena di luar cakupan; usul perbaikan dis
 
 ## 9. Artefak
 
-- Kode & migrasi: commit `4ddefcf`, `10ed14b`, `5bfe3bd` di branch `feat/mariadb-migration` (belum di-push).
+- Kode & migrasi: commit `4ddefcf`, `10ed14b`, `5bfe3bd`, `6fd40d9`, `9c5106e`, `cf3a3c3` di branch
+  `feat/mariadb-migration` (belum di-push).
 - Log mentah (di luar git): `Claude outputs/mariadb/` → `baseline-pg/`, `mariadb-12.3/` (seed, unit, lint, build,
   e2e, smoke, integration), `mariadb-10.11/` (migrate, seed, integration, negative-control), `negative-control*.log`.
 - Alat uji (di luar git): `run-integration.sh`, `smoke-roles.sh`, `negative-control.ts`.
 - Server uji lokal: `D:\my-room\tools\mariadb-12.3.3-winx64` (data `mariadb-12.3-data`, port 3307) dan
   `mariadb-10.11.19-winx64` (port 3308); kata sandi root acak di `mariadb-*-root-password.txt` di folder yang sama.
+- Log perbaikan & uji ulang (di luar git): `Claude outputs/mariadb/fix-verify/`.
+
+## 10. Perbaikan cacat lama dan uji ulang (2026-11-05, ±11.00–11.15 WIB)
+
+| ID | Perbaikan | Commit |
+|---|---|---|
+| D-01 | `.eslintrc.json` memuat `next/typescript`, sehingga aturan `@typescript-eslint/*` dikenali. Lint exit 0; tersisa 12 peringatan lama (import tak terpakai, 1 `alt-text` di PDF), tidak disentuh | `9c5106e` |
+| D-02 | `prisma/seed.ts` mengosongkan semua tabel aplikasi (daftar dari `information_schema`, kecuali `_prisma_migrations`) dengan `FOREIGN_KEY_CHECKS=0` dalam satu transaksi, sehingga seed ulang = seed ke DB kosong | `cf3a3c3` |
+| D-03 | Seed membuat vendor `SHIPPING_LINE`/`AIRLINE` dengan `isForeign: true` (aturan migrasi `20261028090000`) | `cf3a3c3` |
+| D-04 | 6 nomor container demo memakai digit cek benar (`MSCU1234566`, `CAIU1234561`, `TGHU7654320`, `MSCU2034562`, `TGBU2087659`, `MEDU4412879`); ekspektasi di `verify-clearance-invoice.ts` disesuaikan. Ditemukan juga: skrip itu membuat container uji `TEST000000x` yang tidak valid dan menggagalkan `verify-job-containers` bila dijalankan sesudahnya; diganti `TSTU0000009/14/20` | `cf3a3c3` |
+| D-05 | `simulate-panduan-e2e.ts` mengambil saldo per akhir hari WIB (`AS_OF`), bukan `new Date()` | `cf3a3c3` |
+| D-06 | Charge code seed (`seed.ts`, `seed-domestic.ts`) diberi `invoiceSection` sesuai aturan migrasi `20261105090000` (FREIGHT/DOCUMENTATION/LOCAL) | `cf3a3c3` |
+
+Uji ulang sesudah perbaikan (DB demo `ffms` **tidak** disentuh; seed ulang dan E2E memakai `ffms_test`):
+
+| Uji | MariaDB 12.3 | MariaDB 10.11 |
+|---|---|---|
+| Seed 2× berturut-turut di DB yang sudah berisi | lulus, run 1 = run 2, TB 55.545.131.020,23 | lulus, identik dengan 12.3 |
+| Vendor luar negeri / charge code tanpa `invoiceSection` / container tidak valid | 12 / 0 / 0 | sama |
+| 23 skrip `tests/integration` | **23/23 lulus**, 313 asersi PASS, 0 FAIL | **23/23 lulus**, 313 PASS, 0 FAIL |
+| Unit (Vitest) / typecheck / lint | 169/169 / lulus / exit 0 | — |
+| E2E Playwright (server diarahkan ke `ffms_test` hasil seed baru) | **17/17** | — |
+| Smoke 6 role × 43 halaman | 0 error | — |
+
+`simulate-panduan-e2e` lulus saat dijalankan pukul ±11.10 WIB (sebelumnya selalu gagal sebelum 12.00), membuktikan D-05.
+Catatan: DB demo `ffms` di MariaDB masih berisi data seed versi lama (sebelum perbaikan D-03/D-04/D-06) ditambah data
+dari E2E. Untuk menyegarkannya: `npm run db:seed` (mengosongkan dan mengisi ulang DB demo).

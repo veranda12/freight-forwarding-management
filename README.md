@@ -43,8 +43,8 @@ npx prisma db seed          # isi data demo ke database kosong
 npm run dev
 ```
 
-> Seed ulang di atas database yang sudah terisi saat ini gagal (FK `DomesticShipment_customerId_fkey`). Untuk mengisi
-> ulang, kosongkan database dulu (`npm run db:reset` — **menghapus seluruh isi database**).
+> `npx prisma db seed` bisa diulang: seed **mengosongkan semua tabel aplikasi** lalu mengisi ulang data demo yang sama
+> persis. Jangan dijalankan di database yang berisi data sungguhan.
 
 ### Hosting (syarat minimum)
 
@@ -113,7 +113,7 @@ Lihat `PLAN.md` (rencana) dan `DECISIONS.md` (keputusan desain) untuk detail.
 npm run dev          # jalankan dev server
 npm run build        # production build
 npm run typecheck    # tsc --noEmit
-npm run db:seed      # isi data demo (ke database kosong)
+npm run db:seed      # kosongkan semua tabel lalu isi ulang data demo (deterministik)
 npm run db:studio    # Prisma Studio
 npm run test         # unit test (Vitest)
 npm run test:e2e     # end-to-end test (Playwright)
