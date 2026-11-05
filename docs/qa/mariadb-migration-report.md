@@ -285,7 +285,7 @@ Uji ulang (MariaDB 12.3, `ffms_test` bersih dari snapshot seed):
 
 Status akhir semua temuan: D-01…D-11 **diperbaiki dan diuji**. Tidak ada satu pun yang disebabkan perpindahan database.
 
-## 14. Role Management (2026-11-06; commit `4d45966`, `aadc37f`)
+## 14. Role Management (2026-11-05; commit `4d45966`, `aadc37f`)
 
 Fitur baru atas permintaan pemilik (bukan bagian migrasi DB): role kustom, izin per menu/tombol/persetujuan,
 maker-checker, dan batas data. Desain lengkap di `DECISIONS.md` § Role Management; katalog izin
@@ -310,3 +310,47 @@ Temuan & keputusan selama pengujian:
   mengaktifkan yang lain dengan mencabut izin `*Own`.
 - Halaman detail ber-`loading.tsx` mengembalikan HTTP 200 untuk `notFound()` (streaming); data di luar batas tetap tidak
   tampil (diverifikasi lewat curl: nomor quotation milik Sales lain tidak ada di HTML).
+
+## 15. Uji end-to-end komprehensif: alur per role, keamanan, anomali, regresi (2026-11-05, ±15.30–16.50 WIB)
+
+Suite baru `e2e/qa/` (Playwright). Setiap uji memeriksa UI **dan** kebenaran data di database (`qa-helpers.ts`, menolak
+berjalan di DB demo `ffms`), termasuk buku besar seimbang setelah setiap langkah akuntansi. Uji penolakan memakai
+*server action* asli yang direkam dari user berhak lalu dikirim ulang (*replay*) oleh user yang tidak berhak, disertai
+**kontrol positif** (replay yang sama oleh user berhak berhasil), supaya penolakan terbukti karena otorisasi.
+Suite QA membuat draft quotation sendiri (`newDraft`) sehingga tidak menghabiskan data seed untuk spec lain.
+
+| Suite | Cakupan | Hasil |
+|---|---|---|
+| QA-01 Ekspor lintas role | Sales buat via form → ajukan (tanpa tombol Kirim/Terima/Convert) → Operation kirim (tidak bisa memutuskan sendiri) → Operation lain terima + convert (POL/POD, costing, Sales PIC) → container ISO 6346 tidak valid ditolak / valid diterima, milestone, status → Documentation cetak 5 PDF tanpa bisa mengubah job → Finance invoice + receipt (PAID), bill + bayar → visibilitas Sales/Manager + Excel → tracking publik tanpa harga | 10/10 |
+| QA-02 Domestik | STT oleh Sales, status sampai diterima (POD wajib nama penerima), invoice sekali saja + receipt, batas data (Sales lain: detail, invoice, PDF STT 404), tracking, pembatalan oleh Operation (STT batal tidak bisa ditagih) | 6/6 |
+| QA-03 Akuntansi | Kas keluar + batal (jurnal pembalik), transfer + batal, setor pajak + batal, **maker-checker diatur Admin** (cabut `manualJournal.cancelOwn` → Finance ditolak membatalkan jurnalnya sendiri → kembalikan → langsung boleh tanpa login ulang), tutup buku 2025, kunci periode (posting tanggal terkunci ditolak, setelah dibuka bisa) | 6/6 |
+| QA-04 Keamanan | Tanpa login (6 halaman → login; 5 API tanpa PDF/Excel), replay Kirim oleh Sales, Terima oleh pengirim sendiri, Convert oleh Sales, simpan role oleh Finance (eskalasi ke semua izin), Sales mengubah dirinya jadi Admin, batal invoice oleh Operation; user dinonaktifkan di tengah sesi (halaman & API 401); batas data lintas modul (job, invoice, PDF invoice/dokumen, pencarian, Excel 403) | 9/9 |
+| QA-05 Anomali | Dua Operation menekan Kirim bersamaan → tepat satu berhasil; ajukan ulang, Terima pada Draft, keputusan tak dikenal ditolak; convert ganda → 1 job; pembayaran berlebih/negatif/nol/potongan negatif/ke invoice batal ditolak, pembayaran sebagian sah → PARTIAL; XSS di nama customer tampil sebagai teks, unicode + alamat 1.000 karakter utuh; pencarian dengan injeksi SQL, `%`, `_`, backslash, 3.000 karakter → 200 tanpa error; validasi form (quotation tanpa customer, email ganda beda huruf besar/kecil, password pendek, nama role ganda); Admin tidak bisa menonaktifkan dirinya (UI & replay) | 7/7 |
+| QA-06 Matriks role | 6 role × 13 halaman: akses halaman, tombol "… Baru", menu sidebar, bilah tab, dan KPI uang dashboard dibandingkan dengan izin role **di database**; tab tidak terwariskan antar user; tidak ada error JavaScript/hydration di 10 halaman utama | 8/8 |
+
+### 15.1 Cacat yang ditemukan dan diperbaiki
+
+| ID | Temuan | Perbaikan | Bukti |
+|---|---|---|---|
+| D-12 | Bilah tab membuat tab untuk halaman yang **tidak diizinkan** (Documentation: Quotation, Customer, Vendor, Rate…). Halaman ber-`loading.tsx` sempat aktif di klien sebelum server mengalihkan. Isi halaman tidak bocor. | `tabs-context.tsx`: tab hanya untuk item menu yang diizinkan; tab tersimpan disaring ulang saat dipulihkan | QA-06 merah sebelum perbaikan (docs, finance), hijau sesudahnya |
+| D-13 | Tab (termasuk judul seperti nomor invoice) **terwariskan ke user berikutnya** yang login di tab browser yang sama (`sessionStorage` tidak per user) | Kunci penyimpanan `app-tabs:<email>` | QA-06 "tidak terwariskan" |
+| D-14 | Dashboard menampilkan **Revenue, Gross profit, grafik Revenue vs Cost dan Top Customer** ke role tanpa izin keuangan (Documentation) | Hanya bila `jobs.viewFinancials` atau `costing.view` (Sales, Operation, Finance, Management, Admin); disaring di server, tidak ikut payload | QA-06 KPI uang |
+| D-15 | **Hydration error (React #418)** di `/roles/new` dan `/roles/<id>`: `Badge` (`<div>`) di dalam `<p>`. Pola sama di detail customer (kontak Primary, cacat lama). | `<p>` → `<div>`; pindai seluruh `src`: tidak ada pola lain | Kontrol negatif: tanpa perbaikan uji merah tepat di 2 halaman itu |
+| — | Label "Kunci jurnal sampai tanggal" tidak terhubung ke input | `htmlFor`/`id` | QA-03 |
+
+Catatan (tidak diubah): label pada form kas masuk/keluar dan transfer belum terhubung ke input-nya (aksesibilitas;
+uji memakai placeholder). Percobaan paksa yang ditolak (mis. replay "Batalkan invoice" oleh Operation) tercatat di log
+sebagai error, yang berguna sebagai jejak keamanan.
+
+### 15.2 Regresi akhir (build yang sama dengan commit)
+
+| Uji | Hasil |
+|---|---|
+| Unit (Vitest) | 175/175 |
+| Typecheck / lint / build | Lulus |
+| Integrasi (`tests/integration`, MariaDB 12.3) | 25/25 skrip, 0 FAIL |
+| E2E penuh (spec lama + `e2e/qa/`, DB uji bersih) | **71/71** (13 berkas spec; 0 dilewati) |
+| Smoke 7 user × 44 halaman | 0 error HTTP; Admin & Management 44, Sales 34, Operation 35, Documentation 32, Finance 39 (sisanya dialihkan sesuai izin) |
+
+Menjalankan: `bash "Claude outputs/rbac/qa-run.sh" yes [e2e/qa/<spec>]` (memulihkan `ffms_test` dari snapshot seed,
+menyalakan `next start` di port 3000 dengan DB uji, menjalankan Playwright, lalu mematikan server).
