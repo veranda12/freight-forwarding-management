@@ -1,5 +1,6 @@
 import { prisma } from "./prisma";
 import type { AccountType } from "@prisma/client";
+import { r2 as roundCents } from "./accounting-core";
 
 export type TBRow = {
   code: string; name: string; type: AccountType;
@@ -114,6 +115,18 @@ function bucketOf(days: number): typeof BUCKETS[number] {
   return ">90";
 }
 
+type AgingRow = { name: string; buckets: Record<string, number>; total: number };
+
+/** Bulatkan hasil aging ke sen. Penjumlahan float menyisakan galat seperti 1216815106.6399999 (D-11). */
+function roundAging(rows: AgingRow[], totals: Record<string, number>) {
+  for (const r of rows) {
+    for (const k of BUCKETS) r.buckets[k] = roundCents(r.buckets[k]);
+    r.total = roundCents(r.total);
+  }
+  for (const k of BUCKETS) totals[k] = roundCents(totals[k]);
+  return roundCents(Object.values(totals).reduce((s, v) => s + v, 0));
+}
+
 export async function getArAging() {
   const today = new Date();
   const invoices = await prisma.invoice.findMany({
@@ -134,7 +147,7 @@ export async function getArAging() {
     totals[b] += outstanding;
   }
   const rows = [...byCustomer.values()].sort((a, b) => b.total - a.total);
-  const grandTotal = Object.values(totals).reduce((s, v) => s + v, 0);
+  const grandTotal = roundAging(rows, totals);
   return { rows, totals, grandTotal, buckets: BUCKETS };
 }
 
@@ -157,6 +170,6 @@ export async function getApAging() {
     totals[bk] += outstanding;
   }
   const rows = [...byVendor.values()].sort((a, b) => b.total - a.total);
-  const grandTotal = Object.values(totals).reduce((s, v) => s + v, 0);
+  const grandTotal = roundAging(rows, totals);
   return { rows, totals, grandTotal, buckets: BUCKETS };
 }
