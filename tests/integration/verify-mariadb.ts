@@ -47,7 +47,10 @@ async function freeMasa(): Promise<{ masa: string; y: number; m: number }> {
 async function main() {
   const dbName = (await db.$queryRaw<{ d: string }[]>`SELECT DATABASE() AS d`)[0].d;
   if (dbName === "ffms") throw new Error("Jalankan di database uji, bukan ffms.");
-  const ver = (await db.$queryRaw<{ v: string; iso: string }[]>`SELECT VERSION() AS v, @@transaction_isolation AS iso`)[0];
+  // `transaction_isolation` baru ada sejak 11.1; 10.11 memakai `tx_isolation`.
+  const ver = (await db.$queryRaw<{ v: string; iso: string }[]>`
+    SELECT VERSION() AS v, (SELECT VARIABLE_VALUE FROM information_schema.GLOBAL_VARIABLES
+      WHERE VARIABLE_NAME IN ('TRANSACTION_ISOLATION', 'TX_ISOLATION') LIMIT 1) AS iso`)[0];
   console.log(`DB ${dbName} · ${ver.v} · isolasi bawaan server ${ver.iso} · run ${RUN}\n`);
 
   // TC-01 + TC-07: teks panjang dan utf8mb4
