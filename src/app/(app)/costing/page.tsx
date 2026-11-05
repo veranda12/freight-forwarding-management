@@ -1,4 +1,5 @@
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm } from "@/lib/auth-helpers";
+import { jobScope } from "@/lib/data-scope";
 import { prisma } from "@/lib/prisma";
 import { formatIDR, formatPercent } from "@/lib/format";
 import { PageHeader } from "@/components/page-header";
@@ -8,9 +9,9 @@ import { CostingTable, type CostingRow } from "./costing-table";
 export const dynamic = "force-dynamic";
 
 export default async function CostingPage() {
-  await requireCan("costing", "read");
+  const user = await requirePerm("costing.view");
   const jobs = await prisma.job.findMany({
-    where: { status: { not: "CANCELLED" } },
+    where: { status: { not: "CANCELLED" }, ...jobScope(user) },
     orderBy: { openedAt: "desc" },
     include: { customer: { select: { name: true } } },
   });

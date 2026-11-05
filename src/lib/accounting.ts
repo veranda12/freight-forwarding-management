@@ -1,5 +1,5 @@
 import { prisma } from "./prisma";
-import type { AccountType } from "@prisma/client";
+import type { AccountType, Prisma } from "@prisma/client";
 import { r2 as roundCents } from "./accounting-core";
 
 export type TBRow = {
@@ -127,10 +127,11 @@ function roundAging(rows: AgingRow[], totals: Record<string, number>) {
   return roundCents(Object.values(totals).reduce((s, v) => s + v, 0));
 }
 
-export async function getArAging() {
+/** Aging piutang. `scope` = batas data invoice (lib/data-scope.ts); tanpa scope = semua invoice. */
+export async function getArAging(scope: Prisma.InvoiceWhereInput = {}) {
   const today = new Date();
   const invoices = await prisma.invoice.findMany({
-    where: { status: { in: ["UNPAID", "PARTIAL", "OVERDUE"] } },
+    where: { ...scope, status: { in: ["UNPAID", "PARTIAL", "OVERDUE"] } },
     include: { customer: { select: { name: true } } },
   });
   const byCustomer = new Map<string, { name: string; buckets: Record<string, number>; total: number }>();
@@ -151,10 +152,11 @@ export async function getArAging() {
   return { rows, totals, grandTotal, buckets: BUCKETS };
 }
 
-export async function getApAging() {
+/** Aging hutang. `scope` = batas data vendor bill (lib/data-scope.ts); tanpa scope = semua bill. */
+export async function getApAging(scope: Prisma.VendorBillWhereInput = {}) {
   const today = new Date();
   const bills = await prisma.vendorBill.findMany({
-    where: { status: { in: ["UNPAID", "PARTIAL"] } },
+    where: { ...scope, status: { in: ["UNPAID", "PARTIAL"] } },
     include: { vendor: { select: { name: true } } },
   });
   const byVendor = new Map<string, { name: string; buckets: Record<string, number>; total: number }>();

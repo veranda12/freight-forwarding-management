@@ -1,4 +1,4 @@
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
@@ -13,7 +13,7 @@ const TYPE_LABEL: Record<string, string> = {
 };
 
 export default async function CoaPage() {
-  await requireCan("coa", "read");
+  await requirePerm("coa.view");
   const accounts = await prisma.coaAccount.findMany({ orderBy: { code: "asc" } });
   return (
     <div className="space-y-6">

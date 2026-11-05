@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Download } from "lucide-react";
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm } from "@/lib/auth-helpers";
 import { listLogDays, readLogs, todayLogDay, type LogLevel, type LogSource } from "@/lib/logger";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
@@ -16,7 +16,7 @@ const SOURCES: { v: LogSource; label: string }[] = [{ v: "server", label: "Serve
 const selectCls = "h-9 rounded-md border bg-background px-2 text-sm";
 
 export default async function LogsPage({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
-  await requireCan("audit", "read", { redirectTo: "/dashboard" });
+  await requirePerm("logs.view");
   const sp = await searchParams;
   const days = await listLogDays();
   const day = sp.day && /^\d{4}-\d{2}-\d{2}$/.test(sp.day) ? sp.day : days[0] ?? todayLogDay();

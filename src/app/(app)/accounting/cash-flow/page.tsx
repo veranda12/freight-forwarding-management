@@ -1,4 +1,4 @@
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
 import { getCashFlow } from "@/lib/cashflow";
 import { formatIDR } from "@/lib/format";
@@ -13,7 +13,7 @@ export const dynamic = "force-dynamic";
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
 
 export default async function CashFlowPage({ searchParams }: { searchParams: Promise<{ from?: string; to?: string }> }) {
-  await requireCan("accounting", "read");
+  await requirePerm("cashFlow.view");
   const sp = await searchParams;
   const today = new Date().toISOString().slice(0, 10);
   const from = ISO.test(sp.from ?? "") ? sp.from! : `${today.slice(0, 4)}-01-01`;

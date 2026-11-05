@@ -13,9 +13,9 @@ import { DOM_STATUS_FLOW, DOM_STATUS_LABELS } from "@/lib/enums";
 import { cancelDomesticShipment, createInvoiceFromDomestic, updateDomesticStatus } from "../actions";
 
 export function SttActions({
-  id, status, destCity, canWrite, canInvoice,
+  id, status, destCity, canStatus, canCancel, canInvoice,
 }: {
-  id: string; status: DomesticStatus; destCity: string; canWrite: boolean; canInvoice: boolean;
+  id: string; status: DomesticStatus; destCity: string; canStatus: boolean; canCancel: boolean; canInvoice: boolean;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -58,7 +58,7 @@ export function SttActions({
       {canInvoice && (
         <Button variant="outline" onClick={invoice} disabled={pending}>{pending ? <Loader2 className="animate-spin" /> : <Receipt />} Buat Invoice</Button>
       )}
-      {canWrite && next && (
+      {canStatus && next && (
         <Dialog open={openNext} onOpenChange={setOpenNext}>
           <DialogTrigger asChild><Button><ArrowRight /> {isDelivery ? "Konfirmasi Diterima" : DOM_STATUS_LABELS[next]}</Button></DialogTrigger>
           <DialogContent>
@@ -87,7 +87,7 @@ export function SttActions({
           </DialogContent>
         </Dialog>
       )}
-      {canWrite && !done && (
+      {canCancel && !done && (
         <Dialog open={openCancel} onOpenChange={setOpenCancel}>
           <DialogTrigger asChild><Button variant="ghost" className="text-destructive hover:text-destructive"><Ban /> Batalkan</Button></DialogTrigger>
           <DialogContent>

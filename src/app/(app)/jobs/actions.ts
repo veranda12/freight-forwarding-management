@@ -3,7 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { Prisma, type JobStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { assertCan } from "@/lib/auth-helpers";
+import { assertPerm } from "@/lib/auth-helpers";
+import { assertJobInScope } from "./job-scope";
 import { writeAudit } from "@/lib/audit";
 import { JOB_STATUS_LABELS, modeDirKey } from "@/lib/enums";
 import { genJobNumber } from "@/lib/sequence";
@@ -16,7 +17,7 @@ const d = (v: unknown) => { const x = s(v); return x ? new Date(x) : null; };
 const num = (v: unknown) => { const n = parseFloat(String(v ?? "")); return Number.isFinite(n) ? n : null; };
 
 export async function createJob(input: JobInput): Promise<{ ok: boolean; error?: string; id?: string }> {
-  const user = await assertCan("jobs", "write");
+  const user = await assertPerm("jobs.create");
   const mode = s(input.mode); const direction = s(input.direction); const customerId = s(input.customerId);
   if (!mode || !direction || !customerId) return { ok: false, error: "Mode, arah, dan customer wajib diisi." };
   if (direction !== "EXPORT" && direction !== "IMPORT") return { ok: false, error: "Arah Ekspor-Impor hanya Export/Import. Kargo antar kota dibuat di menu Domestik." };
@@ -32,7 +33,7 @@ export async function createJob(input: JobInput): Promise<{ ok: boolean; error?:
     const job = await tx.job.create({
       data: {
         number, mode: mode as any, direction: direction as any, status: "DRAFT",
-        customerId, salesPicId: s(input.salesPicId) ?? user.id,
+        customerId, salesPicId: s(input.salesPicId) ?? user.id, createdById: user.id,
         incoterm: s(input.incoterm), commodityId: s(input.commodityId), goodsDescription: s(input.goodsDescription),
         polId: !isAir ? s(input.polId) : null, podId: !isAir ? s(input.podId) : null,
         originAirportId: isAir ? s(input.originAirportId) : null, destAirportId: isAir ? s(input.destAirportId) : null,
@@ -56,7 +57,8 @@ export async function createJob(input: JobInput): Promise<{ ok: boolean; error?:
 }
 
 export async function updateJobStatus(jobId: string, status: JobStatus) {
-  const user = await assertCan("jobs", "write");
+  const user = await assertPerm(status === "CANCELLED" ? "jobs.cancel" : "jobs.status");
+  await assertJobInScope(user, jobId);
   const job = await prisma.job.update({
     where: { id: jobId },
     data: {
@@ -76,7 +78,10 @@ export async function updateJobStatus(jobId: string, status: JobStatus) {
 }
 
 export async function toggleMilestone(milestoneId: string, done: boolean) {
-  const user = await assertCan("jobs", "write");
+  const user = await assertPerm("jobs.milestone");
+  const target = await prisma.milestone.findUnique({ where: { id: milestoneId }, select: { jobId: true } });
+  if (!target) throw new Error("Data tidak ditemukan.");
+  await assertJobInScope(user, target.jobId);
   const ms = await prisma.milestone.update({
     where: { id: milestoneId },
     data: { isDone: done, actualAt: done ? new Date() : null, userId: user.id },
@@ -86,7 +91,8 @@ export async function toggleMilestone(milestoneId: string, done: boolean) {
 }
 
 export async function addMilestone(jobId: string, title: string, note?: string) {
-  const user = await assertCan("jobs", "write");
+  const user = await assertPerm("jobs.milestone");
+  await assertJobInScope(user, jobId);
   const count = await prisma.milestone.count({ where: { jobId } });
   await prisma.milestone.create({
     data: {

@@ -1,4 +1,5 @@
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm } from "@/lib/auth-helpers";
+import { paymentScope } from "@/lib/data-scope";
 import { prisma } from "@/lib/prisma";
 import { formatIDR } from "@/lib/format";
 import { PageHeader } from "@/components/page-header";
@@ -8,8 +9,9 @@ import { PaymentsTable, type PaymentRow } from "./payments-table";
 export const dynamic = "force-dynamic";
 
 export default async function PaymentsPage() {
-  await requireCan("payments", "read");
+  const user = await requirePerm("payments.view");
   const payments = await prisma.payment.findMany({
+    where: paymentScope(user),
     orderBy: { date: "desc" },
     include: { customer: { select: { name: true } }, vendor: { select: { name: true } } },
   });

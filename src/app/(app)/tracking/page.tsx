@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ExternalLink } from "lucide-react";
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm } from "@/lib/auth-helpers";
+import { jobScope } from "@/lib/data-scope";
 import { prisma } from "@/lib/prisma";
 import { MODE_SHORT } from "@/lib/enums";
 import { formatDate } from "@/lib/format";
@@ -13,9 +14,9 @@ import { JobStatusBadge } from "@/components/status-badge";
 export const dynamic = "force-dynamic";
 
 export default async function TrackingPage() {
-  await requireCan("tracking", "read");
+  const user = await requirePerm("tracking.view");
   const jobs = await prisma.job.findMany({
-    where: { status: { in: ["BOOKED", "STUFFING", "DEPARTED", "IN_TRANSIT", "ARRIVED", "CUSTOMS_CLEARANCE"] } },
+    where: { status: { in: ["BOOKED", "STUFFING", "DEPARTED", "IN_TRANSIT", "ARRIVED", "CUSTOMS_CLEARANCE"] }, ...jobScope(user) },
     orderBy: { etd: "asc" },
     include: {
       customer: { select: { name: true } },

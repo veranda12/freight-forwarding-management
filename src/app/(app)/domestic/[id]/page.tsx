@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Check, Circle, Printer } from "lucide-react";
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm, hasPerm } from "@/lib/auth-helpers";
+import { domesticScope } from "@/lib/data-scope";
 import { prisma } from "@/lib/prisma";
-import { can } from "@/lib/rbac";
 import { DOM_MODE_LABELS, DOM_STATUS_FLOW, DOM_STATUS_LABELS, DOM_STATUS_VARIANT } from "@/lib/enums";
 import { formatDate, formatDateTime, formatIDR, formatNumber, formatPercent } from "@/lib/format";
 import { kgPerCbm, leadTimeText } from "@/lib/chargeable";
@@ -20,10 +20,10 @@ import { SttActions } from "./stt-actions";
 export const dynamic = "force-dynamic";
 
 export default async function SttDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const user = await requireCan("domestic", "read");
+  const user = await requirePerm("domestic.view");
   const { id } = await params;
-  const s = await prisma.domesticShipment.findUnique({
-    where: { id },
+  const s = await prisma.domesticShipment.findFirst({
+    where: { id, ...domesticScope(user) },
     include: {
       customer: { select: { id: true, name: true } },
       vendor: { select: { name: true } },
@@ -34,9 +34,11 @@ export default async function SttDetailPage({ params }: { params: Promise<{ id: 
   });
   if (!s) notFound();
 
-  const canWrite = can(user.role, "domestic", "write");
-  const canMoney = can(user.role, "costing", "read");
-  const canInvoice = can(user.role, "invoices", "write");
+  const canStatus = hasPerm(user, "domestic.status");
+  const canCancel = hasPerm(user, "domestic.cancel") && (s.createdById !== user.id || hasPerm(user, "domestic.cancelOwn"));
+  const canPrint = hasPerm(user, "domestic.print");
+  const canMoney = hasPerm(user, "costing.view");
+  const canInvoice = hasPerm(user, "domestic.invoice");
   const activeInvoice = s.invoices.find((i) => i.status !== "CANCELLED");
   const done = s.status === "DELIVERED" || s.status === "CANCELLED";
   const late = !done && !!s.etaDate && s.etaDate.getTime() < Date.now();
@@ -51,12 +53,13 @@ export default async function SttDetailPage({ params }: { params: Promise<{ id: 
         <Breadcrumbs items={[{ label: "Pengiriman Domestik", href: "/domestic" }, { label: s.number }]} />
         <PageHeader title={s.number} description={`${DOM_MODE_LABELS[s.mode]} · ${s.originCity} → ${s.destCity} · ${s.customer.name}`}>
           <Badge variant={DOM_STATUS_VARIANT[s.status]}>{DOM_STATUS_LABELS[s.status]}</Badge>
-          <Button asChild variant="outline"><a href={`/api/domestic/${s.id}/stt`} target="_blank" rel="noopener"><Printer /> Cetak STT</a></Button>
+          {canPrint && <Button asChild variant="outline"><a href={`/api/domestic/${s.id}/stt`} target="_blank" rel="noopener"><Printer /> Cetak STT</a></Button>}
           <SttActions
             id={s.id}
             status={s.status}
             destCity={s.destCity}
-            canWrite={canWrite}
+            canStatus={canStatus}
+            canCancel={canCancel}
             canInvoice={canInvoice && !activeInvoice && s.status !== "CANCELLED"}
           />
         </PageHeader>

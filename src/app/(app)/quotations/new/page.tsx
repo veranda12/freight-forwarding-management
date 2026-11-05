@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm } from "@/lib/auth-helpers";
+import { customerScope, and } from "@/lib/data-scope";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
@@ -9,9 +11,9 @@ import { QuotationForm } from "../quotation-form";
 export const dynamic = "force-dynamic";
 
 export default async function NewQuotationPage() {
-  await requireCan("quotations", "write", { redirectTo: "/quotations" });
+  const user = await requirePerm("quotations.create", { redirectTo: "/quotations" });
   const [customers, charges, currencies] = await Promise.all([
-    prisma.customer.findMany({ where: { isActive: true }, orderBy: { name: "asc" }, select: { id: true, name: true, code: true } }),
+    prisma.customer.findMany({ where: and<Prisma.CustomerWhereInput>({ isActive: true }, customerScope(user)), orderBy: { name: "asc" }, select: { id: true, name: true, code: true } }),
     prisma.chargeCode.findMany({ where: { isActive: true }, orderBy: { code: "asc" }, select: { id: true, code: true, name: true, defaultTaxable: true } }),
     prisma.currency.findMany({ orderBy: { code: "asc" }, select: { code: true } }),
   ]);

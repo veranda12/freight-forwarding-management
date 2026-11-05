@@ -64,7 +64,7 @@ export async function createBillFromJobCore(db: PrismaClient, jobId: string, ven
     const number = await genDocNumber(tx, SEQ.BILL, date);
     const bill = await tx.vendorBill.create({
       data: {
-        number, vendorId, jobId: job.id, date, dueDate,
+        number, vendorId, jobId: job.id, date, dueDate, createdById: userId ?? null,
         currency: cur, exchangeRate: new Prisma.Decimal(effRate.toFixed(6)),
         amountForeign: new Prisma.Decimal(foreignTotal), amountPaidForeign: new Prisma.Decimal(0),
         subtotal: new Prisma.Decimal(subtotal),
@@ -129,7 +129,7 @@ export async function recordVendorPaymentCore(db: PrismaClient, billId: string, 
       if (amount > outIdr + 0.5) throw new Error(`Melebihi sisa hutang (${outIdr}).`);
       const pay = await tx.payment.create({
         data: {
-          number, direction: "PAYMENT", date, vendorId: bill.vendorId,
+          number, direction: "PAYMENT", date, vendorId: bill.vendorId, createdById: userId ?? null,
           method: (input.method as any) ?? "TRANSFER", reference: input.reference, currency: IDR, bankAccountId: cash.bankAccountId,
           amount: new Prisma.Decimal(amount),
           allocations: { create: [{ billId: bill.id, amount: new Prisma.Decimal(amount) }] },
@@ -165,7 +165,7 @@ export async function recordVendorPaymentCore(db: PrismaClient, billId: string, 
 
     const pay = await tx.payment.create({
       data: {
-        number, direction: "PAYMENT", date, vendorId: bill.vendorId,
+        number, direction: "PAYMENT", date, vendorId: bill.vendorId, createdById: userId ?? null,
         method: (input.method as any) ?? "TRANSFER", reference: input.reference, bankAccountId: cash.bankAccountId,
         currency: bill.currency, exchangeRate: new Prisma.Decimal(payRate.toFixed(6)),
         amount: new Prisma.Decimal(cashIdr),

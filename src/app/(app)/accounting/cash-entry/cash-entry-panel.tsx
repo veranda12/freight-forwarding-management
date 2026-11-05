@@ -24,14 +24,14 @@ type Entry = {
 };
 export type CashPrefill = { direction: "IN" | "OUT"; bankAccountId: string; amount: string; dateKey: string; description: string };
 
-export function CashEntryPanel({ cashAccounts, defaultCashId, inAccounts, outAccounts, entries, today, canWrite, prefill, rates }: {
+export function CashEntryPanel({ cashAccounts, defaultCashId, inAccounts, outAccounts, entries, today, canCreate, canCancel, prefill, rates }: {
   cashAccounts: CashOpt[]; defaultCashId: string | null; inAccounts: Opt[]; outAccounts: Opt[]; entries: Entry[];
-  today: string; canWrite: boolean; prefill?: CashPrefill; rates: Record<string, number>;
+  today: string; canCreate: boolean; canCancel: boolean; prefill?: CashPrefill; rates: Record<string, number>;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const blank = { direction: "OUT" as "IN" | "OUT", bankAccountId: defaultCashId ?? "", counterAccountId: "", amount: "", rate: "", dateKey: today, description: "", reference: "" };
-  const [open, setOpen] = useState(!!prefill && canWrite);
+  const [open, setOpen] = useState(!!prefill && canCreate);
   const [f, setF] = useState(prefill ? { ...blank, ...prefill } : blank);
   const set = (p: Partial<typeof f>) => setF((x) => ({ ...x, ...p }));
   const [cancel, setCancel] = useState<Entry | null>(null);
@@ -59,7 +59,7 @@ export function CashEntryPanel({ cashAccounts, defaultCashId, inAccounts, outAcc
 
   return (
     <div className="space-y-4">
-      {canWrite && (
+      {canCreate && (
         <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (v && !prefill) setF(blank); }}>
           <DialogTrigger asChild><Button><Plus /> Catat transaksi kas</Button></DialogTrigger>
           <DialogContent className="max-w-lg">
@@ -118,7 +118,7 @@ export function CashEntryPanel({ cashAccounts, defaultCashId, inAccounts, outAcc
                 <TableHead>Tanggal</TableHead><TableHead>No. Jurnal</TableHead><TableHead>Kas / Rekening</TableHead>
                 <TableHead>Akun lawan</TableHead><TableHead>Keterangan</TableHead>
                 <TableHead className="text-right">Masuk</TableHead><TableHead className="text-right">Keluar</TableHead>
-                <TableHead>Status</TableHead>{canWrite && <TableHead className="text-right">Aksi</TableHead>}
+                <TableHead>Status</TableHead>{canCancel && <TableHead className="text-right">Aksi</TableHead>}
               </TableRow></TableHeader>
               <TableBody>
                 {entries.map((e) => {
@@ -138,7 +138,7 @@ export function CashEntryPanel({ cashAccounts, defaultCashId, inAccounts, outAcc
                       <TableCell className="text-right tabular-nums">{e.direction === "IN" ? money : "-"}</TableCell>
                       <TableCell className="text-right tabular-nums">{e.direction === "OUT" ? money : "-"}</TableCell>
                       <TableCell>{e.reversed ? <Badge variant="outline">Dibatalkan</Badge> : <Badge variant="outline" className="border-success/50 text-success">Berlaku</Badge>}</TableCell>
-                      {canWrite && (
+                      {canCancel && (
                         <TableCell className="text-right">
                           {!e.reversed && <Button size="sm" variant="ghost" className="text-destructive" onClick={() => { setCancel(e); setReason(""); }}><Ban /> Batalkan</Button>}
                         </TableCell>

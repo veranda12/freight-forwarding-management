@@ -2,7 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
-import { assertCan } from "@/lib/auth-helpers";
+import { assertPerm } from "@/lib/auth-helpers";
+import { assertJobInScope } from "../job-scope";
 import { writeAudit } from "@/lib/audit";
 import { saveJobContainer, deleteJobContainer, type ContainerInput } from "@/lib/job-containers";
 import { errorMessage } from "@/lib/action-error";
@@ -10,8 +11,9 @@ import { errorMessage } from "@/lib/action-error";
 type Result = { ok: true } | { ok: false; error: string };
 
 export async function saveJobContainerAction(jobId: string, input: ContainerInput): Promise<Result> {
-  const user = await assertCan("containers", "write");
+  const user = await assertPerm("jobs.containers");
   try {
+    await assertJobInScope(user, jobId);
     const c = await saveJobContainer(prisma, jobId, input);
     await writeAudit({ entity: "JobContainer", entityId: c.id, action: input.id ? "UPDATE" : "CREATE", summary: c.containerNo, userId: user.id });
     revalidatePath(`/jobs/${jobId}`);
@@ -22,8 +24,9 @@ export async function saveJobContainerAction(jobId: string, input: ContainerInpu
 }
 
 export async function deleteJobContainerAction(jobId: string, containerId: string): Promise<Result> {
-  const user = await assertCan("containers", "write");
+  const user = await assertPerm("jobs.containers");
   try {
+    await assertJobInScope(user, jobId);
     const c = await deleteJobContainer(prisma, jobId, containerId);
     await writeAudit({ entity: "JobContainer", entityId: containerId, action: "DELETE", summary: c.containerNo, userId: user.id });
     revalidatePath(`/jobs/${jobId}`);

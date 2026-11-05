@@ -1,17 +1,18 @@
-import type { Resource } from "@/lib/rbac";
+import type { PermissionKey } from "@/lib/permissions";
 import {
   LayoutDashboard, Users, Building2, Globe2, Anchor, Coins, Tags, Container,
   Package, Percent, BookOpen, FileText, Briefcase, CalendarCheck, FileSignature,
   Calculator, Receipt, FileInput, StickyNote, Wallet, BookMarked, BarChart3,
   UserCog, Settings, History, MapPin, Truck, PackageCheck, Scale, Calculator as CalcIcon,
-  ArrowLeftRight, BookCheck, Landmark, GitCompare, RefreshCw, Banknote, ArrowDownUp, NotebookPen, ListChecks, Bug,
+  ArrowLeftRight, BookCheck, Landmark, GitCompare, RefreshCw, Banknote, ArrowDownUp, NotebookPen, ListChecks, Bug, ShieldCheck,
 } from "lucide-react";
 
 export type NavItem = {
   label: string;
   href: string;
   icon: React.ComponentType<{ className?: string }>;
-  resource: Resource;
+  /** Izin `*.view` yang dibutuhkan untuk melihat menu ini. */
+  perm: PermissionKey;
 };
 
 export type NavGroup = {
@@ -23,81 +24,82 @@ export const NAV: NavGroup[] = [
   {
     label: "Utama",
     items: [
-      { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, resource: "dashboard" },
+      { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, perm: "dashboard.view" },
     ],
   },
   {
     // Lini bisnis 1: forwarding internasional
     label: "Ekspor-Impor",
     items: [
-      { label: "Rate Management", href: "/rates", icon: Tags, resource: "rates" },
-      { label: "Quotation", href: "/quotations", icon: FileSignature, resource: "quotations" },
-      { label: "Job / Shipment", href: "/jobs", icon: Briefcase, resource: "jobs" },
-      { label: "Booking", href: "/bookings", icon: CalendarCheck, resource: "bookings" },
-      { label: "Dokumentasi", href: "/documents", icon: FileText, resource: "documents" },
-      { label: "Tracking", href: "/tracking", icon: MapPin, resource: "tracking" },
+      { label: "Rate Management", href: "/rates", icon: Tags, perm: "rates.view" },
+      { label: "Quotation", href: "/quotations", icon: FileSignature, perm: "quotations.view" },
+      { label: "Job / Shipment", href: "/jobs", icon: Briefcase, perm: "jobs.view" },
+      { label: "Booking", href: "/bookings", icon: CalendarCheck, perm: "bookings.view" },
+      { label: "Dokumentasi", href: "/documents", icon: FileText, perm: "documents.view" },
+      { label: "Tracking", href: "/tracking", icon: MapPin, perm: "tracking.view" },
     ],
   },
   {
     // Lini bisnis 2: kargo domestik (antar kota) — data & alur terpisah
     label: "Domestik",
     items: [
-      { label: "Pengiriman (STT)", href: "/domestic", icon: Truck, resource: "domestic" },
-      { label: "Cek Tarif", href: "/domestic/check", icon: CalcIcon, resource: "domesticTariffs" },
-      { label: "Tarif Domestik", href: "/domestic/tariffs", icon: PackageCheck, resource: "domesticTariffs" },
+      { label: "Pengiriman (STT)", href: "/domestic", icon: Truck, perm: "domestic.view" },
+      { label: "Cek Tarif", href: "/domestic/check", icon: CalcIcon, perm: "domesticCheck.view" },
+      { label: "Tarif Domestik", href: "/domestic/tariffs", icon: PackageCheck, perm: "domesticTariffs.view" },
     ],
   },
   {
     label: "Finance",
     items: [
-      { label: "Costing", href: "/costing", icon: Calculator, resource: "costing" },
-      { label: "Invoice (AR)", href: "/invoices", icon: Receipt, resource: "invoices" },
-      { label: "Vendor Bill (AP)", href: "/bills", icon: FileInput, resource: "bills" },
-      { label: "Debit/Credit Note", href: "/notes", icon: StickyNote, resource: "notes" },
-      { label: "Receipt & Payment", href: "/payments", icon: Wallet, resource: "payments" },
-      { label: "Accounting", href: "/accounting", icon: BookMarked, resource: "accounting" },
-      { label: "Kas Masuk / Keluar", href: "/accounting/cash-entry", icon: ArrowDownUp, resource: "accounting" },
-      { label: "Jurnal Manual", href: "/accounting/manual-journal", icon: NotebookPen, resource: "accounting" },
-      { label: "Arus Kas", href: "/accounting/cash-flow", icon: ArrowLeftRight, resource: "accounting" },
-      { label: "Tutup Buku", href: "/accounting/closing", icon: BookCheck, resource: "accounting" },
-      { label: "Aset Tetap", href: "/accounting/fixed-assets", icon: Building2, resource: "accounting" },
-      { label: "Pajak", href: "/accounting/tax", icon: Landmark, resource: "accounting" },
-      { label: "Rekonsiliasi Bank", href: "/accounting/bank-rec", icon: GitCompare, resource: "accounting" },
-      { label: "Revaluasi Kurs", href: "/accounting/fx", icon: RefreshCw, resource: "accounting" },
+      { label: "Costing", href: "/costing", icon: Calculator, perm: "costing.view" },
+      { label: "Invoice (AR)", href: "/invoices", icon: Receipt, perm: "invoices.view" },
+      { label: "Vendor Bill (AP)", href: "/bills", icon: FileInput, perm: "bills.view" },
+      { label: "Debit/Credit Note", href: "/notes", icon: StickyNote, perm: "notes.view" },
+      { label: "Receipt & Payment", href: "/payments", icon: Wallet, perm: "payments.view" },
+      { label: "Accounting", href: "/accounting", icon: BookMarked, perm: "accounting.view" },
+      { label: "Kas Masuk / Keluar", href: "/accounting/cash-entry", icon: ArrowDownUp, perm: "cashEntry.view" },
+      { label: "Jurnal Manual", href: "/accounting/manual-journal", icon: NotebookPen, perm: "manualJournal.view" },
+      { label: "Arus Kas", href: "/accounting/cash-flow", icon: ArrowLeftRight, perm: "cashFlow.view" },
+      { label: "Tutup Buku", href: "/accounting/closing", icon: BookCheck, perm: "closing.view" },
+      { label: "Aset Tetap", href: "/accounting/fixed-assets", icon: Building2, perm: "fixedAssets.view" },
+      { label: "Pajak", href: "/accounting/tax", icon: Landmark, perm: "tax.view" },
+      { label: "Rekonsiliasi Bank", href: "/accounting/bank-rec", icon: GitCompare, perm: "bankRec.view" },
+      { label: "Revaluasi Kurs", href: "/accounting/fx", icon: RefreshCw, perm: "fx.view" },
     ],
   },
   {
     label: "Laporan",
     items: [
-      { label: "Reporting", href: "/reports", icon: BarChart3, resource: "reports" },
+      { label: "Reporting", href: "/reports", icon: BarChart3, perm: "reports.view" },
     ],
   },
   {
     label: "Master Data",
     items: [
-      { label: "Customer", href: "/customers", icon: Users, resource: "customers" },
-      { label: "Vendor", href: "/vendors", icon: Building2, resource: "vendors" },
-      { label: "Overseas Agent", href: "/agents", icon: Globe2, resource: "agents" },
-      { label: "Port & Airport", href: "/ports", icon: Anchor, resource: "ports" },
-      { label: "Kas & Rekening", href: "/bank-accounts", icon: Banknote, resource: "accounting" },
-      { label: "Armada Sendiri", href: "/vehicles", icon: Truck, resource: "vehicles" },
-      { label: "Currency & Kurs", href: "/currencies", icon: Coins, resource: "currencies" },
-      { label: "Charge Code", href: "/charges", icon: Tags, resource: "charges" },
-      { label: "Rate Card", href: "/rate-card", icon: ListChecks, resource: "charges" },
-      { label: "Aturan Berat", href: "/weight-rules", icon: Scale, resource: "weightRules" },
-      { label: "Container Type", href: "/containers", icon: Container, resource: "containers" },
-      { label: "Commodity", href: "/commodities", icon: Package, resource: "commodities" },
-      { label: "Pajak", href: "/taxes", icon: Percent, resource: "taxes" },
-      { label: "Chart of Accounts", href: "/coa", icon: BookOpen, resource: "coa" },
+      { label: "Customer", href: "/customers", icon: Users, perm: "customers.view" },
+      { label: "Vendor", href: "/vendors", icon: Building2, perm: "vendors.view" },
+      { label: "Overseas Agent", href: "/agents", icon: Globe2, perm: "agents.view" },
+      { label: "Port & Airport", href: "/ports", icon: Anchor, perm: "ports.view" },
+      { label: "Kas & Rekening", href: "/bank-accounts", icon: Banknote, perm: "bankAccounts.view" },
+      { label: "Armada Sendiri", href: "/vehicles", icon: Truck, perm: "vehicles.view" },
+      { label: "Currency & Kurs", href: "/currencies", icon: Coins, perm: "currencies.view" },
+      { label: "Charge Code", href: "/charges", icon: Tags, perm: "charges.view" },
+      { label: "Rate Card", href: "/rate-card", icon: ListChecks, perm: "rateCard.view" },
+      { label: "Aturan Berat", href: "/weight-rules", icon: Scale, perm: "weightRules.view" },
+      { label: "Container Type", href: "/containers", icon: Container, perm: "containers.view" },
+      { label: "Commodity", href: "/commodities", icon: Package, perm: "commodities.view" },
+      { label: "Pajak", href: "/taxes", icon: Percent, perm: "taxes.view" },
+      { label: "Chart of Accounts", href: "/coa", icon: BookOpen, perm: "coa.view" },
     ],
   },
   {
     label: "Sistem",
     items: [
-      { label: "User Management", href: "/users", icon: UserCog, resource: "users" },
-      { label: "Audit Log", href: "/audit", icon: History, resource: "audit" },
-      { label: "Log Error", href: "/logs", icon: Bug, resource: "audit" },
-      { label: "Setting Perusahaan", href: "/settings", icon: Settings, resource: "settings" },
+      { label: "User Management", href: "/users", icon: UserCog, perm: "users.view" },
+      { label: "Role Management", href: "/roles", icon: ShieldCheck, perm: "roles.view" },
+      { label: "Audit Log", href: "/audit", icon: History, perm: "audit.view" },
+      { label: "Log Error", href: "/logs", icon: Bug, perm: "logs.view" },
+      { label: "Setting Perusahaan", href: "/settings", icon: Settings, perm: "settings.view" },
     ],
   },
 ];

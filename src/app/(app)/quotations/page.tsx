@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { Plus } from "lucide-react";
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm, hasPerm } from "@/lib/auth-helpers";
+import { quotationScope } from "@/lib/data-scope";
 import { prisma } from "@/lib/prisma";
-import { can } from "@/lib/rbac";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { QuotationsTable, type QuoRow } from "./quotations-table";
@@ -10,8 +10,9 @@ import { QuotationsTable, type QuoRow } from "./quotations-table";
 export const dynamic = "force-dynamic";
 
 export default async function QuotationsPage() {
-  const user = await requireCan("quotations", "read");
+  const user = await requirePerm("quotations.view");
   const quos = await prisma.quotation.findMany({
+    where: quotationScope(user),
     orderBy: { createdAt: "desc" },
     include: { customer: { select: { name: true } } },
   });
@@ -23,7 +24,7 @@ export default async function QuotationsPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="Quotation" description={`${rows.length} quotation`}>
-        {can(user.role, "quotations", "write") && <Button asChild><Link href="/quotations/new"><Plus /> Quotation Baru</Link></Button>}
+        {hasPerm(user, "quotations.create") && <Button asChild><Link href="/quotations/new"><Plus /> Quotation Baru</Link></Button>}
       </PageHeader>
       <QuotationsTable data={rows} />
     </div>

@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, Pencil } from "lucide-react";
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm, hasPerm } from "@/lib/auth-helpers";
+import { customerScope, jobScope } from "@/lib/data-scope";
 import { prisma } from "@/lib/prisma";
-import { can } from "@/lib/rbac";
 import { MODE_SHORT } from "@/lib/enums";
 import { formatIDR, formatDate, formatNumber } from "@/lib/format";
 import { PageHeader } from "@/components/page-header";
@@ -18,18 +18,18 @@ export const dynamic = "force-dynamic";
 
 export default async function CustomerDetail({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const user = await requireCan("customers", "read");
-  const c = await prisma.customer.findUnique({
-    where: { id },
+  const user = await requirePerm("customers.view");
+  const c = await prisma.customer.findFirst({
+    where: { id, ...customerScope(user) },
     include: {
       salesPic: { select: { name: true } }, contacts: true,
       warehouses: { orderBy: [{ isActive: "desc" }, { name: "asc" }] },
-      jobsAsCustomer: { orderBy: { openedAt: "desc" }, take: 10, select: { id: true, number: true, mode: true, status: true, openedAt: true, revenueIdr: true } },
+      jobsAsCustomer: { where: jobScope(user), orderBy: { openedAt: "desc" }, take: 10, select: { id: true, number: true, mode: true, status: true, openedAt: true, revenueIdr: true } },
       _count: { select: { jobsAsCustomer: true, invoices: true } },
     },
   });
   if (!c) notFound();
-  const canWrite = can(user.role, "customers", "write");
+  const canWrite = hasPerm(user, "customers.edit");
 
   return (
     <div className="space-y-6">

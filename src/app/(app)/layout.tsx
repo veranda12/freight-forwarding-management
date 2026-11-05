@@ -1,14 +1,14 @@
 import { requireUser } from "@/lib/auth-helpers";
-import { resourcesForRole } from "@/lib/rbac";
+import { ALL_PERMISSION_KEYS } from "@/lib/permissions";
 import { AppShell } from "@/components/shell/app-shell";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser();
-  const allowed = resourcesForRole(user.role);
+  const allowed = user.isAdmin ? [...ALL_PERMISSION_KEYS] : [...user.permissions];
 
   return (
     <AppShell
-      user={{ name: user.name ?? "User", email: user.email ?? "", role: user.role }}
+      user={{ name: user.name, email: user.email, roleName: user.roleName }}
       allowed={allowed}
     >
       {children}

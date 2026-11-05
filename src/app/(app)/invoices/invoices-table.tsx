@@ -22,7 +22,7 @@ const FACETS: Facet[] = [
   { columnId: "status", label: "Status", options: (Object.keys(INV_STATUS_LABELS) as InvoiceStatus[]).map((s) => ({ value: s, label: INV_STATUS_LABELS[s] })) },
 ];
 
-export function InvoicesTable({ data }: { data: InvoiceRow[] }) {
+export function InvoicesTable({ data, canReceipt }: { data: InvoiceRow[]; canReceipt: boolean }) {
   const router = useRouter();
   const columns: ColumnDef<InvoiceRow>[] = [
     { accessorKey: "number", header: "No. Invoice", cell: ({ row }) => <span className="font-medium">{row.original.number}</span> },
@@ -40,7 +40,7 @@ export function InvoicesTable({ data }: { data: InvoiceRow[] }) {
             <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="h-7 w-7"><MoreHorizontal className="h-4 w-4" /></Button></DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-48">
               <DropdownMenuItem onSelect={() => router.push(`/invoices/${row.original.id}`)}><SquareArrowOutUpRight className="h-4 w-4" /> Buka detail</DropdownMenuItem>
-              {row.original.status !== "PAID" && row.original.status !== "CANCELLED" && (
+              {canReceipt && row.original.status !== "PAID" && row.original.status !== "CANCELLED" && (
                 <DropdownMenuItem onSelect={() => router.push(`/invoices/${row.original.id}`)}><Wallet className="h-4 w-4" /> Catat pembayaran</DropdownMenuItem>
               )}
             </DropdownMenuContent>

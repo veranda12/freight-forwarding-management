@@ -4,8 +4,8 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { Prisma, type QuotationStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { assertCan, requireUser, ForbiddenError } from "@/lib/auth-helpers";
-import { canConvertQuotation } from "@/lib/rbac";
+import { assertPerm, assertNotOwn, hasPerm, ForbiddenError, type SessionUser } from "@/lib/auth-helpers";
+import { quotationScope, customerScope } from "@/lib/data-scope";
 import { errorMessage } from "@/lib/action-error";
 import { writeAudit } from "@/lib/audit";
 import { genJobNumber } from "@/lib/sequence";
@@ -23,8 +23,13 @@ type QuoInput = {
 };
 
 export async function createQuotation(input: QuoInput): Promise<{ ok: boolean; error?: string; id?: string }> {
-  const user = await assertCan("quotations", "write");
-  if (!input.customerId) return { ok: false, error: "Customer wajib dipilih." };
+  let user: SessionUser;
+  try {
+    user = await assertPerm("quotations.create");
+    if (!input.customerId) throw new Error("Customer wajib dipilih.");
+    const cust = await prisma.customer.findFirst({ where: { id: input.customerId, ...customerScope(user) }, select: { id: true } });
+    if (!cust) throw new Error("Customer tidak ditemukan.");
+  } catch (e) { return { ok: false, error: errorMessage(e, "Gagal membuat quotation.") }; }
   const lines = (input.lines ?? []).filter((l) => l.chargeCodeId);
   if (lines.length === 0) return { ok: false, error: "Minimal satu baris charge." };
 
@@ -44,7 +49,7 @@ export async function createQuotation(input: QuoInput): Promise<{ ok: boolean; e
     const validUntil = input.validUntil ? new Date(input.validUntil) : new Date(Date.now() + 30 * 86400000);
     const quo = await tx.quotation.create({
       data: {
-        number, customerId: input.customerId, ownerId: input.ownerId || user.id,
+        number, customerId: input.customerId, ownerId: input.ownerId || user.id, createdById: user.id,
         mode: input.mode as any, direction: input.direction as any,
         currency: input.currency || "USD", exchangeRate: new Prisma.Decimal(fx),
         validUntil, status: "DRAFT", incoterm: input.incoterm || null,
@@ -72,19 +77,83 @@ export async function createQuotation(input: QuoInput): Promise<{ ok: boolean; e
   return { ok: true, id };
 }
 
-export async function setQuotationStatus(id: string, status: QuotationStatus) {
-  const user = await assertCan("quotations", "write");
-  await prisma.quotation.update({
-    where: { id },
-    data: {
-      status,
-      ...(status === "SENT" ? { sentAt: new Date() } : {}),
-      ...(["ACCEPTED", "REJECTED"].includes(status) ? { decidedAt: new Date() } : {}),
-    },
+type Result = { ok: true } | { ok: false; error: string };
+const fail = (e: unknown, fallback: string): Result => ({ ok: false, error: errorMessage(e, fallback) });
+
+/** Quotation dalam batas data user, atau error (diperlakukan seperti tidak ada). */
+async function quotationInScope(user: SessionUser, id: string) {
+  const quo = await prisma.quotation.findFirst({
+    where: { id, ...quotationScope(user) },
+    select: { id: true, number: true, status: true, needsApproval: true, createdById: true, ownerId: true, submittedById: true, sentById: true },
   });
-  await writeAudit({ entity: "Quotation", entityId: id, action: "STATUS", summary: status, userId: user.id });
+  if (!quo) throw new Error("Quotation tidak ditemukan.");
+  return quo;
+}
+
+/** Ubah status hanya bila status saat ini masih `from` (aman dari klik ganda / dua user bersamaan). */
+async function transition(id: string, from: QuotationStatus, data: Prisma.QuotationUpdateManyMutationInput) {
+  const res = await prisma.quotation.updateMany({ where: { id, status: from }, data });
+  if (res.count === 0) throw new Error("Status quotation sudah berubah. Muat ulang halaman.");
+}
+
+async function done(user: SessionUser, id: string, action: string, summary?: string): Promise<Result> {
+  await writeAudit({ entity: "Quotation", entityId: id, action, summary, userId: user.id });
   revalidatePath(`/quotations/${id}`);
   revalidatePath("/quotations");
+  return { ok: true };
+}
+
+/** Sales: Draft → Diajukan. */
+export async function submitQuotation(id: string): Promise<Result> {
+  try {
+    const user = await assertPerm("quotations.submit");
+    const quo = await quotationInScope(user, id);
+    if (quo.status !== "DRAFT") throw new Error("Hanya quotation Draft yang bisa diajukan.");
+    await transition(id, "DRAFT", { status: "SUBMITTED", submittedById: user.id, submittedAt: new Date(), returnNote: null });
+    return done(user, id, "SUBMIT", quo.number);
+  } catch (e) { return fail(e, "Gagal mengajukan quotation."); }
+}
+
+/** Operation: Diajukan → Draft dengan catatan revisi. */
+export async function returnQuotation(id: string, note: string): Promise<Result> {
+  try {
+    const user = await assertPerm("quotations.return");
+    const why = (note ?? "").trim();
+    if (why.length < 3) throw new Error("Catatan revisi wajib diisi (minimal 3 karakter).");
+    const quo = await quotationInScope(user, id);
+    if (quo.status !== "SUBMITTED") throw new Error("Hanya quotation berstatus Diajukan yang bisa dikembalikan.");
+    assertNotOwn(user, "quotations.decideOwn", [quo.createdById, quo.submittedById], "mengembalikan");
+    await transition(id, "SUBMITTED", { status: "DRAFT", returnNote: why, submittedById: null, submittedAt: null });
+    return done(user, id, "RETURN", why);
+  } catch (e) { return fail(e, "Gagal mengembalikan quotation."); }
+}
+
+/** Operation: Diajukan → Sent. Margin < 10% butuh izin tambahan. */
+export async function sendQuotation(id: string): Promise<Result> {
+  try {
+    const user = await assertPerm("quotations.send");
+    const quo = await quotationInScope(user, id);
+    if (quo.status !== "SUBMITTED") throw new Error("Hanya quotation berstatus Diajukan yang bisa dikirim.");
+    if (quo.needsApproval && !hasPerm(user, "quotations.sendLowMargin")) {
+      throw new ForbiddenError("Margin quotation di bawah 10%: perlu user yang berwenang mengirim quotation margin rendah.");
+    }
+    assertNotOwn(user, "quotations.decideOwn", [quo.createdById, quo.submittedById], "mengirim");
+    await transition(id, "SUBMITTED", { status: "SENT", sentById: user.id, sentAt: new Date(), ...(quo.needsApproval ? { approvedById: user.id, approvedAt: new Date() } : {}) });
+    return done(user, id, "SEND", quo.number);
+  } catch (e) { return fail(e, "Gagal mengirim quotation."); }
+}
+
+/** Operation: Sent → Accepted / Rejected (jawaban customer). */
+export async function decideQuotation(id: string, decision: "ACCEPTED" | "REJECTED"): Promise<Result> {
+  try {
+    const user = await assertPerm("quotations.decide");
+    if (decision !== "ACCEPTED" && decision !== "REJECTED") throw new Error("Keputusan tidak dikenal.");
+    const quo = await quotationInScope(user, id);
+    if (quo.status !== "SENT") throw new Error("Hanya quotation berstatus Sent yang bisa diterima atau ditolak.");
+    assertNotOwn(user, "quotations.decideOwn", [quo.createdById, quo.submittedById, quo.sentById], decision === "ACCEPTED" ? "menerima" : "menolak");
+    await transition(id, "SENT", { status: decision, decidedById: user.id, decidedAt: new Date() });
+    return done(user, id, decision === "ACCEPTED" ? "ACCEPT" : "REJECT", quo.number);
+  } catch (e) { return fail(e, "Gagal menyimpan keputusan quotation."); }
 }
 
 /**
@@ -94,8 +163,8 @@ export async function setQuotationStatus(id: string, status: QuotationStatus) {
 export async function convertQuotationToJob(quotationId: string): Promise<{ ok: false; error: string } | void> {
   let jobId: string;
   try {
-    const user = await requireUser();
-    if (!canConvertQuotation(user.role)) throw new ForbiddenError("quotations/jobs", "write");
+    const user = await assertPerm("quotations.convert");
+    await quotationInScope(user, quotationId);
     jobId = await convertQuotationCore(quotationId, user.id);
   } catch (e) {
     return { ok: false, error: errorMessage(e, "Gagal konversi ke job.") };
@@ -152,7 +221,7 @@ async function convertQuotationCore(quotationId: string, userId: string): Promis
       data: {
         number, mode: quo.mode, direction: quo.direction, status: "DRAFT",
         ...route,
-        customerId: quo.customerId, salesPicId: quo.ownerId,
+        customerId: quo.customerId, salesPicId: quo.ownerId, createdById: userId,
         incoterm: quo.incoterm,
         shipperName: quo.direction === "EXPORT" ? quo.customer.name : null,
         consigneeName: quo.direction === "IMPORT" ? quo.customer.name : null,

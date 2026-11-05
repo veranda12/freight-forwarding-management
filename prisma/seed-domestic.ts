@@ -6,6 +6,7 @@
  * Membuat (jika belum ada): akun COA 4500/5500, charge code DOMFRT/PACK, aturan berat default,
  * tarif domestik per kota, dan ±36 STT demo. Tidak mengubah data Ekspor-Impor.
  */
+import { roleIdOf } from "../src/lib/roles";
 import { PrismaClient, Prisma, type DomesticMode, type DomesticStatus } from "@prisma/client";
 import { PRISMA_CLIENT_OPTIONS } from "../src/lib/prisma-options";
 import { DEFAULT_WEIGHT_RULES, quoteDomestic } from "../src/lib/chargeable";
@@ -142,7 +143,7 @@ export async function seedDomestic(prisma: PrismaClient) {
   const tariffs = await prisma.domesticTariff.findMany();
   const customers = await prisma.customer.findMany({ where: { isActive: true }, select: { id: true, name: true, address: true, phone: true }, take: 40 });
   const vendors = await prisma.vendor.findMany({ select: { id: true, type: true } });
-  const users = await prisma.user.findMany({ where: { role: { in: ["OPERATION", "ADMIN"] } }, select: { id: true } });
+  const users = await prisma.user.findMany({ where: { roleId: { in: [roleIdOf("OPERATION"), roleIdOf("ADMIN")] } }, select: { id: true } });
   if (!customers.length) { console.log("    Tidak ada customer — lewati STT demo."); return; }
   const vendorFor = (mode: DomesticMode) => {
     const type = mode === "DARAT" ? "TRUCKING" : mode === "LAUT" ? "SHIPPING_LINE" : "AIRLINE";

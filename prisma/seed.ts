@@ -9,6 +9,7 @@ import {
 import { seedDomestic } from "./seed-domestic";
 import { seedAccountingExt } from "./seed-accounting-ext";
 import { seedClearance } from "./seed-clearance";
+import { ensureDefaultRoles, roleIdOf } from "../src/lib/roles";
 
 const prisma = new PrismaClient(PRISMA_CLIENT_OPTIONS);
 
@@ -117,24 +118,28 @@ async function main() {
   // ---------- Users ----------
   console.log("  • User & akun demo…");
   const hash = await bcrypt.hash("demo123", 10);
+  await ensureDefaultRoles(prisma);
   const demoUsers = [
-    { name: "Admin Sistem", email: "admin@demo.com", role: "ADMIN" as const },
-    { name: "Rina Sales", email: "sales@demo.com", role: "SALES" as const },
-    { name: "Budi Operasional", email: "ops@demo.com", role: "OPERATION" as const },
-    { name: "Dewi Dokumentasi", email: "docs@demo.com", role: "DOCUMENTATION" as const },
-    { name: "Fajar Finance", email: "finance@demo.com", role: "FINANCE" as const },
-    { name: "Hadi Manajemen", email: "manager@demo.com", role: "MANAGEMENT" as const },
+    { name: "Admin Sistem", email: "admin@demo.com", role: "ADMIN" },
+    { name: "Rina Sales", email: "sales@demo.com", role: "SALES" },
+    { name: "Budi Operasional", email: "ops@demo.com", role: "OPERATION" },
+    // Operation kedua: maker-checker melarang pengirim quotation memutuskan quotation kirimannya sendiri.
+    { name: "Sari Operasional", email: "ops2@demo.com", role: "OPERATION" },
+    { name: "Dewi Dokumentasi", email: "docs@demo.com", role: "DOCUMENTATION" },
+    { name: "Fajar Finance", email: "finance@demo.com", role: "FINANCE" },
+    { name: "Hadi Manajemen", email: "manager@demo.com", role: "MANAGEMENT" },
   ];
-  const users = [];
-  for (const u of demoUsers) {
-    users.push(await prisma.user.create({ data: { ...u, passwordHash: hash } }));
+  const users: { id: string; role: string }[] = [];
+  for (const { role, ...u } of demoUsers) {
+    const created = await prisma.user.create({ data: { ...u, roleId: roleIdOf(role), passwordHash: hash } });
+    users.push({ id: created.id, role });
   }
   // extra sales staff
-  const salesTeam = [users.find((u) => u.role === "SALES")!];
+  const salesTeam: { id: string }[] = [users.find((u) => u.role === "SALES")!];
   for (const name of ["Indah Sari", "Agus Wijaya"]) {
     salesTeam.push(
       await prisma.user.create({
-        data: { name, email: faker.internet.email({ firstName: name.split(" ")[0] }).toLowerCase(), role: "SALES", passwordHash: hash },
+        data: { name, email: faker.internet.email({ firstName: name.split(" ")[0] }).toLowerCase(), roleId: roleIdOf("SALES"), passwordHash: hash },
       })
     );
   }
@@ -1079,7 +1084,7 @@ async function main() {
     const margin = r2(totalSell - totalBuy);
     await prisma.quotation.create({
       data: {
-        number: nextNum("QUO", d), customerId: cust.id, ownerId: cust.salesPicId,
+        number: nextNum("QUO", d), customerId: cust.id, ownerId: cust.salesPicId, createdById: cust.salesPicId,
         mode, direction, currency: cur, exchangeRate: new Prisma.Decimal(fx),
         validUntil: addDays(d, 30), status: status as any,
         originText: direction === "EXPORT" ? "Jakarta (IDTPP)" : pick(["Shanghai", "Singapore"]),

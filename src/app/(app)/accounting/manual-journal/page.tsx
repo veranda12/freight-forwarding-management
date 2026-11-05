@@ -1,6 +1,5 @@
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm, hasPerm } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
-import { can } from "@/lib/rbac";
 import { listManualJournals, manualAccountInfo } from "@/lib/manual-journal";
 import { formatIDR } from "@/lib/format";
 import { PageHeader } from "@/components/page-header";
@@ -10,7 +9,7 @@ import { ManualJournalPanel } from "./manual-journal-panel";
 export const dynamic = "force-dynamic";
 
 export default async function ManualJournalPage() {
-  const user = await requireCan("accounting", "read");
+  const user = await requirePerm("manualJournal.view");
   const today = new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10);
   const [info, entries] = await Promise.all([manualAccountInfo(prisma), listManualJournals(prisma)]);
   // Hanya akun yang boleh dipakai: bisa diposting, aktif, dan bukan piutang, hutang, atau rekening valas.
@@ -31,7 +30,7 @@ export default async function ManualJournalPage() {
         { label: "Nilai jurnal berlaku", value: formatIDR(active.reduce((s, e) => s + e.total, 0)) },
         { label: "Dibatalkan", value: entries.length - active.length, tone: entries.length - active.length ? "warning" : undefined },
       ]} />
-      <ManualJournalPanel accounts={accounts} entries={entries} today={today} canWrite={can(user.role, "accounting", "write")} />
+      <ManualJournalPanel accounts={accounts} entries={entries} today={today} canCreate={hasPerm(user, "manualJournal.create")} canCancel={hasPerm(user, "manualJournal.cancel")} />
     </div>
   );
 }

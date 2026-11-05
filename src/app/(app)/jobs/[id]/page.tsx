@@ -3,9 +3,9 @@ import { notFound } from "next/navigation";
 import {
   Ship, Plane, Truck, FileCheck, Package, Download, ExternalLink,
 } from "lucide-react";
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm, hasPerm } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
-import { can } from "@/lib/rbac";
+import { jobScope } from "@/lib/data-scope";
 import { MODE_LABELS, DIRECTION_LABELS, LANE_LABELS } from "@/lib/enums";
 import { formatIDR, formatMoney, formatDate, formatNumber, formatPercent } from "@/lib/format";
 import { PageHeader } from "@/components/page-header";
@@ -60,14 +60,18 @@ const DOC_TYPES = [
 
 export default async function JobDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const user = await requireCan("jobs", "read");
-  const canWrite = can(user.role, "jobs", "write");
-  const canDocs = can(user.role, "documents", "read");
-  const canInvoice = can(user.role, "invoices", "write");
-  const canFin = ["ADMIN", "FINANCE", "SALES", "MANAGEMENT"].includes(user.role);
+  const user = await requirePerm("jobs.view");
+  const canStatus = hasPerm(user, "jobs.status");
+  const canCancel = hasPerm(user, "jobs.cancel");
+  const canMilestone = hasPerm(user, "jobs.milestone");
+  const canClearance = hasPerm(user, "jobs.clearance");
+  const canGenerateDocs = hasPerm(user, "documents.generate");
+  const canInvoice = hasPerm(user, "invoices.create");
+  // Proksi sementara kolom uang: role yang boleh melihat invoice (dulu ADMIN/FINANCE/SALES/MANAGEMENT).
+  const canFin = hasPerm(user, "jobs.viewFinancials");
 
-  const job = await prisma.job.findUnique({
-    where: { id },
+  const job = await prisma.job.findFirst({
+    where: { id, ...jobScope(user) },
     include: {
       customer: true,
       warehouse: true,
@@ -101,10 +105,11 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
     acc[k].amount += Number(c.actualIdr);
     return acc;
   }, {}));
-  const canBill = can(user.role, "bills", "write");
-  const canContainers = can(user.role, "containers", "write");
+  const canBill = hasPerm(user, "bills.create");
+  const canFleetCost = hasPerm(user, "jobs.fleetCost");
+  const canContainers = hasPerm(user, "jobs.containers");
   const containerTypes = await prisma.containerType.findMany({ where: { isActive: true }, orderBy: { code: "asc" }, select: { id: true, code: true, name: true } });
-  const canCosting = can(user.role, "costing", "write") && job.status !== "CANCELLED";
+  const canCosting = hasPerm(user, "jobs.charges") && job.status !== "CANCELLED";
   let chargeOptions: ChargeFormOptions | null = null;
   if (canCosting) {
     const [charges, allCurrencies, vendors, vehicles] = await Promise.all([
@@ -125,7 +130,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
       vehicles: vehicles.map((v) => ({ id: v.id, label: `${v.plate} · ${v.type}` })),
     };
   }
-  const warehouses = canWrite || canContainers
+  const warehouses = canClearance || canContainers
     ? (await prisma.warehouse.findMany({ where: { customerId: job.customerId, isActive: true }, orderBy: { name: "asc" } }))
         .map((w) => ({ id: w.id, name: w.name, address: w.address, city: w.city, distanceKm: w.distanceKm == null ? null : Number(w.distanceKm) }))
     : [];
@@ -173,7 +178,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
           description={`${MODE_LABELS[job.mode]} · ${DIRECTION_LABELS[job.direction]} · ${job.customer.name}`}
         >
           <JobStatusBadge status={job.status} />
-          {canWrite && <StatusControl jobId={job.id} current={job.status} />}
+          {(canStatus || canCancel) && <StatusControl jobId={job.id} current={job.status} canStatus={canStatus} canCancel={canCancel} />}
         </PageHeader>
       </div>
 
@@ -267,7 +272,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
             <Card className="lg:col-span-2">
               <CardHeader className="flex-row items-center justify-between">
                 <CardTitle className="text-base">Clearance & Delivery</CardTitle>
-                {canWrite && (
+                {canClearance && (
                   <ClearanceForm jobId={job.id} warehouses={warehouses} initial={{
                     customsLane: job.customsLane, warehouseId: job.warehouseId, deliveryAddress: job.deliveryAddress,
                     distanceKm: job.distanceKm == null ? null : Number(job.distanceKm),
@@ -366,7 +371,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
           <Card>
             <CardHeader><CardTitle className="text-base">Timeline Milestone</CardTitle></CardHeader>
             <CardContent>
-              <MilestoneTimeline jobId={job.id} items={milestoneItems} canWrite={canWrite} />
+              <MilestoneTimeline jobId={job.id} items={milestoneItems} canWrite={canMilestone} />
             </CardContent>
           </Card>
         </TabsContent>
@@ -377,7 +382,8 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
             <Card>
               <CardHeader><CardTitle className="text-base">Generate Dokumen PDF</CardTitle></CardHeader>
               <CardContent className="space-y-2">
-                {DOC_TYPES.map((d) => (
+                {!canGenerateDocs && <p className="text-sm text-muted-foreground">Anda tidak punya izin mencetak dokumen.</p>}
+                {canGenerateDocs && DOC_TYPES.map((d) => (
                   <a key={d.kind} href={`/api/documents/${d.kind.toLowerCase()}/${job.id}`} target="_blank" rel="noopener"
                      className="flex items-center justify-between rounded-md border px-3 py-2 text-sm hover:bg-accent">
                     <span className="flex items-center gap-2"><FileCheck className="h-4 w-4 text-muted-foreground" />{d.label}</span>
@@ -413,7 +419,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
                 Job ini belum punya charge. Job dari quotation membawa charge-nya otomatis. Untuk job yang dibuat langsung, tambahkan charge selling (untuk invoice) dan buying (untuk bill vendor) di bawah.
               </p>
             )}
-            {canCosting && !isAir && (
+            {canClearance && job.status !== "CANCELLED" && !isAir && (
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/30 px-4 py-3 text-sm">
                 <p className="text-muted-foreground">
                   Selling charge bisa dihitung otomatis dari rate card: {job.containers.length ? summarizeContainers(job.containers) : "belum ada container"}
@@ -423,7 +429,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
               </div>
             )}
             <CostTable title="Selling (Revenue)" side="SELLING" jobId={job.id} rows={selling} totalIdr={revenue} tone="success" chargeOptions={chargeOptions} />
-            <CostTable title="Buying (Cost)" side="BUYING" jobId={job.id} rows={buying} totalIdr={cost} tone="destructive" recordable={canBill} chargeOptions={chargeOptions} />
+            <CostTable title="Buying (Cost)" side="BUYING" jobId={job.id} rows={buying} totalIdr={cost} tone="destructive" recordable={canFleetCost} chargeOptions={chargeOptions} />
             <Card>
               <CardContent className="flex flex-wrap items-center justify-between gap-4 p-5">
                 <div><p className="text-sm text-muted-foreground">Gross Profit</p><p className={cn("text-2xl font-semibold", profit < 0 && "text-destructive")}>{formatIDR(profit)}</p></div>
@@ -516,7 +522,6 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
           </div>
         </TabsContent>
       </Tabs>
-      {!canDocs && null}
     </div>
   );
 }

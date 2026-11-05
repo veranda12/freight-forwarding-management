@@ -2,14 +2,14 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
-import { assertCan } from "@/lib/auth-helpers";
+import { assertPerm } from "@/lib/auth-helpers";
 import { writeAudit } from "@/lib/audit";
 import { commoditySchema } from "@/lib/validators";
 import { clean } from "@/lib/crud";
 import type { EntityActionResult } from "@/components/crud/entity-form";
 
 export async function saveCommodity(values: Record<string, unknown>): Promise<EntityActionResult> {
-  const user = await assertCan("commodities", "write");
+  const user = await assertPerm("commodities.edit");
   const parsed = commoditySchema.safeParse(values);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message };
   const d = parsed.data;

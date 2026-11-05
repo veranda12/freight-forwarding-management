@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Briefcase } from "lucide-react";
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm, hasPerm } from "@/lib/auth-helpers";
+import { billScope } from "@/lib/data-scope";
 import { prisma } from "@/lib/prisma";
-import { can } from "@/lib/rbac";
 import { formatIDR, formatDate, formatNumber } from "@/lib/format";
 import { latestRate } from "@/lib/fx";
 import { r2 } from "@/lib/accounting-core";
@@ -20,11 +20,11 @@ export const dynamic = "force-dynamic";
 
 export default async function BillDetail({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const user = await requireCan("bills", "read");
-  const canPay = can(user.role, "payments", "write");
+  const user = await requirePerm("bills.view");
+  const canPay = hasPerm(user, "bills.pay");
 
-  const bill = await prisma.vendorBill.findUnique({
-    where: { id },
+  const bill = await prisma.vendorBill.findFirst({
+    where: { id, ...billScope(user) },
     include: {
       vendor: { select: { name: true, code: true, isForeign: true } },
       job: { select: { id: true, number: true } },

@@ -1,4 +1,5 @@
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm, hasPerm } from "@/lib/auth-helpers";
+import { invoiceScope } from "@/lib/data-scope";
 import { prisma } from "@/lib/prisma";
 import { formatIDR } from "@/lib/format";
 import { PageHeader } from "@/components/page-header";
@@ -8,8 +9,9 @@ import { InvoicesTable, type InvoiceRow } from "./invoices-table";
 export const dynamic = "force-dynamic";
 
 export default async function InvoicesPage() {
-  await requireCan("invoices", "read");
+  const user = await requirePerm("invoices.view");
   const invoices = await prisma.invoice.findMany({
+    where: invoiceScope(user),
     orderBy: { date: "desc" },
     include: { customer: { select: { name: true } }, job: { select: { number: true } }, domesticShipment: { select: { number: true } } },
   });
@@ -32,7 +34,7 @@ export default async function InvoicesPage() {
         { label: "Overdue", value: formatIDR(overdue), tone: "destructive" },
         { label: "Lunas", value: formatIDR(paid), tone: "success" },
       ]} />
-      <InvoicesTable data={rows} />
+      <InvoicesTable data={rows} canReceipt={hasPerm(user, "invoices.receipt")} />
     </div>
   );
 }

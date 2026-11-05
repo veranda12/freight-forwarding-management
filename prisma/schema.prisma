@@ -14,15 +14,6 @@ datasource db {
 // ENUMS
 // ============================================================
 
-enum Role {
-  ADMIN
-  SALES
-  OPERATION
-  DOCUMENTATION
-  FINANCE
-  MANAGEMENT
-}
-
 enum TransportMode {
   SEA_FCL
   SEA_LCL
@@ -74,6 +65,7 @@ enum JobStatus {
 
 enum QuotationStatus {
   DRAFT
+  SUBMITTED
   SENT
   ACCEPTED
   REJECTED
@@ -243,7 +235,8 @@ model User {
   name          String
   email         String    @unique
   passwordHash  String
-  role          Role      @default(OPERATION)
+  roleId        String
+  appRole       AppRole   @relation(fields: [roleId], references: [id])
   phone         String?
   isActive      Boolean   @default(true)
   image         String?   @db.Text
@@ -366,6 +359,7 @@ model Customer {
   salesPicId    String?
   salesPic      User?    @relation("CustomerSalesPic", fields: [salesPicId], references: [id])
   isActive      Boolean  @default(true)
+  createdById   String? // pembuat (untuk batas data & maker-checker); data lama null
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -378,6 +372,7 @@ model Customer {
   warehouses        Warehouse[]
 
   @@index([name])
+  @@index([createdById])
 }
 
 model CustomerContact {
@@ -661,8 +656,14 @@ model Quotation {
   needsApproval Boolean         @default(false)
   approvedById  String?
   approvedAt    DateTime?
+  submittedById String?
+  submittedAt   DateTime?
+  sentById      String?
   sentAt        DateTime?
+  decidedById   String?
   decidedAt     DateTime?
+  returnNote    String?         @db.Text
+  createdById   String? // pembuat (untuk batas data & maker-checker); data lama null
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
 
@@ -670,6 +671,7 @@ model Quotation {
   job   Job?
 
   @@index([status])
+  @@index([createdById])
 }
 
 model QuotationLine {
@@ -769,10 +771,11 @@ model Job {
   profitIdr  Decimal @default(0) @db.Decimal(18, 2)
   marginPct  Decimal @default(0) @db.Decimal(6, 2)
 
-  openedAt  DateTime  @default(now())
-  closedAt  DateTime?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  openedAt    DateTime  @default(now())
+  closedAt    DateTime?
+  createdById String? // pembuat (untuk batas data & maker-checker); data lama null
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   containers JobContainer[]
   milestones Milestone[]
@@ -786,6 +789,7 @@ model Job {
   @@index([mode])
   @@index([openedAt])
   @@index([customerId])
+  @@index([createdById])
 }
 
 model JobContainer {
@@ -927,6 +931,7 @@ model Invoice {
   notes              String?           @db.Text
   journalEntryId     String?
   postedAt           DateTime?
+  createdById        String? // pembuat (untuk batas data & maker-checker); data lama null
   createdAt          DateTime          @default(now())
   updatedAt          DateTime          @updatedAt
 
@@ -937,6 +942,7 @@ model Invoice {
   @@index([status])
   @@index([customerId])
   @@index([dueDate])
+  @@index([createdById])
 }
 
 model InvoiceLine {
@@ -983,6 +989,7 @@ model VendorBill {
   notes             String?    @db.Text
   journalEntryId    String?
   postedAt          DateTime?
+  createdById       String? // pembuat (untuk batas data & maker-checker); data lama null
   createdAt         DateTime   @default(now())
   updatedAt         DateTime   @updatedAt
 
@@ -992,6 +999,7 @@ model VendorBill {
   @@index([status])
   @@index([vendorId])
   @@index([dueDate])
+  @@index([createdById])
 }
 
 model BillLine {
@@ -1021,7 +1029,10 @@ model Note {
   description    String?        @db.Text
   status         NoteStatus     @default(ISSUED)
   journalEntryId String?
+  createdById    String? // pembuat (untuk batas data & maker-checker); data lama null
   createdAt      DateTime       @default(now())
+
+  @@index([createdById])
 }
 
 model Payment {
@@ -1040,6 +1051,7 @@ model Payment {
   amount         Decimal          @default(0) @db.Decimal(18, 2) // IDR total
   notes          String?          @db.Text
   journalEntryId String?
+  createdById    String? // pembuat (untuk batas data & maker-checker); data lama null
   createdAt      DateTime         @default(now())
 
   bankAccountId String?
@@ -1049,6 +1061,7 @@ model Payment {
 
   @@index([direction])
   @@index([date])
+  @@index([createdById])
 }
 
 model PaymentAllocation {
@@ -1400,4 +1413,22 @@ model RateCardItem {
   createdAt       DateTime        @default(now())
 
   @@index([chargeCodeId])
+}
+
+// ============================================================
+// ROLE MANAGEMENT
+// ============================================================
+
+/// Role kustom. `permissions` = daftar kunci izin dari src/lib/permissions.ts. Role sistem (Admin) selalu semua izin.
+model AppRole {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  name        String
+  description String?  @db.Text
+  isSystem    Boolean  @default(false)
+  permissions Json
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users User[]
 }

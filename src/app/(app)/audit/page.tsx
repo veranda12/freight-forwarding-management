@@ -1,4 +1,4 @@
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
 import { formatDateTime } from "@/lib/format";
 import { PageHeader } from "@/components/page-header";
@@ -10,7 +10,7 @@ import { EmptyState } from "@/components/empty-state";
 export const dynamic = "force-dynamic";
 
 export default async function AuditPage() {
-  await requireCan("audit", "read", { redirectTo: "/dashboard" });
+  await requirePerm("audit.view");
   const logs = await prisma.auditLog.findMany({
     orderBy: { createdAt: "desc" }, take: 200,
     include: { user: { select: { name: true } } },

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
@@ -13,7 +13,7 @@ export const dynamic = "force-dynamic";
 
 export default async function EditVendorPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  await requireCan("vendors", "write", { redirectTo: "/vendors" });
+  await requirePerm("vendors.edit", { redirectTo: "/vendors" });
   const v = await prisma.vendor.findUnique({ where: { id } });
   if (!v) notFound();
   return (

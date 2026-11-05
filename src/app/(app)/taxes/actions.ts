@@ -3,14 +3,14 @@
 import { revalidatePath } from "next/cache";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { assertCan } from "@/lib/auth-helpers";
+import { assertPerm } from "@/lib/auth-helpers";
 import { writeAudit } from "@/lib/audit";
 import { taxSchema } from "@/lib/validators";
 import { clean } from "@/lib/crud";
 import type { EntityActionResult } from "@/components/crud/entity-form";
 
 export async function saveTax(values: Record<string, unknown>): Promise<EntityActionResult> {
-  const user = await assertCan("taxes", "write");
+  const user = await assertPerm("taxes.edit");
   const parsed = taxSchema.safeParse(values);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message };
   const d = parsed.data;

@@ -1,4 +1,4 @@
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm, hasPerm } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
@@ -13,7 +13,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 export const dynamic = "force-dynamic";
 
 export default async function ChargesPage() {
-  await requireCan("charges", "read");
+  const user = await requirePerm("charges.view");
+  const canCreate = hasPerm(user, "charges.create");
+  const canEdit = hasPerm(user, "charges.edit");
   const charges = await prisma.chargeCode.findMany({
     orderBy: { code: "asc" },
     include: { revenueAccount: true, expenseAccount: true },
@@ -28,7 +30,7 @@ export default async function ChargesPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="Charge Code" description={`${charges.length} kode biaya dengan mapping akun pendapatan & biaya`}>
-        <ChargeNew revenueAccounts={revenueAccounts} expenseAccounts={expenseAccounts} />
+        {canCreate && <ChargeNew revenueAccounts={revenueAccounts} expenseAccounts={expenseAccounts} />}
       </PageHeader>
       <Card>
         <CardContent className="p-0">
@@ -48,7 +50,7 @@ export default async function ChargesPage() {
                   <TableCell>{c.defaultTaxable ? <Badge variant="outline">11%</Badge> : "-"}</TableCell>
                   <TableCell>{c.isPph23 ? <Badge variant="outline">2%</Badge> : "-"}</TableCell>
                   <TableCell>{c.isPph26 ? <Badge variant="outline">{Number(c.pph26Rate)}%</Badge> : "-"}</TableCell>
-                  <TableCell className="text-right whitespace-nowrap"><ChargeMapEdit id={c.id} code={c.code} name={c.name} revenueAccountId={c.revenueAccountId} expenseAccountId={c.expenseAccountId} revenueAccounts={revenueAccounts} expenseAccounts={expenseAccounts} /><ChargePrintEdit id={c.id} code={c.code} name={c.name} invoiceSection={c.invoiceSection} asReceipt={c.asReceipt} /><ChargeTaxEdit id={c.id} code={c.code} name={c.name} defaultTaxable={c.defaultTaxable} isPph23={c.isPph23} isPph26={c.isPph26} pph26Rate={Number(c.pph26Rate)} /></TableCell>
+                  <TableCell className="text-right whitespace-nowrap">{canEdit && <><ChargeMapEdit id={c.id} code={c.code} name={c.name} revenueAccountId={c.revenueAccountId} expenseAccountId={c.expenseAccountId} revenueAccounts={revenueAccounts} expenseAccounts={expenseAccounts} /><ChargePrintEdit id={c.id} code={c.code} name={c.name} invoiceSection={c.invoiceSection} asReceipt={c.asReceipt} /><ChargeTaxEdit id={c.id} code={c.code} name={c.name} defaultTaxable={c.defaultTaxable} isPph23={c.isPph23} isPph26={c.isPph26} pph26Rate={Number(c.pph26Rate)} /></>}</TableCell>
                 </TableRow>
               ))}
             </TableBody>

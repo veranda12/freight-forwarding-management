@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/auth";
+import { getCurrentUser } from "@/lib/auth-helpers";
 import { writeLog } from "@/lib/logger";
 
 export const runtime = "nodejs";
@@ -32,12 +32,11 @@ export async function POST(req: NextRequest) {
   const message = str(body.message, 1000);
   if (!message) return new NextResponse(null, { status: 400 });
 
-  const session = await auth().catch(() => null);
-  const user = session?.user as { id?: string; email?: string | null; role?: string } | undefined;
+  const user = await getCurrentUser().catch(() => null);
   await writeLog(body.level === "warn" ? "warn" : "error", "client", message, {
     kind: str(body.kind, 50), url: str(body.url, 500), stack: str(body.stack), componentStack: str(body.componentStack),
     digest: str(body.digest, 100), userAgent: str(body.userAgent, 300), ip,
-    ...(user ? { user: { id: user.id, email: user.email, role: user.role } } : {}),
+    ...(user ? { user: { id: user.id, email: user.email, role: user.roleName } } : {}),
   });
   return new NextResponse(null, { status: 204 });
 }

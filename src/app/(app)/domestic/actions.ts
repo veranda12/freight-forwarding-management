@@ -3,7 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { Prisma, type DomesticStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { assertCan } from "@/lib/auth-helpers";
+import { assertPerm, assertNotOwn } from "@/lib/auth-helpers";
+import { customerScope, domesticScope } from "@/lib/data-scope";
 import { writeAudit } from "@/lib/audit";
 import { genDocNumber, SEQ } from "@/lib/sequence";
 import { postJournal } from "@/lib/journal";
@@ -26,10 +27,12 @@ export type ActionResult = { ok: boolean; error?: string; id?: string };
 /* ------------------------------------------------------------------ */
 
 export async function createDomesticShipment(input: unknown): Promise<ActionResult> {
-  const user = await assertCan("domestic", "write");
+  const user = await assertPerm("domestic.create");
   const parsed = domesticShipmentSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message };
   const d = parsed.data;
+  const cust = await prisma.customer.findFirst({ where: { id: d.customerId, ...customerScope(user) }, select: { id: true } });
+  if (!cust) return { ok: false, error: "Customer tidak ditemukan." };
 
   const tariff = await prisma.domesticTariff.findFirst({
     where: { mode: d.mode, originCity: d.originCity, destCity: d.destCity, isActive: true },
@@ -94,8 +97,8 @@ export async function updateDomesticStatus(
   status: DomesticStatus,
   extra: { location?: string; note?: string; receivedBy?: string } = {},
 ): Promise<ActionResult> {
-  const user = await assertCan("domestic", "write");
-  const s = await prisma.domesticShipment.findUnique({ where: { id } });
+  const user = await assertPerm("domestic.status");
+  const s = await prisma.domesticShipment.findFirst({ where: { id, ...domesticScope(user) } });
   if (!s) return { ok: false, error: "STT tidak ditemukan." };
   if (s.status === "CANCELLED" || s.status === "DELIVERED") return { ok: false, error: "STT sudah selesai/dibatalkan." };
   if (status === "CANCELLED") return { ok: false, error: "Gunakan tombol Batalkan STT." };
@@ -122,9 +125,10 @@ export async function updateDomesticStatus(
 }
 
 export async function cancelDomesticShipment(id: string, reason?: string): Promise<ActionResult> {
-  const user = await assertCan("domestic", "write");
-  const s = await prisma.domesticShipment.findUnique({ where: { id }, include: { invoices: { where: { status: { not: "CANCELLED" } } } } });
+  const user = await assertPerm("domestic.cancel");
+  const s = await prisma.domesticShipment.findFirst({ where: { id, ...domesticScope(user) }, include: { invoices: { where: { status: { not: "CANCELLED" } } } } });
   if (!s) return { ok: false, error: "STT tidak ditemukan." };
+  try { assertNotOwn(user, "domestic.cancelOwn", [s.createdById], "membatalkan"); } catch (e) { return { ok: false, error: (e as Error).message }; }
   if (s.status === "DELIVERED" || s.status === "CANCELLED") return { ok: false, error: "STT sudah selesai/dibatalkan." };
   if (s.invoices.length) return { ok: false, error: "Batalkan invoice STT ini dulu." };
   await prisma.domesticShipment.update({
@@ -139,9 +143,9 @@ export async function cancelDomesticShipment(id: string, reason?: string): Promi
 
 /** Invoice AR dari STT (freight, packing, asuransi, lain-lain) + jurnal otomatis. */
 export async function createInvoiceFromDomestic(id: string): Promise<ActionResult> {
-  const user = await assertCan("invoices", "write");
-  const s = await prisma.domesticShipment.findUnique({
-    where: { id },
+  const user = await assertPerm("domestic.invoice");
+  const s = await prisma.domesticShipment.findFirst({
+    where: { id, ...domesticScope(user) },
     include: { customer: true, invoices: { where: { status: { not: "CANCELLED" } } } },
   });
   if (!s) return { ok: false, error: "STT tidak ditemukan." };
@@ -181,7 +185,7 @@ export async function createInvoiceFromDomestic(id: string): Promise<ActionResul
     const number = await genDocNumber(tx, SEQ.INVOICE, date);
     const inv = await tx.invoice.create({
       data: {
-        number, domesticShipmentId: s.id, customerId: s.customerId, date, dueDate, currency: "IDR",
+        number, domesticShipmentId: s.id, customerId: s.customerId, date, dueDate, currency: "IDR", createdById: user.id,
         subtotal: D(subtotal), taxableBase: D(taxableBase), ppnAmount: D(ppn), total: D(total),
         status: "UNPAID", postedAt: date, notes: `STT ${s.number}`, lines: { create: lines },
       },
@@ -207,7 +211,7 @@ export async function createInvoiceFromDomestic(id: string): Promise<ActionResul
 const titleCase = (v: string) => v.trim().toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
 
 export async function saveDomesticTariff(values: Record<string, unknown>): Promise<EntityActionResult> {
-  const user = await assertCan("domesticTariffs", "write");
+  const user = await assertPerm("domesticTariffs.edit");
   const parsed = domesticTariffSchema.safeParse(values);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message };
   const d = parsed.data;

@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm } from "@/lib/auth-helpers";
+import { jobScope } from "@/lib/data-scope";
 import { prisma } from "@/lib/prisma";
 import { formatDate } from "@/lib/format";
 import { PageHeader } from "@/components/page-header";
@@ -10,8 +11,9 @@ import { BookingStatusBadge } from "@/components/status-badge";
 export const dynamic = "force-dynamic";
 
 export default async function BookingsPage() {
-  await requireCan("bookings", "read");
+  const user = await requirePerm("bookings.view");
   const bookings = await prisma.booking.findMany({
+    where: { job: jobScope(user) },
     orderBy: { createdAt: "desc" }, take: 200,
     include: { vendor: { select: { name: true } }, job: { select: { id: true, number: true } } },
   });

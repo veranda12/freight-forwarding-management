@@ -2,9 +2,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { NextRequest, NextResponse } from "next/server";
 import { renderToBuffer } from "@react-pdf/renderer";
-import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { can } from "@/lib/rbac";
+import { getCurrentUser, hasPerm } from "@/lib/auth-helpers";
+import { invoiceScope } from "@/lib/data-scope";
 import { groupContainers } from "@/lib/rate-card";
 import { InvoiceDocument, type PdfExcludedLine, type PdfInvoice, type PdfInvoiceCompany } from "@/lib/pdf/invoice-document";
 
@@ -14,14 +14,14 @@ const LANE_EN = { GREEN: "Green lane", YELLOW: "Yellow lane", RED: "Red lane" } 
 
 /** Cetak invoice: halaman ringkas lalu halaman detail, dalam satu PDF. */
 export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  if (!can((session.user as { role?: any }).role, "invoices", "read")) return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  const user = await getCurrentUser();
+  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  if (!hasPerm(user, "invoices.print")) return NextResponse.json({ error: "forbidden" }, { status: 403 });
   const { id } = await ctx.params;
 
   const [inv, company] = await Promise.all([
-    prisma.invoice.findUnique({
-      where: { id },
+    prisma.invoice.findFirst({
+      where: { id, ...invoiceScope(user) },
       include: {
         customer: true,
         lines: { include: { chargeCode: true }, orderBy: { sortOrder: "asc" } },

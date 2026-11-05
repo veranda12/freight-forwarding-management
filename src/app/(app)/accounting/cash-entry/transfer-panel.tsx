@@ -19,8 +19,8 @@ import type { CashOpt } from "./cash-entry-panel";
 
 type Transfer = { id: string; number: string; date: string; description: string; from: string; to: string; amountIdr: number; feeIdr: number; reversed: boolean };
 
-export function TransferPanel({ cashAccounts, transfers, today, canWrite, rates }: {
-  cashAccounts: CashOpt[]; transfers: Transfer[]; today: string; canWrite: boolean; rates: Record<string, number>;
+export function TransferPanel({ cashAccounts, transfers, today, canCreate, canCancel, rates }: {
+  cashAccounts: CashOpt[]; transfers: Transfer[]; today: string; canCreate: boolean; canCancel: boolean; rates: Record<string, number>;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -57,7 +57,7 @@ export function TransferPanel({ cashAccounts, transfers, today, canWrite, rates 
 
   return (
     <div className="space-y-4">
-      {canWrite && (
+      {canCreate && (
         <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (v) setF(blank); }}>
           <DialogTrigger asChild><Button><Repeat /> Transfer antar rekening</Button></DialogTrigger>
           <DialogContent className="max-w-lg">
@@ -122,7 +122,7 @@ export function TransferPanel({ cashAccounts, transfers, today, canWrite, rates 
               <TableHeader><TableRow>
                 <TableHead>Tanggal</TableHead><TableHead>No. Jurnal</TableHead><TableHead>Dari</TableHead><TableHead>Ke</TableHead>
                 <TableHead className="text-right">Nilai (IDR)</TableHead><TableHead className="text-right">Biaya</TableHead>
-                <TableHead>Status</TableHead>{canWrite && <TableHead className="text-right">Aksi</TableHead>}
+                <TableHead>Status</TableHead>{canCancel && <TableHead className="text-right">Aksi</TableHead>}
               </TableRow></TableHeader>
               <TableBody>
                 {transfers.map((t) => (
@@ -134,7 +134,7 @@ export function TransferPanel({ cashAccounts, transfers, today, canWrite, rates 
                     <TableCell className="text-right tabular-nums">{formatIDR(t.amountIdr)}</TableCell>
                     <TableCell className="text-right tabular-nums">{t.feeIdr ? formatIDR(t.feeIdr) : "-"}</TableCell>
                     <TableCell>{t.reversed ? <Badge variant="outline">Dibatalkan</Badge> : <Badge variant="outline" className="border-success/50 text-success">Berlaku</Badge>}</TableCell>
-                    {canWrite && (
+                    {canCancel && (
                       <TableCell className="text-right">
                         {!t.reversed && <Button size="sm" variant="ghost" className="text-destructive" onClick={() => { setCancel(t); setReason(""); }}><Ban /> Batalkan</Button>}
                       </TableCell>

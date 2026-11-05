@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm } from "@/lib/auth-helpers";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { EntityForm, type FieldConfig } from "@/components/crud/entity-form";
@@ -13,7 +13,7 @@ const FIELDS: FieldConfig[] = [
 ];
 
 export default async function NewContainerTypePage() {
-  await requireCan("containers", "write", { redirectTo: "/containers" });
+  await requirePerm("containers.edit", { redirectTo: "/containers" });
   return (
     <div className="space-y-6">
       <div>

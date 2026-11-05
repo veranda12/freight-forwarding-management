@@ -1,5 +1,5 @@
 import React from "react";
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
 import { getTrialBalance, getIncomeStatement, getBalanceSheet } from "@/lib/accounting";
 import { formatIDR } from "@/lib/format";
@@ -18,7 +18,7 @@ const TB_ORDER = ["ASSET", "LIABILITY", "EQUITY", "REVENUE", "EXPENSE"] as const
 const TB_TYPE_LABEL: Record<string, string> = { ASSET: "Aset", LIABILITY: "Kewajiban", EQUITY: "Ekuitas", REVENUE: "Pendapatan", EXPENSE: "Beban" };
 
 export default async function AccountingPage({ searchParams }: { searchParams: Promise<{ asof?: string }> }) {
-  await requireCan("accounting", "read");
+  await requirePerm("accounting.view");
   const sp = await searchParams;
   const asofStr = sp.asof && /^\d{4}-\d{2}-\d{2}$/.test(sp.asof) ? sp.asof : new Date().toISOString().slice(0, 10);
   const asof = new Date(asofStr + "T23:59:59");

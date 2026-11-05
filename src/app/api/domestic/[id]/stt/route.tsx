@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { renderToBuffer } from "@react-pdf/renderer";
-import type { Role } from "@prisma/client";
-import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { can } from "@/lib/rbac";
+import { getCurrentUser, hasPerm } from "@/lib/auth-helpers";
+import { domesticScope } from "@/lib/data-scope";
 import { DOM_MODE_LABELS } from "@/lib/enums";
 import { SttDocument } from "@/lib/pdf/stt-document";
 import type { PdfCompany } from "@/lib/pdf/job-document";
@@ -11,14 +10,14 @@ import type { PdfCompany } from "@/lib/pdf/job-document";
 export const runtime = "nodejs";
 
 export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  if (!can((session.user as { role?: Role }).role, "domestic", "read")) return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  const user = await getCurrentUser();
+  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  if (!hasPerm(user, "domestic.print")) return NextResponse.json({ error: "forbidden" }, { status: 403 });
 
   const { id } = await ctx.params;
   const [stt, company] = await Promise.all([
-    prisma.domesticShipment.findUnique({
-      where: { id },
+    prisma.domesticShipment.findFirst({
+      where: { id, ...domesticScope(user) },
       include: { customer: { select: { name: true } }, packages: { orderBy: { sortOrder: "asc" } } },
     }),
     prisma.companySetting.findFirst(),

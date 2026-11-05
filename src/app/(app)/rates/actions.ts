@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { assertCan } from "@/lib/auth-helpers";
+import { assertPerm } from "@/lib/auth-helpers";
 import { writeAudit } from "@/lib/audit";
 import { rateSchema } from "@/lib/validators";
 import { clean } from "@/lib/crud";
@@ -11,11 +11,11 @@ import { clean } from "@/lib/crud";
 export type RateResult = { ok: boolean; error?: string; redirect?: string };
 
 export async function saveRate(values: Record<string, unknown>): Promise<RateResult> {
-  const user = await assertCan("rates", "write");
+  const id = clean(values.id);
+  const user = await assertPerm(id ? "rates.edit" : "rates.create");
   const parsed = rateSchema.safeParse(values);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message };
   const d = parsed.data;
-  const id = clean(values.id);
   const data = {
     vendorId: d.vendorId, mode: d.mode as any, chargeCodeId: d.chargeCodeId,
     originPortId: clean(d.originPortId), destPortId: clean(d.destPortId), containerTypeId: clean(d.containerTypeId),

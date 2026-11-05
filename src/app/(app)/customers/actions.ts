@@ -2,7 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
-import { assertCan } from "@/lib/auth-helpers";
+import { assertPerm } from "@/lib/auth-helpers";
+import { customerScope } from "@/lib/data-scope";
 import { writeAudit } from "@/lib/audit";
 import { customerSchema, type CustomerInput } from "@/lib/validators";
 import { Prisma } from "@prisma/client";
@@ -16,7 +17,7 @@ async function nextCustomerCode(): Promise<string> {
 function clean(v?: string) { return v && v.trim() !== "" ? v.trim() : null; }
 
 export async function createCustomer(input: CustomerInput): Promise<{ ok: boolean; id?: string; error?: string }> {
-  const user = await assertCan("customers", "write");
+  const user = await assertPerm("customers.create");
   const parsed = customerSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Data tidak valid" };
   const d = parsed.data;
@@ -27,6 +28,7 @@ export async function createCustomer(input: CustomerInput): Promise<{ ok: boolea
       address: clean(d.address), city: clean(d.city), phone: clean(d.phone), email: clean(d.email),
       termOfPayment: d.termOfPayment, creditLimit: new Prisma.Decimal(d.creditLimit),
       salesPicId: clean(d.salesPicId) ?? undefined,
+      createdById: user.id,
       ...(clean(d.contactName) ? { contacts: { create: [{ name: d.contactName!, position: clean(d.contactPosition), phone: clean(d.contactPhone), email: clean(d.contactEmail), isPrimary: true }] } } : {}),
     },
   });
@@ -36,7 +38,9 @@ export async function createCustomer(input: CustomerInput): Promise<{ ok: boolea
 }
 
 export async function updateCustomer(id: string, input: CustomerInput): Promise<{ ok: boolean; error?: string }> {
-  const user = await assertCan("customers", "write");
+  const user = await assertPerm("customers.edit");
+  const inScope = await prisma.customer.findFirst({ where: { id, ...customerScope(user) }, select: { id: true } });
+  if (!inScope) return { ok: false, error: "Customer tidak ditemukan." };
   const parsed = customerSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Data tidak valid" };
   const d = parsed.data;

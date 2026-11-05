@@ -1,4 +1,4 @@
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm, hasPerm } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
 import { formatNumber, formatDate } from "@/lib/format";
 import { PageHeader } from "@/components/page-header";
@@ -11,7 +11,7 @@ import { CurrencyForms } from "./currency-forms";
 export const dynamic = "force-dynamic";
 
 export default async function CurrenciesPage() {
-  await requireCan("currencies", "read");
+  const user = await requirePerm("currencies.view");
   const currencies = await prisma.currency.findMany();
   const latest = await prisma.exchangeRate.findMany({
     where: { currencyCode: { in: currencies.filter((c) => !c.isBase).map((c) => c.code) } },
@@ -24,7 +24,7 @@ export default async function CurrenciesPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="Currency & Kurs" description="Kurs terhadap IDR. Sumber: Frankfurter (data ECB), bukan kurs resmi Bank Indonesia.">
-        <SyncKursButton />
+        {hasPerm(user, "currencies.sync") && <SyncKursButton />}
       </PageHeader>
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
@@ -64,7 +64,7 @@ export default async function CurrenciesPage() {
       <Card>
         <CardHeader><CardTitle className="text-base">Tambah Mata Uang & Kurs</CardTitle></CardHeader>
         <CardContent>
-          <CurrencyForms foreign={currencies.filter((c) => !c.isBase).map((c) => ({ code: c.code, name: c.name }))} />
+          {hasPerm(user, "currencies.edit") && <CurrencyForms foreign={currencies.filter((c) => !c.isBase).map((c) => ({ code: c.code, name: c.name }))} />}
         </CardContent>
       </Card>
     </div>

@@ -4,7 +4,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
-import { assertCan } from "@/lib/auth-helpers";
+import { assertPerm } from "@/lib/auth-helpers";
 import { writeAudit } from "@/lib/audit";
 import { errorMessage } from "@/lib/action-error";
 
@@ -33,7 +33,7 @@ function parse(input: CompanyInput) {
 }
 
 export async function saveCompanySettingAction(input: CompanyInput): Promise<Result> {
-  const user = await assertCan("settings", "write");
+  const user = await assertPerm("settings.edit");
   try {
     const data = parse(input);
     const current = await prisma.companySetting.findFirst();
@@ -56,7 +56,7 @@ async function removeLogoFile(logoPath: string | null) {
 
 /** Unggah logo kop invoice (PNG/JPG, maks 800 KB). Logo lama dihapus. */
 export async function uploadCompanyLogoAction(form: FormData): Promise<Result> {
-  const user = await assertCan("settings", "write");
+  const user = await assertPerm("settings.edit");
   try {
     const file = form.get("logo");
     if (!(file instanceof File) || file.size === 0) throw new Error("Pilih file logo.");
@@ -80,7 +80,7 @@ export async function uploadCompanyLogoAction(form: FormData): Promise<Result> {
 }
 
 export async function removeCompanyLogoAction(): Promise<Result> {
-  const user = await assertCan("settings", "write");
+  const user = await assertPerm("settings.edit");
   try {
     const current = await prisma.companySetting.findFirst();
     if (!current?.logoPath) return { ok: true };

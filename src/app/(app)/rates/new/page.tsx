@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
@@ -26,7 +26,7 @@ async function options() {
 }
 
 export default async function NewRatePage() {
-  await requireCan("rates", "write", { redirectTo: "/rates" });
+  await requirePerm("rates.create", { redirectTo: "/rates" });
   const o = await options();
   return (
     <div className="space-y-5">

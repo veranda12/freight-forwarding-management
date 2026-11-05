@@ -12,7 +12,7 @@ import {
 import { JOB_STATUS_FLOW, JOB_STATUS_LABELS } from "@/lib/enums";
 import { updateJobStatus } from "../actions";
 
-export function StatusControl({ jobId, current }: { jobId: string; current: JobStatus }) {
+export function StatusControl({ jobId, current, canStatus = true, canCancel = true }: { jobId: string; current: JobStatus; canStatus?: boolean; canCancel?: boolean }) {
   const [pending, start] = useTransition();
   const router = useRouter();
 
@@ -39,15 +39,17 @@ export function StatusControl({ jobId, current }: { jobId: string; current: JobS
       <DropdownMenuContent align="end" className="w-56">
         <DropdownMenuLabel>Pindahkan status ke</DropdownMenuLabel>
         <DropdownMenuSeparator />
-        {JOB_STATUS_FLOW.map((s) => (
+        {canStatus && JOB_STATUS_FLOW.map((s) => (
           <DropdownMenuItem key={s} disabled={s === current} onSelect={() => set(s)}>
             {JOB_STATUS_LABELS[s]}
           </DropdownMenuItem>
         ))}
-        <DropdownMenuSeparator />
-        <DropdownMenuItem className="text-destructive" onSelect={() => set("CANCELLED")}>
-          Batalkan Job
-        </DropdownMenuItem>
+        {canStatus && canCancel && <DropdownMenuSeparator />}
+        {canCancel && (
+          <DropdownMenuItem className="text-destructive" onSelect={() => set("CANCELLED")}>
+            Batalkan Job
+          </DropdownMenuItem>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );

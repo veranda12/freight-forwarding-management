@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import ExcelJS from "exceljs";
-import { auth } from "@/auth";
+import { getCurrentUser, hasPerm } from "@/lib/auth-helpers";
+import { billScope, invoiceScope, jobScope } from "@/lib/data-scope";
 import { prisma } from "@/lib/prisma";
 import { getArAging, getApAging } from "@/lib/accounting";
 import { MODE_LABELS } from "@/lib/enums";
@@ -8,10 +9,15 @@ import { MODE_LABELS } from "@/lib/enums";
 export const runtime = "nodejs";
 
 export async function GET(req: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const user = await getCurrentUser();
+  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const type = req.nextUrl.searchParams.get("type") ?? "profitability";
+  // Export butuh izin export laporan + izin lihat modul sumber datanya; isinya mengikuti batas data user.
+  const sourcePerm = type === "ar-aging" ? "invoices.view" : type === "ap-aging" ? "bills.view" : "jobs.view";
+  if (!hasPerm(user, "reports.export") || !hasPerm(user, sourcePerm)) {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  }
   const wb = new ExcelJS.Workbook();
   wb.creator = "CargoFlow";
   wb.created = new Date();
@@ -30,7 +36,7 @@ export async function GET(req: NextRequest) {
       { header: "Margin %", key: "margin", width: 12, style: { numFmt: "0.0" } },
     ];
     const jobs = await prisma.job.findMany({
-      where: { status: { not: "CANCELLED" } },
+      where: { ...jobScope(user), status: { not: "CANCELLED" } },
       orderBy: { openedAt: "desc" },
       include: { customer: { select: { name: true } } },
     });
@@ -42,7 +48,7 @@ export async function GET(req: NextRequest) {
     }
     styleHeader(ws);
   } else if (type === "ar-aging" || type === "ap-aging") {
-    const data = type === "ar-aging" ? await getArAging() : await getApAging();
+    const data = type === "ar-aging" ? await getArAging(invoiceScope(user)) : await getApAging(billScope(user));
     const ws = wb.addWorksheet(type === "ar-aging" ? "AR Aging" : "AP Aging");
     ws.columns = [
       { header: type === "ar-aging" ? "Customer" : "Vendor", key: "name", width: 34 },

@@ -26,8 +26,8 @@ const TONE: Record<MasaStatus, string> = {
   PAID: "border-success/50 text-success", OVERPAID: "border-destructive/50 text-destructive",
 };
 
-export function TaxPeriodPanel({ rows, history, today, canWrite, cashAccounts, defaultCashId }: {
-  rows: PeriodRow[]; history: History[]; today: string; canWrite: boolean;
+export function TaxPeriodPanel({ rows, history, today, canCreate, canCancel, cashAccounts, defaultCashId }: {
+  rows: PeriodRow[]; history: History[]; today: string; canCreate: boolean; canCancel: boolean;
   cashAccounts: { id: string; label: string }[]; defaultCashId: string | null;
 }) {
   const router = useRouter();
@@ -79,7 +79,7 @@ export function TaxPeriodPanel({ rows, history, today, canWrite, cashAccounts, d
                   <TableCell className="whitespace-nowrap font-medium">{row.label}</TableCell>
                   {KINDS.map((k) => {
                     const cell = row.cells[k];
-                    const canRemit = canWrite && (cell.status === "UNPAID" || cell.status === "PARTIAL");
+                    const canRemit = canCreate && (cell.status === "UNPAID" || cell.status === "PARTIAL");
                     return (
                       <TableCell key={k} className="align-top">
                         <div className="space-y-1">
@@ -115,7 +115,7 @@ export function TaxPeriodPanel({ rows, history, today, canWrite, cashAccounts, d
               <TableHeader><TableRow>
                 <TableHead>Masa</TableHead><TableHead>Jenis</TableHead><TableHead>Tanggal setor</TableHead>
                 <TableHead>NTPN</TableHead><TableHead className="text-right">Nominal</TableHead><TableHead>Status</TableHead>
-                {canWrite && <TableHead className="text-right">Aksi</TableHead>}
+                {canCancel && <TableHead className="text-right">Aksi</TableHead>}
               </TableRow></TableHeader>
               <TableBody>
                 {history.map((h) => (
@@ -130,7 +130,7 @@ export function TaxPeriodPanel({ rows, history, today, canWrite, cashAccounts, d
                         ? <Badge variant="outline" className="border-success/50 text-success">Berlaku</Badge>
                         : <Badge variant="outline" className="text-muted-foreground" title={h.cancelReason ?? ""}>Dibatalkan</Badge>}
                     </TableCell>
-                    {canWrite && (
+                    {canCancel && (
                       <TableCell className="text-right">
                         {h.status === "POSTED" && (
                           <Button size="sm" variant="ghost" className="text-destructive" onClick={() => { setCancel(h); setReason(""); }}><Ban /> Batalkan</Button>

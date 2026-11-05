@@ -1,6 +1,5 @@
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm, hasPerm } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
-import { can } from "@/lib/rbac";
 import { formatIDR } from "@/lib/format";
 import { BASIS_LABELS, CONDITION_LABELS, SECTION_LABELS } from "@/lib/enums";
 import { PageHeader } from "@/components/page-header";
@@ -12,8 +11,8 @@ import { RateCardForm } from "./rate-card-form";
 export const dynamic = "force-dynamic";
 
 export default async function RateCardPage() {
-  const user = await requireCan("charges", "read");
-  const canWrite = can(user.role, "charges", "write");
+  const user = await requirePerm("rateCard.view");
+  const canWrite = hasPerm(user, "rateCard.edit");
   const [items, charges, containerTypes] = await Promise.all([
     prisma.rateCardItem.findMany({ include: { chargeCode: true, containerType: true }, orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }] }),
     prisma.chargeCode.findMany({ where: { isActive: true }, orderBy: { code: "asc" }, select: { id: true, code: true, name: true } }),

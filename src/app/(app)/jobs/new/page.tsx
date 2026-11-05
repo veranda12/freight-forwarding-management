@@ -1,6 +1,8 @@
+import { salesPicOptions } from "../../customers/sales-options";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm } from "@/lib/auth-helpers";
+import { customerScope } from "@/lib/data-scope";
 import { prisma } from "@/lib/prisma";
 import { getWeightRules, toRuleOpt } from "@/lib/weight-rules";
 import { PageHeader } from "@/components/page-header";
@@ -10,10 +12,10 @@ import { JobForm } from "../job-form";
 export const dynamic = "force-dynamic";
 
 export default async function NewJobPage() {
-  await requireCan("jobs", "write", { redirectTo: "/jobs" });
+  const user = await requirePerm("jobs.create", { redirectTo: "/jobs" });
   const [customers, sales, commodities, ports, airports, rules] = await Promise.all([
-    prisma.customer.findMany({ where: { isActive: true }, orderBy: { name: "asc" }, select: { id: true, name: true, code: true } }),
-    prisma.user.findMany({ where: { role: { in: ["SALES", "OPERATION", "ADMIN"] }, isActive: true }, orderBy: { name: "asc" }, select: { id: true, name: true } }),
+    prisma.customer.findMany({ where: { isActive: true, ...customerScope(user) }, orderBy: { name: "asc" }, select: { id: true, name: true, code: true } }),
+    salesPicOptions(["jobs.create"]),
     prisma.commodity.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true, hsCode: true } }),
     prisma.port.findMany({ orderBy: { unlocode: "asc" }, select: { id: true, unlocode: true, name: true } }),
     prisma.airport.findMany({ orderBy: { iata: "asc" }, select: { id: true, iata: true, name: true } }),

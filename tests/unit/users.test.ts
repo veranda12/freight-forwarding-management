@@ -1,14 +1,14 @@
 import { describe, it, expect } from "vitest";
 import { validateUserInput } from "@/lib/users";
 
-const base = { name: "Rina Sari", email: "  Rina@Perusahaan.co.id ", phone: "+62 812 3456 7890", role: "SALES", password: "rahasia123", confirmPassword: "rahasia123" };
+const base = { name: "Rina Sari", email: "  Rina@Perusahaan.co.id ", phone: "+62 812 3456 7890", roleId: "role_sales", password: "rahasia123", confirmPassword: "rahasia123" };
 
 describe("validateUserInput", () => {
   it("menerima input lengkap dan menormalisasi email serta nama", () => {
     const v = validateUserInput(base);
     expect(v.email).toBe("rina@perusahaan.co.id");
     expect(v.name).toBe("Rina Sari");
-    expect(v.role).toBe("SALES");
+    expect(v.roleId).toBe("role_sales");
     expect(v.phone).toBe("+62 812 3456 7890");
   });
 
@@ -30,8 +30,9 @@ describe("validateUserInput", () => {
     expect(() => validateUserInput({ ...base, phone: "0812-abc-7890" })).toThrow(/Nomor telepon/);
   });
 
-  it("menolak role yang tidak dikenal", () => {
-    expect(() => validateUserInput({ ...base, role: "SUPERUSER" })).toThrow(/Role/);
+  it("menolak role kosong", () => {
+    expect(() => validateUserInput({ ...base, roleId: "" })).toThrow(/Role wajib/);
+    expect(() => validateUserInput({ ...base, roleId: "   " })).toThrow(/Role wajib/);
   });
 
   it("menolak password pendek dan konfirmasi yang tidak sama", () => {

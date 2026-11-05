@@ -1,12 +1,13 @@
 import { redirect } from "next/navigation";
 import { Ship } from "lucide-react";
-import { auth } from "@/auth";
+import { getCurrentUser, homeFor } from "@/lib/auth-helpers";
 import { PRODUCT } from "@/config/product";
 import { LoginForm } from "./login-form";
 
 export default async function LoginPage() {
-  const session = await auth();
-  if (session?.user) redirect("/dashboard");
+  // Cek user aktif dari DB (bukan sekadar token): user yang dinonaktifkan tetap melihat form login, bukan redirect berputar.
+  const user = await getCurrentUser();
+  if (user) redirect(homeFor(user));
 
   return (
     <div className="grid min-h-screen lg:grid-cols-2">

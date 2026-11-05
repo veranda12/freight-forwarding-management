@@ -1,44 +1,55 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { can } from "@/lib/rbac";
-import type { Role } from "@prisma/client";
+import { getCurrentUser, hasPerm } from "@/lib/auth-helpers";
+import { customerScope, domesticScope, jobScope } from "@/lib/data-scope";
 
 export async function GET(req: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json([], { status: 401 });
+  const user = await getCurrentUser();
+  if (!user) return NextResponse.json([], { status: 401 });
 
   const q = req.nextUrl.searchParams.get("q")?.trim() ?? "";
   if (q.length < 2) return NextResponse.json([]);
 
   // Tanpa `mode: "insensitive"`: collation MariaDB (utf8mb4_unicode_ci) sudah tidak membedakan huruf besar/kecil.
   const like = { contains: q };
-  const canDomestic = can((session.user as { role?: Role }).role, "domestic", "read");
+  // Tiap kelompok hasil hanya untuk yang berhak melihat modulnya, dan dibatasi data miliknya bila tanpa izin lihat semua.
+  const canJobs = hasPerm(user, "jobs.view");
+  const canCustomers = hasPerm(user, "customers.view");
+  const canDomestic = hasPerm(user, "domestic.view");
 
   const [jobs, customers, containers, stts] = await Promise.all([
-    prisma.job.findMany({
-      where: {
-        OR: [
-          { number: like }, { mblNo: like }, { hblNo: like }, { mawbNo: like }, { hawbNo: like },
-          { shipperName: like }, { consigneeName: like },
-        ],
-      },
-      select: { id: true, number: true, status: true, customer: { select: { name: true } } },
-      take: 6,
-    }),
-    prisma.customer.findMany({
-      where: { OR: [{ name: like }, { code: like }] },
-      select: { id: true, name: true, code: true, city: true },
-      take: 5,
-    }),
-    prisma.jobContainer.findMany({
-      where: { containerNo: like },
-      select: { containerNo: true, job: { select: { id: true, number: true } } },
-      take: 5,
-    }),
+    canJobs
+      ? prisma.job.findMany({
+          where: {
+            AND: [
+              { OR: [
+                { number: like }, { mblNo: like }, { hblNo: like }, { mawbNo: like }, { hawbNo: like },
+                { shipperName: like }, { consigneeName: like },
+              ] },
+              jobScope(user),
+            ],
+          },
+          select: { id: true, number: true, status: true, customer: { select: { name: true } } },
+          take: 6,
+        })
+      : Promise.resolve([]),
+    canCustomers
+      ? prisma.customer.findMany({
+          where: { AND: [{ OR: [{ name: like }, { code: like }] }, customerScope(user)] },
+          select: { id: true, name: true, code: true, city: true },
+          take: 5,
+        })
+      : Promise.resolve([]),
+    canJobs
+      ? prisma.jobContainer.findMany({
+          where: { containerNo: like, job: jobScope(user) },
+          select: { containerNo: true, job: { select: { id: true, number: true } } },
+          take: 5,
+        })
+      : Promise.resolve([]),
     canDomestic
       ? prisma.domesticShipment.findMany({
-          where: { OR: [{ number: like }, { consigneeName: like }, { shipperName: like }, { destCity: like }] },
+          where: { AND: [{ OR: [{ number: like }, { consigneeName: like }, { shipperName: like }, { destCity: like }] }, domesticScope(user)] },
           select: { id: true, number: true, originCity: true, destCity: true, customer: { select: { name: true } } },
           orderBy: { createdAt: "desc" },
           take: 5,

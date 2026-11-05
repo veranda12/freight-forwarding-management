@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
@@ -18,7 +18,7 @@ const FIELDS: FieldConfig[] = [
 
 export default async function EditContainerTypePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  await requireCan("containers", "write", { redirectTo: "/containers" });
+  await requirePerm("containers.edit", { redirectTo: "/containers" });
   const c = await prisma.containerType.findUnique({ where: { id } });
   if (!c) notFound();
   return (

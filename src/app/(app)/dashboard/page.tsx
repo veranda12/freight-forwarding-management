@@ -1,8 +1,8 @@
 import {
   Ship, FileWarning, AlertTriangle, ArrowUpCircle, CalendarClock, Truck, PackageOpen,
 } from "lucide-react";
-import { can } from "@/lib/rbac";
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm, hasPerm } from "@/lib/auth-helpers";
+import { billScope, customerScope, domesticScope, invoiceScope, jobScope, quotationScope } from "@/lib/data-scope";
 import { getDashboardData, getWorklist } from "@/lib/analytics";
 import { formatIDR } from "@/lib/format";
 import { PageHeader } from "@/components/page-header";
@@ -13,35 +13,42 @@ import { WorklistPanel } from "./worklist-panel";
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
-  const user = await requireCan("dashboard", "read");
-  const [d, wl] = await Promise.all([getDashboardData(), getWorklist()]);
-  const role = user.role;
+  const user = await requirePerm("dashboard.view");
+  // Angka & antrian mengikuti batas data user (milik sendiri bila tanpa izin "lihat semua").
+  const scope = {
+    job: jobScope(user), invoice: invoiceScope(user), bill: billScope(user),
+    customer: customerScope(user), quotation: quotationScope(user), domestic: domesticScope(user),
+  };
+  const [d, wl] = await Promise.all([getDashboardData(scope), getWorklist(scope)]);
 
-  const isOps = ["ADMIN", "OPERATION", "MANAGEMENT", "SALES"].includes(role);
-  const isDocs = ["ADMIN", "DOCUMENTATION", "OPERATION", "MANAGEMENT"].includes(role);
-  const isFin = ["ADMIN", "FINANCE", "MANAGEMENT"].includes(role);
-  const isDom = can(role, "domestic", "read");
+  // Kartu/panel hanya untuk modul yang boleh dilihat user.
+  const seeJobs = hasPerm(user, "jobs.view");
+  const seeDocs = hasPerm(user, "documents.view");
+  const seeInvoices = hasPerm(user, "invoices.view");
+  const seeBills = hasPerm(user, "bills.view");
+  const isDom = hasPerm(user, "domestic.view");
 
-  const kpis: { label: string; value: string; tone?: string }[] = [
-    { label: "Shipment aktif", value: String(d.kpis.activeJobs) },
-    { label: "Shipment bln ini", value: String(d.kpis.monthJobs) },
-    { label: "Revenue bln ini", value: formatIDR(d.kpis.monthRevenue) },
-    { label: "Gross profit bln ini", value: formatIDR(d.kpis.monthProfit) },
-    { label: "Invoice bln ini", value: formatIDR(d.kpis.monthInvoiced) },
-    { label: "AR overdue", value: formatIDR(d.kpis.overdueAmount), tone: "text-destructive" },
-    { label: "Customer", value: String(d.kpis.totalCustomers) },
-    { label: "Quotation terbuka", value: String(d.kpis.openQuotations), tone: "text-warning" },
-  ];
+  const kpis: { label: string; value: string; tone?: string; show: boolean }[] = [
+    { label: "Shipment aktif", value: String(d.kpis.activeJobs), show: seeJobs },
+    { label: "Shipment bln ini", value: String(d.kpis.monthJobs), show: seeJobs },
+    { label: "Revenue bln ini", value: formatIDR(d.kpis.monthRevenue), show: seeJobs },
+    { label: "Gross profit bln ini", value: formatIDR(d.kpis.monthProfit), show: seeJobs },
+    { label: "Invoice bln ini", value: formatIDR(d.kpis.monthInvoiced), show: seeInvoices },
+    { label: "AR overdue", value: formatIDR(d.kpis.overdueAmount), tone: "text-destructive", show: seeInvoices },
+    { label: "Customer", value: String(d.kpis.totalCustomers), show: hasPerm(user, "customers.view") },
+    { label: "Quotation terbuka", value: String(d.kpis.openQuotations), tone: "text-warning", show: hasPerm(user, "quotations.view") },
+  ].filter((k) => k.show);
+  const showWorklist = seeJobs || seeDocs || seeInvoices || seeBills;
 
   return (
     <div className="space-y-5">
       <PageHeader
-        title={`Halo, ${user.name?.split(" ")[0] ?? ""}`}
+        title={`Halo, ${user.name.split(" ")[0] ?? ""}`}
         description="Ringkasan operasional PT Samudra Lintas Logistik — antrian yang butuh aksi lebih dulu."
       />
 
       {/* KPI strip — compact, bukan kartu raksasa */}
-      <Card>
+      {kpis.length > 0 && <Card>
         <CardContent className="grid grid-cols-2 divide-x divide-y p-0 sm:grid-cols-4 lg:grid-cols-8 lg:divide-y-0">
           {kpis.map((k) => (
             <div key={k.label} className="px-4 py-3">
@@ -50,19 +57,19 @@ export default async function DashboardPage() {
             </div>
           ))}
         </CardContent>
-      </Card>
+      </Card>}
 
       {/* Worklist — antrian aksi role-aware */}
-      <div>
+      {showWorklist && <div>
         <h2 className="mb-2 text-sm font-semibold text-muted-foreground">Butuh Aksi · Ekspor-Impor</h2>
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {isOps && <WorklistPanel title="Berangkat ≤ 3 hari" items={wl.departingSoon} hrefBase="/jobs/" icon={Ship} tone="warning" emptyText="Tak ada shipment berangkat dekat" />}
-          {isOps && <WorklistPanel title="Cut-off CY ≤ 2 hari" items={wl.cutoffSoon} hrefBase="/jobs/" icon={CalendarClock} tone="warning" emptyText="Tak ada cut-off mendekat" />}
-          {isDocs && <WorklistPanel title="B/L belum terbit" items={wl.blPending} hrefBase="/jobs/" icon={FileWarning} tone="default" emptyText="Semua B/L sudah terbit" />}
-          {isFin && <WorklistPanel title="AR overdue" items={wl.arOverdue} hrefBase="/invoices/" icon={AlertTriangle} tone="destructive" emptyText="Tidak ada tunggakan" />}
-          {isFin && <WorklistPanel title="AP jatuh tempo ≤ 7 hari" items={wl.apDueSoon} hrefBase="/bills/" icon={ArrowUpCircle} tone="warning" emptyText="Tidak ada tagihan jatuh tempo" />}
+          {seeJobs && <WorklistPanel title="Berangkat ≤ 3 hari" items={wl.departingSoon} hrefBase="/jobs/" icon={Ship} tone="warning" emptyText="Tak ada shipment berangkat dekat" />}
+          {seeJobs && <WorklistPanel title="Cut-off CY ≤ 2 hari" items={wl.cutoffSoon} hrefBase="/jobs/" icon={CalendarClock} tone="warning" emptyText="Tak ada cut-off mendekat" />}
+          {seeDocs && <WorklistPanel title="B/L belum terbit" items={wl.blPending} hrefBase="/jobs/" icon={FileWarning} tone="default" emptyText="Semua B/L sudah terbit" />}
+          {seeInvoices && <WorklistPanel title="AR overdue" items={wl.arOverdue} hrefBase="/invoices/" icon={AlertTriangle} tone="destructive" emptyText="Tidak ada tunggakan" />}
+          {seeBills && <WorklistPanel title="AP jatuh tempo ≤ 7 hari" items={wl.apDueSoon} hrefBase="/bills/" icon={ArrowUpCircle} tone="warning" emptyText="Tidak ada tagihan jatuh tempo" />}
         </div>
-      </div>
+      </div>}
 
       {/* Domestik — lini bisnis terpisah, panel sendiri */}
       {isDom && (
@@ -75,8 +82,8 @@ export default async function DashboardPage() {
         </div>
       )}
 
-      {/* Analitik — sekunder */}
-      <div>
+      {/* Analitik — sekunder (berasal dari data job) */}
+      {seeJobs && <div>
         <h2 className="mb-2 text-sm font-semibold text-muted-foreground">Analitik</h2>
         <div className="grid gap-4 lg:grid-cols-3">
           <Card className="lg:col-span-2">
@@ -96,7 +103,7 @@ export default async function DashboardPage() {
             <CardContent><TopCustomerChart data={d.topCustomers} /></CardContent>
           </Card>
         </div>
-      </div>
+      </div>}
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm, hasPerm } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
 import { fiscalYearStatus } from "@/lib/fiscal";
 import { formatIDR, formatDate } from "@/lib/format";
@@ -12,7 +12,9 @@ import { ClosingButton, LockForm } from "./closing-panel";
 export const dynamic = "force-dynamic";
 
 export default async function ClosingPage() {
-  await requireCan("accounting", "read");
+  const user = await requirePerm("closing.view");
+  const canCloseYear = hasPerm(user, "closing.closeYear");
+  const canLock = hasPerm(user, "closing.lockPeriod");
   const { years, lockedUntil } = await fiscalYearStatus(prisma);
   // Tahun paling awal yang belum ditutup harus ditutup dulu, berurutan.
   const firstOpen = [...years].reverse().find((y) => !y.closed)?.year;
@@ -44,7 +46,7 @@ export default async function ClosingPage() {
                   <TableCell className="text-right tabular-nums">{y.netIncome !== null ? formatIDR(y.netIncome) : "-"}</TableCell>
                   <TableCell>{y.closedAt ? formatDate(y.closedAt) : "-"}</TableCell>
                   <TableCell className="text-right">
-                    {!y.closed && (
+                    {canCloseYear && !y.closed && (
                       <ClosingButton
                         year={y.year}
                         disabled={y.year !== firstOpen}
@@ -66,7 +68,7 @@ export default async function ClosingPage() {
             Jurnal dengan tanggal sampai tanggal kunci tidak bisa diposting, termasuk invoice, bill, pembayaran, dan penyusutan.
             {lockedUntil ? <> Saat ini terkunci sampai <span className="font-medium text-foreground">{lockedUntil}</span>.</> : " Saat ini tidak ada kunci."}
           </p>
-          <LockForm current={lockedUntil} />
+          {canLock && <LockForm current={lockedUntil} />}
         </CardContent>
       </Card>
 

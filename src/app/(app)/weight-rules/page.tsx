@@ -1,6 +1,5 @@
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm, hasPerm } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
-import { can } from "@/lib/rbac";
 import { PageHeader } from "@/components/page-header";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { WeightRulesEditor, type RuleRow } from "./weight-rules-editor";
@@ -10,8 +9,8 @@ export const dynamic = "force-dynamic";
 const ORDER: Record<string, number> = { AIR: 0, SEA_LCL: 1, LAND: 2, UDARA: 0, DARAT: 1, LAUT: 2 };
 
 export default async function WeightRulesPage() {
-  const user = await requireCan("weightRules", "read");
-  const canWrite = can(user.role, "weightRules", "write");
+  const user = await requirePerm("weightRules.view");
+  const canWrite = hasPerm(user, "weightRules.edit");
   const rules = await prisma.weightRule.findMany();
   const rows = (scope: "INTERNATIONAL" | "DOMESTIC"): RuleRow[] =>
     rules

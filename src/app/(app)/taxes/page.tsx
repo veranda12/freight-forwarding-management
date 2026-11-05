@@ -1,8 +1,7 @@
 import Link from "next/link";
 import { Plus, Pencil } from "lucide-react";
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm, hasPerm } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
-import { can } from "@/lib/rbac";
 import { formatNumber } from "@/lib/format";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
@@ -13,8 +12,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 export const dynamic = "force-dynamic";
 
 export default async function TaxesPage() {
-  const user = await requireCan("taxes", "read");
-  const canWrite = can(user.role, "taxes", "write");
+  const user = await requirePerm("taxes.view");
+  const canWrite = hasPerm(user, "taxes.edit");
   const taxes = await prisma.taxRate.findMany({ orderBy: { code: "asc" } });
   return (
     <div className="space-y-6">

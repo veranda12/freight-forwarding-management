@@ -19,7 +19,7 @@ export function UserForm({ roles }: { roles: RoleOpt[] }) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
-  const [role, setRole] = useState("OPERATION");
+  const [role, setRole] = useState(roles.find((r) => r.label === "Operation")?.value ?? roles[0]?.value ?? "");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
 
@@ -28,7 +28,7 @@ export function UserForm({ roles }: { roles: RoleOpt[] }) {
 
   function save() {
     start(async () => {
-      const res = await createUserAction({ name, email, phone, role, password, confirmPassword: confirm });
+      const res = await createUserAction({ name, email, phone, roleId: role, password, confirmPassword: confirm });
       if (res.ok) {
         toast.success(`User ${email.trim().toLowerCase()} dibuat.`);
         router.push("/users");
@@ -58,7 +58,7 @@ export function UserForm({ roles }: { roles: RoleOpt[] }) {
         <div className="space-y-1.5 sm:col-span-2">
           <Label>Role</Label>
           <Select value={role} onValueChange={setRole}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectTrigger aria-label="Role"><SelectValue /></SelectTrigger>
             <SelectContent>
               {roles.map((r) => <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>)}
             </SelectContent>

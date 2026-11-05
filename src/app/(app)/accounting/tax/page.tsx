@@ -1,8 +1,7 @@
 import Link from "next/link";
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm, hasPerm } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
 import { getTaxRecap, getTaxPeriods } from "@/lib/tax";
-import { can } from "@/lib/rbac";
 import { cashAccountOptions } from "@/lib/cash-accounts";
 import { formatIDR, formatDate } from "@/lib/format";
 import { PageHeader } from "@/components/page-header";
@@ -16,7 +15,7 @@ export const dynamic = "force-dynamic";
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
 
 export default async function TaxPage({ searchParams }: { searchParams: Promise<{ from?: string; to?: string; tahun?: string }> }) {
-  const user = await requireCan("accounting", "read");
+  const user = await requirePerm("tax.view");
   const sp = await searchParams;
   const today = new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10); // tanggal Jakarta
   const from = ISO.test(sp.from ?? "") ? sp.from! : `${today.slice(0, 4)}-01-01`;
@@ -77,7 +76,7 @@ export default async function TaxPage({ searchParams }: { searchParams: Promise<
           <button type="submit" className="h-9 rounded-md border px-3 text-sm hover:bg-muted">Tampilkan</button>
         </form>
       </div>
-      <TaxPeriodPanel rows={periods.rows} history={periods.history} today={today} canWrite={can(user.role, "accounting", "write")} cashAccounts={cash.options} defaultCashId={cash.defaultId} />
+      <TaxPeriodPanel rows={periods.rows} history={periods.history} today={today} canCreate={hasPerm(user, "tax.remit")} canCancel={hasPerm(user, "tax.cancel")} cashAccounts={cash.options} defaultCashId={cash.defaultId} />
 
       <TaxTable title="PPN Keluaran (invoice)" rows={recap.ppnOut} cols={["Tanggal", "No. Invoice", "Customer", "DPP", "PPN"]}
         render={(r: any) => [r.date, r.number, r.party, r.dpp, r.ppn]} />

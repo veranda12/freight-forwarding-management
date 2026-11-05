@@ -28,7 +28,7 @@ const cents = (v: string) => Math.round((Number(v) || 0) * 100);
 let seq = 0;
 const newLine = (): Line => ({ key: ++seq, accountId: "", description: "", debit: "", credit: "" });
 
-export function ManualJournalPanel({ accounts, entries, today, canWrite }: { accounts: Opt[]; entries: Entry[]; today: string; canWrite: boolean }) {
+export function ManualJournalPanel({ accounts, entries, today, canCreate, canCancel }: { accounts: Opt[]; entries: Entry[]; today: string; canCreate: boolean; canCancel: boolean }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [open, setOpen] = useState(false);
@@ -70,7 +70,7 @@ export function ManualJournalPanel({ accounts, entries, today, canWrite }: { acc
 
   return (
     <div className="space-y-4">
-      {canWrite && (
+      {canCreate && (
         <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (v) reset(); }}>
           <DialogTrigger asChild><Button><Plus /> Buat jurnal manual</Button></DialogTrigger>
           <DialogContent className="max-h-[90vh] max-w-4xl overflow-y-auto">
@@ -143,7 +143,7 @@ export function ManualJournalPanel({ accounts, entries, today, canWrite }: { acc
               <TableHeader><TableRow>
                 <TableHead className="w-8" /><TableHead>Tanggal</TableHead><TableHead>No. Jurnal</TableHead><TableHead>Keterangan</TableHead>
                 <TableHead className="text-right">Nilai</TableHead><TableHead>Dibuat oleh</TableHead><TableHead>Status</TableHead>
-                {canWrite && <TableHead className="text-right">Aksi</TableHead>}
+                {canCancel && <TableHead className="text-right">Aksi</TableHead>}
               </TableRow></TableHeader>
               <TableBody>
                 {entries.map((e) => (
@@ -164,7 +164,7 @@ export function ManualJournalPanel({ accounts, entries, today, canWrite }: { acc
                           ? <Badge variant="outline">Dibatalkan{e.reversalNumber ? ` (${e.reversalNumber})` : ""}</Badge>
                           : <Badge variant="outline" className="border-success/50 text-success">Berlaku</Badge>}
                       </TableCell>
-                      {canWrite && (
+                      {canCancel && (
                         <TableCell className="text-right">
                           {!e.reversed && <Button size="sm" variant="ghost" className="text-destructive" onClick={() => { setCancel(e); setReason(""); setCancelDate(today); }}><Ban /> Batalkan</Button>}
                         </TableCell>
@@ -175,7 +175,7 @@ export function ManualJournalPanel({ accounts, entries, today, canWrite }: { acc
                         <TableCell /><TableCell colSpan={2} className="text-muted-foreground">{l.account}</TableCell>
                         <TableCell className="text-muted-foreground">{l.description}</TableCell>
                         <TableCell className="text-right tabular-nums">{l.debit > 0 ? `D ${formatIDR(l.debit)}` : `K ${formatIDR(l.credit)}`}</TableCell>
-                        <TableCell colSpan={canWrite ? 3 : 2} />
+                        <TableCell colSpan={canCancel ? 3 : 2} />
                       </TableRow>
                     ))}
                   </Fragment>

@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Briefcase, Printer } from "lucide-react";
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm, hasPerm } from "@/lib/auth-helpers";
+import { invoiceScope } from "@/lib/data-scope";
 import { prisma } from "@/lib/prisma";
-import { can } from "@/lib/rbac";
 import { formatIDR, formatDate, formatNumber } from "@/lib/format";
 import { InvoiceActions } from "./invoice-actions";
 import { latestRate } from "@/lib/fx";
@@ -21,9 +21,9 @@ export const dynamic = "force-dynamic";
 
 export default async function InvoiceDetail({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const user = await requireCan("invoices", "read");
-  const inv = await prisma.invoice.findUnique({
-    where: { id },
+  const user = await requirePerm("invoices.view");
+  const inv = await prisma.invoice.findFirst({
+    where: { id, ...invoiceScope(user) },
     include: {
       customer: true, job: { select: { id: true, number: true } }, domesticShipment: { select: { id: true, number: true } },
       lines: { include: { chargeCode: true }, orderBy: { sortOrder: "asc" } },
@@ -48,9 +48,11 @@ export default async function InvoiceDetail({ params }: { params: Promise<{ id: 
         <Breadcrumbs items={[{ label: "Invoice (AR)", href: "/invoices" }, { label: inv.number }]} />
         <PageHeader title={inv.number} description={`${inv.customer.name} · ${formatDate(inv.date)}`}>
           <InvoiceStatusBadge status={inv.status} />
-          <Button asChild variant="outline">
-            <a href={`/api/invoices/${inv.id}/pdf`} target="_blank" rel="noopener"><Printer /> Cetak Invoice</a>
-          </Button>
+          {hasPerm(user, "invoices.print") && (
+            <Button asChild variant="outline">
+              <a href={`/api/invoices/${inv.id}/pdf`} target="_blank" rel="noopener"><Printer /> Cetak Invoice</a>
+            </Button>
+          )}
           <InvoiceActions
             invoiceId={inv.id}
             currency={inv.currency}
@@ -61,9 +63,9 @@ export default async function InvoiceDetail({ params }: { params: Promise<{ id: 
             pph23Suggest={pph23Suggest}
             cashAccounts={cash.options}
             defaultCashId={cash.defaultId}
-            canWrite={can(user.role, "payments", "write") || can(user.role, "invoices", "write")}
-            payable={inv.status !== "CANCELLED" && inv.status !== "PAID"}
-            cancellable={can(user.role, "invoices", "write") && Number(inv.amountPaid) === 0 && inv.status !== "CANCELLED"}
+            canWrite={hasPerm(user, "invoices.receipt") || hasPerm(user, "invoices.cancel")}
+            payable={hasPerm(user, "invoices.receipt") && inv.status !== "CANCELLED" && inv.status !== "PAID"}
+            cancellable={hasPerm(user, "invoices.cancel") && Number(inv.amountPaid) === 0 && inv.status !== "CANCELLED"}
           />
         </PageHeader>
         {inv.job && <Link href={`/jobs/${inv.job.id}`} className="mt-2 inline-flex items-center gap-1.5 text-sm text-primary hover:underline"><Briefcase className="h-4 w-4" /> Job {inv.job.number}</Link>}

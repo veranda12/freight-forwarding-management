@@ -4,10 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Ship, Menu, PanelLeftClose, PanelLeft, LogOut, ChevronDown } from "lucide-react";
-import type { Role } from "@prisma/client";
 import { NAV } from "@/config/nav";
-import type { Resource } from "@/lib/rbac";
-import { ROLE_LABELS } from "@/lib/rbac";
 import { PRODUCT } from "@/config/product";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -21,7 +18,7 @@ import { ThemeToggle } from "./theme-toggle";
 import { TabsProvider, TabBar } from "./tabs-context";
 import { logoutAction } from "@/app/(app)/actions";
 
-type ShellUser = { name: string; email: string; role: Role };
+type ShellUser = { name: string; email: string; roleName: string };
 
 function initials(name: string) {
   return name.split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase();
@@ -33,7 +30,7 @@ export function AppShell({
   children,
 }: {
   user: ShellUser;
-  allowed: Resource[];
+  allowed: string[];
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
@@ -78,7 +75,7 @@ export function AppShell({
   const allow = new Set(allowed);
   const groups = NAV.map((g) => ({
     ...g,
-    items: g.items.filter((i) => allow.has(i.resource)),
+    items: g.items.filter((i) => allow.has(i.perm)),
   })).filter((g) => g.items.length > 0);
   // menu aktif = href terpanjang yang cocok (/domestic vs /domestic/check)
   const activeHref = groups
@@ -194,7 +191,7 @@ export function AppShell({
                 </Avatar>
                 <div className="hidden text-left sm:block">
                   <p className="text-sm font-medium leading-none">{user.name}</p>
-                  <p className="text-xs text-muted-foreground">{ROLE_LABELS[user.role]}</p>
+                  <p className="text-xs text-muted-foreground">{user.roleName}</p>
                 </div>
                 <ChevronDown className="hidden h-4 w-4 text-muted-foreground sm:block" />
               </button>
