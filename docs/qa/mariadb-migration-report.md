@@ -188,3 +188,38 @@ Uji ulang sesudah perbaikan (DB demo `ffms` **tidak** disentuh; seed ulang dan E
 `simulate-panduan-e2e` lulus saat dijalankan pukul ±11.10 WIB (sebelumnya selalu gagal sebelum 12.00), membuktikan D-05.
 Catatan: DB demo `ffms` di MariaDB masih berisi data seed versi lama (sebelum perbaikan D-03/D-04/D-06) ditambah data
 dari E2E. Untuk menyegarkannya: `npm run db:seed` (mengosongkan dan mengisi ulang DB demo).
+
+## 11. E2E MariaDB 10.11 dan penelusuran manual `DEMO.md` (2026-11-05, 11.30–11.45 WIB)
+
+### 11.1 E2E Playwright di MariaDB 10.11.19
+
+Server diarahkan ke `ffms_test` 10.11 hasil seed baru. **17/17 lulus**; smoke 6 role × 43 halaman tanpa error. Invoice
+yang dibuat E2E tercatat di DB 10.11 (04.33 UTC), membuktikan aplikasi benar-benar menulis ke 10.11.
+
+### 11.2 Penelusuran skenario demo di Chrome (MariaDB 12.3, DB `ffms_test` hasil seed baru)
+
+Dijalankan lewat Claude in Chrome seperti pengguna (klik, form, dialog), dengan cek silang ke DB. Screenshot di
+`Claude outputs/mariadb/chrome-walkthrough/` (di luar git).
+
+| Babak | Langkah | Hasil |
+|---|---|---|
+| 1 Management | Login lewat form → dashboard KPI, grafik volume, revenue vs cost, Top 10 | Lulus |
+| 2 Sales | Quotation Sent `QUO/2026/10/0012`: charge USD/IDR, margin otomatis Rp 3.818.232 (20,9%) | Lulus; kurs 15.909,3 utuh (USD 110 = Rp 1.750.023) |
+| 3 Convert | Terima → Convert ke Job → `JOB/SEA-IMP/2026/11/0007`, revenue/cost/profit = quotation | Lulus **sebagai Admin**; gagal sebagai Sales (D-07) |
+| 4 Operation | 7 tab job berisi data; ubah status → Stuffing / Pickup (langsung tampil); centang milestone | Status lulus; milestone tersimpan di DB tetapi tampilan baru berubah setelah reload (D-09). Jam aktual 11.38 WIB = 04.38 UTC (zona waktu benar) |
+| 5 Dokumen | House B/L, Master B/L, SI, Arrival Notice, DO | 5/5 PDF valid (`%PDF-`), kop PT Samudra Lintas Logistik, data sesuai job |
+| 6 Tracking publik | `/track/JOB/SEA-IMP/2026/11/0002` | 200 tanpa login; milestone terbaru tampil; 0 kemunculan Rp/revenue/profit/margin |
+| 7 Finance | Costing (margin < 10% merah); invoice dari job: subtotal 25.882.876,91, PPN 605.550 (hanya baris kena PPN), total 26.488.426,91; jurnal JE/…/0019 seimbang; pembayaran dengan potongan PPh 23 67.200 → Paid, sisa 0, jurnal JE/…/0020 seimbang sampai sen; invoice kedua dibatalkan → JE/…/0021 ditandai batal, pembalik JE/…/0022 (tidak ada yang dihapus); Trial Balance & Neraca "Balance ✓" (aset 8.978.867.428 = pasiva) | Lulus |
+| 8 Reporting | 5 tab laporan; Export Excel Profitability (303 job), AR Aging (41 customer), AP Aging (18 vendor) | Lulus; XLSX valid, total AP 3.832.068.369,55 = layar (D-11 kosmetik) |
+
+Log aplikasi selama penelusuran: hanya 1 error (penolakan hak akses D-07), tanpa error browser.
+
+### 11.3 Temuan baru dari penelusuran (semua di luar lapisan database, belum diperbaiki)
+
+| ID | Severity | Temuan | Bukti | Usul |
+|---|---|---|---|---|
+| D-07 | **Sedang** | Quotation hanya bisa dikonversi ke Job oleh **Admin**. Tombol tampil bila punya hak tulis `quotations` (Sales), tetapi server mensyaratkan hak tulis `jobs` (Operation); Sales hanya melihat toast "Gagal konversi ke job." tanpa alasan. `DEMO.md` Babak 3 menggambarkan Sales yang mengonversi | `src/app/(app)/quotations/[id]/page.tsx:22,42`, `src/app/(app)/quotations/actions.ts:88`, `src/lib/rbac.ts:66,68`; log `ForbiddenError … write pada jobs` | **Keputusan bisnis**: siapa yang boleh konversi. Lalu samakan syarat tombol dan server, dan tampilkan pesan error dari server |
+| D-08 | Info | Konversi quotation tidak mengisi POL/POD job (quotation menyimpan rute sebagai teks bebas) | Job 0007: Rute "- → -" padahal quotation Shanghai → Jakarta | Isi POL/POD manual, atau pemetaan teks → master port |
+| D-09 | Rendah | Centang milestone tersimpan, tetapi timeline tidak diperbarui sampai halaman di-reload (aksi lain seperti Ubah Status ikut memperbaruinya) | DB `isDone=1` 04.38/04.39 UTC; UI tetap kosong setelah 6 detik | Periksa `router.refresh()` di `milestone-timeline.tsx` / sistem tab aplikasi |
+| D-10 | Rendah | Tombol "Catat Pembayaran" tetap tampil di invoice yang dibatalkan (server menolak: `receivables.ts:112`) | Screenshot INV/2026/11/0006 | Sembunyikan bila status CANCELLED |
+| D-11 | Rendah | Baris TOTAL Excel aging berisi galat floating point (`1216815106.6399999`) | Isi XLSX | Bulatkan (`r2`) sebelum ditulis ke sel |
