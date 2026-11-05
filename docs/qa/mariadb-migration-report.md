@@ -262,3 +262,25 @@ Paritas data tambahan: invoice pertama yang dibuat dari `JOB/SEA-IMP/2026/11/000
   OPERATION. Build, typecheck, lint lulus.
 
 D-08…D-11 belum diperbaiki (cacat lama, bukan migrasi); menunggu keputusan pemilik.
+
+## 13. Perbaikan D-08 sampai D-11 (commit `f1fe007`, 2026-11-05 ±13.30–14.00 WIB)
+
+| ID | Akar masalah (terbukti) | Perbaikan |
+|---|---|---|
+| D-08 | Quotation menyimpan rute sebagai teks bebas, job memakai relasi master Port/Airport; convert tidak memetakan | `src/lib/route-match.ts`: kode dalam kurung (UNLOCODE untuk laut, IATA untuk udara), lalu nama kota/pelabuhan; dipakai **hanya bila cocok tepat satu**, selain itu tetap kosong (tidak menebak). Mode darat/customs tidak dipetakan |
+| D-09 | Lebih serius dari dugaan awal. Dibuktikan di browser (penyadap `fetch`, DB, curl): server action dan refresh selesai 200 dalam ±0,1 dtk dengan data baru, tetapi transisi React "server action + `router.refresh()`" di komponen milestone **tidak pernah selesai**: tampilan tidak memakai data baru dan **semua tombol milestone terkunci**; klik berikutnya (setelah tombol terbuka oleh aksi lain) bisa **membalik** milestone yang sudah tercentang tanpa terlihat (terjadi pada uji: Gate In CY kembali 0) | `milestone-timeline.tsx`: status centang dipegang lokal (optimistic) dan disinkronkan dari props, penanda sibuk per klik dilepas di `finally`, rollback + toast bila gagal, `router.refresh()` di luar transisi; "Tambah Milestone" diperlakukan sama. Tombol diberi `aria-pressed` |
+| D-10 | Tombol bayar invoice hanya mensyaratkan `outstanding > 0` | Prop `payable` (bukan CANCELLED/PAID), sama dengan pola halaman Vendor Bill |
+| D-11 | Aging dijumlahkan float tanpa pembulatan | `roundAging()` di `src/lib/accounting.ts` membulatkan baris, bucket, dan total ke sen (berlaku untuk layar dan Excel) |
+
+Uji ulang (MariaDB 12.3, `ffms_test` bersih dari snapshot seed):
+
+| Uji | Hasil |
+|---|---|
+| Build / typecheck / lint | Lulus (lint: 12 peringatan lama yang sama) |
+| Unit (Vitest) | **174/174** (baru: `route-match.test.ts`) |
+| Integrasi | **24/24** skrip, 325 asersi PASS, 0 FAIL (baru: `verify-route-aging.ts`: 8 kasus pemetaan rute + pembulatan aging AR/AP) |
+| E2E (Playwright) | **22/22** (baru: `job-invoice-ui.spec.ts` D-09: centang tampil tanpa reload, tombol aktif, batal centang, tersimpan setelah reload; D-10: invoice batal tanpa tombol Catat Pembayaran) |
+| D-08 di DB | Job hasil convert E2E: Singapore → Jakarta (IDTPP) = `SGSIN → IDTPP`; Shanghai → Jakarta (IDTPP) = `CNSHA → IDTPP`. Dari 25 quotation seed, 24 terpetakan penuh; 1 (AIR ke Rotterdam) tujuan tetap kosong karena master Airport tidak punya Rotterdam |
+| D-11 di Excel | Unduhan AR/AP aging: 258 + 114 angka, **0** yang lebih dari 2 desimal (TOTAL `1542036833.07`, sebelumnya `1542036833.0700004`) |
+
+Status akhir semua temuan: D-01…D-11 **diperbaiki dan diuji**. Tidak ada satu pun yang disebabkan perpindahan database.
