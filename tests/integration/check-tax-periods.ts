@@ -1,9 +1,10 @@
 /** Tampilkan status setoran pajak per masa (hanya membaca, aman untuk demo). */
 import { PrismaClient } from "@prisma/client";
+import { PRISMA_CLIENT_OPTIONS } from "../../src/lib/prisma-options";
 import { getTaxPeriods } from "../../src/lib/tax";
 import { STATUS_LABEL } from "../../src/lib/tax-period";
 
-const db = new PrismaClient();
+const db = new PrismaClient(PRISMA_CLIENT_OPTIONS);
 (async () => {
   const legacy = await db.journalEntry.count({ where: { source: "MANUAL", description: { startsWith: "Setor " } } });
   console.log("jurnal setor cara lama (MANUAL):", legacy);

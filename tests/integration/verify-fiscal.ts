@@ -3,13 +3,14 @@
  *   node node_modules/tsx/dist/cli.mjs tests/integration/verify-fiscal.ts
  */
 import { PrismaClient } from "@prisma/client";
+import { PRISMA_CLIENT_OPTIONS } from "../../src/lib/prisma-options";
 import { getIncomeStatement, getBalanceSheet, getTrialBalance } from "../../src/lib/accounting";
 import { closeFiscalYear, fiscalYearStatus } from "../../src/lib/fiscal";
 import { postJournal } from "../../src/lib/journal";
 import { setLockKey } from "../../src/lib/period-lock";
 import { accountMap } from "../../src/lib/coa";
 
-const prisma = new PrismaClient();
+const prisma = new PrismaClient(PRISMA_CLIENT_OPTIONS);
 let failures = 0;
 const ok = (c: boolean, msg: string) => { console.log((c ? "PASS " : "FAIL ") + msg); if (!c) failures++; };
 const f = (n: number) => Math.round(n).toLocaleString("id-ID");

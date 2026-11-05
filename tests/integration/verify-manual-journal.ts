@@ -5,13 +5,14 @@
  *   DATABASE_URL=.../ffms_test npx tsx tests/integration/verify-manual-journal.ts
  */
 import { PrismaClient } from "@prisma/client";
+import { PRISMA_CLIENT_OPTIONS } from "../../src/lib/prisma-options";
 import { createManualJournal, cancelManualJournal, listManualJournals, manualAccountInfo, MANUAL_JOURNAL_TAG } from "../../src/lib/manual-journal";
 import { createCashEntry, cancelCashEntry } from "../../src/lib/cash-entry";
 import { getLockKey, setLockKey } from "../../src/lib/period-lock";
 import { masaTotals } from "../../src/lib/tax";
 import { getCashFlow } from "../../src/lib/cashflow";
 
-const db = new PrismaClient();
+const db = new PrismaClient(PRISMA_CLIENT_OPTIONS);
 let failures = 0;
 const ok = (c: boolean, msg: string) => { console.log((c ? "PASS " : "FAIL ") + msg); if (!c) failures++; };
 const throws = async (fn: () => Promise<unknown>, re: RegExp, msg: string) => {
@@ -29,7 +30,7 @@ async function bal(code: string) {
 const count = () => db.journalEntry.count();
 
 async function main() {
-  const dbName = (await db.$queryRaw<{ d: string }[]>`SELECT current_database() AS d`)[0].d;
+  const dbName = (await db.$queryRaw<{ d: string }[]>`SELECT DATABASE() AS d`)[0].d;
   if (dbName === "ffms") throw new Error("Jangan jalankan uji ini di database demo ffms. Pakai salinan seperti ffms_test.");
   console.log(`   database: ${dbName}`);
   const originalLock = await getLockKey(db);

@@ -3,13 +3,14 @@
  * (JANGAN dijalankan di database demo). Data uji dihapus di akhir.
  */
 import { PrismaClient } from "@prisma/client";
+import { PRISMA_CLIENT_OPTIONS } from "../../src/lib/prisma-options";
 import { createBankAccount, updateBankAccount, resolveCashAccount, cashCoaIds } from "../../src/lib/cash-accounts";
 import { createCashEntry, cancelCashEntry, listCashEntries } from "../../src/lib/cash-entry";
 import { recordReceiptCore } from "../../src/lib/receivables";
 import { getCashFlow } from "../../src/lib/cashflow";
 import { getBankRecon } from "../../src/lib/bank-rec";
 
-const db = new PrismaClient();
+const db = new PrismaClient(PRISMA_CLIENT_OPTIONS);
 let failures = 0;
 const ok = (c: boolean, msg: string) => { console.log((c ? "PASS " : "FAIL ") + msg); if (!c) failures++; };
 const throws = async (fn: () => Promise<unknown>, re: RegExp, msg: string) => {

@@ -3,6 +3,7 @@
  *   node node_modules/tsx/dist/cli.mjs tests/integration/verify-accounting-flow.ts
  */
 import { PrismaClient } from "@prisma/client";
+import { PRISMA_CLIENT_OPTIONS } from "../../src/lib/prisma-options";
 import { getTrialBalance, getBalanceSheet } from "../../src/lib/accounting";
 import { createFixedAsset, runDepreciation, assetRegister } from "../../src/lib/fixed-assets";
 import { createInvoiceFromJobCore, recordReceiptCore } from "../../src/lib/receivables";
@@ -13,7 +14,7 @@ import { getCashFlow } from "../../src/lib/cashflow";
 import { getBankRecon, setReconciled, saveBankRecon } from "../../src/lib/bank-rec";
 import { r2 } from "../../src/lib/accounting-core";
 
-const db = new PrismaClient();
+const db = new PrismaClient(PRISMA_CLIENT_OPTIONS);
 let failures = 0;
 const ok = (c: boolean, msg: string) => { console.log((c ? "PASS " : "FAIL ") + msg); if (!c) failures++; };
 const f = (n: number) => Math.round(n).toLocaleString("id-ID");

@@ -8,8 +8,9 @@
  * jurnal kas, dan persamaan neraca. Keluar dengan kode 1 jika ada temuan.
  */
 import { PrismaClient } from "@prisma/client";
+import { PRISMA_CLIENT_OPTIONS } from "../../src/lib/prisma-options";
 
-const db = new PrismaClient();
+const db = new PrismaClient(PRISMA_CLIENT_OPTIONS);
 let failures = 0;
 const ok = (c: boolean, msg: string) => { console.log((c ? "PASS " : "FAIL ") + msg); if (!c) failures++; };
 const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -19,32 +20,32 @@ const AR = "1300", AP = "2000";
 async function main() {
   // 1. Setiap jurnal seimbang sampai sen
   const unbalanced = await db.$queryRaw<{ number: string; d: number; c: number }[]>`
-    SELECT e."number", SUM(l."debit")::float8 AS d, SUM(l."credit")::float8 AS c
-    FROM "JournalEntry" e JOIN "JournalLine" l ON l."entryId" = e."id"
-    GROUP BY e."id", e."number" HAVING SUM(l."debit") <> SUM(l."credit")`;
+    SELECT e.\`number\`, CAST(SUM(l.\`debit\`) AS DOUBLE) AS d, CAST(SUM(l.\`credit\`) AS DOUBLE) AS c
+    FROM \`JournalEntry\` e JOIN \`JournalLine\` l ON l.\`entryId\` = e.\`id\`
+    GROUP BY e.\`id\`, e.\`number\` HAVING SUM(l.\`debit\`) <> SUM(l.\`credit\`)`;
   ok(unbalanced.length === 0, `semua jurnal seimbang${unbalanced.length ? `: ${unbalanced.slice(0, 5).map((u) => `${u.number} D${u.d} K${u.c}`).join(", ")}` : ""}`);
 
   const lonely = await db.$queryRaw<{ number: string }[]>`
-    SELECT e."number" FROM "JournalEntry" e LEFT JOIN "JournalLine" l ON l."entryId" = e."id"
-    GROUP BY e."id", e."number" HAVING COUNT(l."id") < 2`;
+    SELECT e.\`number\` FROM \`JournalEntry\` e LEFT JOIN \`JournalLine\` l ON l.\`entryId\` = e.\`id\`
+    GROUP BY e.\`id\`, e.\`number\` HAVING COUNT(l.\`id\`) < 2`;
   ok(lonely.length === 0, `setiap jurnal punya minimal 2 baris${lonely.length ? `: ${lonely.slice(0, 5).map((x) => x.number).join(", ")}` : ""}`);
 
   // 2. Baris valid: tidak negatif, tidak dua sisi, tidak nol
   const badLines = await db.$queryRaw<{ n: bigint }[]>`
-    SELECT COUNT(*) AS n FROM "JournalLine"
-    WHERE "debit" < 0 OR "credit" < 0 OR ("debit" > 0 AND "credit" > 0) OR ("debit" = 0 AND "credit" = 0)`;
+    SELECT COUNT(*) AS n FROM \`JournalLine\`
+    WHERE \`debit\` < 0 OR \`credit\` < 0 OR (\`debit\` > 0 AND \`credit\` > 0) OR (\`debit\` = 0 AND \`credit\` = 0)`;
   ok(Number(badLines[0].n) === 0, `baris jurnal valid (tidak negatif, satu sisi, tidak nol): ${badLines[0].n} temuan`);
 
   // 3. Hanya akun yang bisa diposting
   const headerLines = await db.$queryRaw<{ code: string; n: bigint }[]>`
-    SELECT a."code", COUNT(*) AS n FROM "JournalLine" l JOIN "CoaAccount" a ON a."id" = l."accountId"
-    WHERE a."isPostable" = false GROUP BY a."code"`;
+    SELECT a.\`code\`, COUNT(*) AS n FROM \`JournalLine\` l JOIN \`CoaAccount\` a ON a.\`id\` = l.\`accountId\`
+    WHERE a.\`isPostable\` = false GROUP BY a.\`code\``;
   ok(headerLines.length === 0, `tidak ada posting ke akun header${headerLines.length ? `: ${headerLines.map((h) => h.code).join(", ")}` : ""}`);
 
   // 4. Trial balance dan persamaan neraca
   const byAcc = await db.$queryRaw<{ code: string; type: string; d: number; c: number }[]>`
-    SELECT a."code", a."type"::text AS type, COALESCE(SUM(l."debit"),0)::float8 AS d, COALESCE(SUM(l."credit"),0)::float8 AS c
-    FROM "CoaAccount" a LEFT JOIN "JournalLine" l ON l."accountId" = a."id" GROUP BY a."code", a."type"`;
+    SELECT a.\`code\`, a.\`type\` AS type, CAST(COALESCE(SUM(l.\`debit\`),0) AS DOUBLE) AS d, CAST(COALESCE(SUM(l.\`credit\`),0) AS DOUBLE) AS c
+    FROM \`CoaAccount\` a LEFT JOIN \`JournalLine\` l ON l.\`accountId\` = a.\`id\` GROUP BY a.\`code\`, a.\`type\``;
   const totD = r2(byAcc.reduce((s, a) => s + a.d, 0)), totC = r2(byAcc.reduce((s, a) => s + a.c, 0));
   ok(totD === totC, `trial balance: total debit ${totD} = total kredit ${totC}`);
   const bal = (types: string[], debitNormal: boolean) =>
@@ -71,9 +72,9 @@ async function main() {
   // Revaluasi kurs ikut memperbarui total IDR invoice dan bill, jadi pembandingnya buku besar penuh.
   const glBalance = async (code: string, debitNormal: boolean) => {
     const rows = await db.$queryRaw<{ d: number; c: number }[]>`
-      SELECT COALESCE(SUM(l."debit"),0)::float8 AS d, COALESCE(SUM(l."credit"),0)::float8 AS c
-      FROM "JournalLine" l JOIN "CoaAccount" a ON a."id" = l."accountId" JOIN "JournalEntry" e ON e."id" = l."entryId"
-      WHERE a."code" = ${code}`;
+      SELECT CAST(COALESCE(SUM(l.\`debit\`),0) AS DOUBLE) AS d, CAST(COALESCE(SUM(l.\`credit\`),0) AS DOUBLE) AS c
+      FROM \`JournalLine\` l JOIN \`CoaAccount\` a ON a.\`id\` = l.\`accountId\` JOIN \`JournalEntry\` e ON e.\`id\` = l.\`entryId\`
+      WHERE a.\`code\` = ${code}`;
     return r2(debitNormal ? rows[0].d - rows[0].c : rows[0].c - rows[0].d);
   };
   // Debit note ke agen menambah piutang (1300), credit note menambah hutang (2000). Nota belum punya pelunasan.
@@ -98,23 +99,23 @@ async function main() {
     { status: "UNPAID", amountPaid: { gt: 0 } },
   ] } });
   ok(statusBad === 0, `status invoice konsisten dengan jumlah dibayar (${statusBad} temuan)`);
-  const overpaid = await db.$queryRaw<{ n: bigint }[]>`SELECT COUNT(*) AS n FROM "Invoice" WHERE "amountPaid" > "total" + 0.5`;
+  const overpaid = await db.$queryRaw<{ n: bigint }[]>`SELECT COUNT(*) AS n FROM \`Invoice\` WHERE \`amountPaid\` > \`total\` + 0.5`;
   ok(Number(overpaid[0].n) === 0, `tidak ada invoice yang dibayar melebihi total (${overpaid[0].n})`);
-  const billOver = await db.$queryRaw<{ n: bigint }[]>`SELECT COUNT(*) AS n FROM "VendorBill" WHERE "amountPaid" > "total" + 0.5`;
+  const billOver = await db.$queryRaw<{ n: bigint }[]>`SELECT COUNT(*) AS n FROM \`VendorBill\` WHERE \`amountPaid\` > \`total\` + 0.5`;
   ok(Number(billOver[0].n) === 0, `tidak ada bill yang dibayar melebihi total (${billOver[0].n})`);
 
   // 8. Alokasi pembayaran = jumlah dibayar per dokumen (dokumen IDR)
   const allocInv = await db.$queryRaw<{ number: string; paid: number; alloc: number }[]>`
-    SELECT i."number", i."amountPaid"::float8 AS paid, COALESCE(SUM(pa."amount"),0)::float8 AS alloc
-    FROM "Invoice" i LEFT JOIN "PaymentAllocation" pa ON pa."invoiceId" = i."id"
-    WHERE i."currency" = 'IDR' AND i."status" <> 'CANCELLED'
-    GROUP BY i."id", i."number", i."amountPaid" HAVING ABS(i."amountPaid" - COALESCE(SUM(pa."amount"),0)) > 0.5`;
+    SELECT i.\`number\`, CAST(i.\`amountPaid\` AS DOUBLE) AS paid, CAST(COALESCE(SUM(pa.\`amount\`),0) AS DOUBLE) AS alloc
+    FROM \`Invoice\` i LEFT JOIN \`PaymentAllocation\` pa ON pa.\`invoiceId\` = i.\`id\`
+    WHERE i.\`currency\` = 'IDR' AND i.\`status\` <> 'CANCELLED'
+    GROUP BY i.\`id\`, i.\`number\`, i.\`amountPaid\` HAVING ABS(i.\`amountPaid\` - COALESCE(SUM(pa.\`amount\`),0)) > 0.5`;
   ok(allocInv.length === 0, `alokasi receipt = dibayar per invoice IDR${allocInv.length ? `: ${allocInv.slice(0, 5).map((a) => `${a.number} ${a.paid}/${a.alloc}`).join(", ")}` : ""}`);
   const allocBill = await db.$queryRaw<{ number: string; paid: number; alloc: number }[]>`
-    SELECT b."number", b."amountPaid"::float8 AS paid, COALESCE(SUM(pa."amount"),0)::float8 AS alloc
-    FROM "VendorBill" b LEFT JOIN "PaymentAllocation" pa ON pa."billId" = b."id"
-    WHERE b."currency" = 'IDR' AND b."status" <> 'CANCELLED'
-    GROUP BY b."id", b."number", b."amountPaid" HAVING ABS(b."amountPaid" - COALESCE(SUM(pa."amount"),0)) > 0.5`;
+    SELECT b.\`number\`, CAST(b.\`amountPaid\` AS DOUBLE) AS paid, CAST(COALESCE(SUM(pa.\`amount\`),0) AS DOUBLE) AS alloc
+    FROM \`VendorBill\` b LEFT JOIN \`PaymentAllocation\` pa ON pa.\`billId\` = b.\`id\`
+    WHERE b.\`currency\` = 'IDR' AND b.\`status\` <> 'CANCELLED'
+    GROUP BY b.\`id\`, b.\`number\`, b.\`amountPaid\` HAVING ABS(b.\`amountPaid\` - COALESCE(SUM(pa.\`amount\`),0)) > 0.5`;
   ok(allocBill.length === 0, `alokasi payment = dibayar per bill IDR${allocBill.length ? `: ${allocBill.slice(0, 5).map((a) => `${a.number} ${a.paid}/${a.alloc}`).join(", ")}` : ""}`);
 
   // 9. Dokumen keuangan punya jurnal

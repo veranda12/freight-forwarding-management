@@ -3,6 +3,7 @@
  * (JANGAN dijalankan di database demo). Semua data uji dihapus di akhir.
  */
 import { PrismaClient } from "@prisma/client";
+import { PRISMA_CLIENT_OPTIONS } from "../../src/lib/prisma-options";
 import { createBankAccount, cashBalances } from "../../src/lib/cash-accounts";
 import { createCashEntry } from "../../src/lib/cash-entry";
 import { createTransfer, cancelTransfer } from "../../src/lib/bank-transfer";
@@ -11,7 +12,7 @@ import { getBankRecon, setReconciled } from "../../src/lib/bank-rec";
 import { importStatement, matchManual, unmatch, deleteStatementLine, getStatementView } from "../../src/lib/bank-statement";
 import { recordReceiptCore } from "../../src/lib/receivables";
 
-const db = new PrismaClient();
+const db = new PrismaClient(PRISMA_CLIENT_OPTIONS);
 let failures = 0;
 const ok = (c: boolean, msg: string) => { console.log((c ? "PASS " : "FAIL ") + msg); if (!c) failures++; };
 const throws = async (fn: () => Promise<unknown>, re: RegExp, msg: string) => {

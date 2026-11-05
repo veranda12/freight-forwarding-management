@@ -2,9 +2,10 @@
  * Uji tambah, ubah, dan hapus container job (JANGAN dijalankan di database demo). Data uji dihapus di akhir.
  */
 import { PrismaClient } from "@prisma/client";
+import { PRISMA_CLIENT_OPTIONS } from "../../src/lib/prisma-options";
 import { saveJobContainer, deleteJobContainer, validateContainerNo } from "../../src/lib/job-containers";
 
-const db = new PrismaClient();
+const db = new PrismaClient(PRISMA_CLIENT_OPTIONS);
 let failures = 0;
 const ok = (c: boolean, msg: string) => { console.log((c ? "PASS " : "FAIL ") + msg); if (!c) failures++; };
 

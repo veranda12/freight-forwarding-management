@@ -4,12 +4,13 @@
  * Dijalankan sekali di database demo. Berhenti jika rekening demo sudah ada.
  */
 import { PrismaClient } from "@prisma/client";
+import { PRISMA_CLIENT_OPTIONS } from "../../src/lib/prisma-options";
 import { createBankAccount } from "../../src/lib/cash-accounts";
 import { createTransfer } from "../../src/lib/bank-transfer";
 import { createCashEntry } from "../../src/lib/cash-entry";
 import { importStatement, matchManual } from "../../src/lib/bank-statement";
 
-const db = new PrismaClient();
+const db = new PrismaClient(PRISMA_CLIENT_OPTIONS);
 const jkt = (d: Date) => new Date(d.getTime() + 7 * 3600_000).toISOString().slice(0, 10);
 
 async function main() {

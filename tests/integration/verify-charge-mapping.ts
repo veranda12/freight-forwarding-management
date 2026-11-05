@@ -2,9 +2,10 @@
  * Uji ubah nama dan pemetaan akun charge code (JANGAN dijalankan di database demo).
  */
 import { PrismaClient } from "@prisma/client";
+import { PRISMA_CLIENT_OPTIONS } from "../../src/lib/prisma-options";
 import { updateChargeMapping } from "../../src/lib/charge-mapping";
 
-const db = new PrismaClient();
+const db = new PrismaClient(PRISMA_CLIENT_OPTIONS);
 let failures = 0;
 const ok = (c: boolean, msg: string) => { console.log((c ? "PASS " : "FAIL ") + msg); if (!c) failures++; };
 

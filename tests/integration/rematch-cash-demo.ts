@@ -1,8 +1,9 @@
 /** Lanjutan seed-cash-demo: lepas centang manual lama di BCA Oktober lalu cocokkan ulang dengan rekening koran. */
 import { PrismaClient } from "@prisma/client";
+import { PRISMA_CLIENT_OPTIONS } from "../../src/lib/prisma-options";
 import { autoMatch, matchManual } from "../../src/lib/bank-statement";
 
-const db = new PrismaClient();
+const db = new PrismaClient(PRISMA_CLIENT_OPTIONS);
 async function main() {
   const bca = await db.bankAccount.findFirstOrThrow({ where: { coaAccount: { code: "1200" } } });
   const from = new Date("2026-10-01T00:00:00+07:00");

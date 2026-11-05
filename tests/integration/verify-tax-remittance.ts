@@ -3,12 +3,13 @@
  * dari data lain. Semua data uji dihapus di akhir.
  */
 import { PrismaClient } from "@prisma/client";
+import { PRISMA_CLIENT_OPTIONS } from "../../src/lib/prisma-options";
 import { accountMap } from "../../src/lib/coa";
 import { postJournal } from "../../src/lib/journal";
 import { remitTaxPeriod, cancelTaxRemittance, masaTotals } from "../../src/lib/tax";
 import { remainingForPeriod } from "../../src/lib/tax-period";
 
-const db = new PrismaClient();
+const db = new PrismaClient(PRISMA_CLIENT_OPTIONS);
 const MASA = "2027-02";
 let failures = 0;
 const ok = (c: boolean, msg: string) => { console.log((c ? "PASS " : "FAIL ") + msg); if (!c) failures++; };

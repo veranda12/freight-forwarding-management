@@ -3,8 +3,9 @@
  *   node node_modules/tsx/dist/cli.mjs tests/integration/kurs-cleanup.ts
  */
 import { PrismaClient } from "@prisma/client";
+import { PRISMA_CLIENT_OPTIONS } from "../../src/lib/prisma-options";
 
-const db = new PrismaClient();
+const db = new PrismaClient(PRISMA_CLIENT_OPTIONS);
 (async () => {
   const rates = await db.exchangeRate.deleteMany({ where: { currencyCode: "QTZ" } });
   const sgd = await db.exchangeRate.deleteMany({ where: { currencyCode: "SGD", date: new Date("2024-01-02T00:00:00Z") } });

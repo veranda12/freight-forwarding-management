@@ -2,10 +2,11 @@
  * Cek pencarian jurnal dan buku besar terhadap database (hanya membaca, aman untuk demo).
  */
 import { PrismaClient } from "@prisma/client";
+import { PRISMA_CLIENT_OPTIONS } from "../../src/lib/prisma-options";
 import { parseJournalFilter } from "../../src/lib/journal-filter";
 import { searchJournals, getLedgerDetail } from "../../src/lib/journal-search";
 
-const db = new PrismaClient();
+const db = new PrismaClient(PRISMA_CLIENT_OPTIONS);
 const f = (n: number) => Math.round(n).toLocaleString("id-ID");
 const run = async (label: string, q: string) => {
   const t0 = Date.now();

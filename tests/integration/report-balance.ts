@@ -1,12 +1,13 @@
 /** Laporan balance untuk docs/Panduan-E2E-dan-Laporan-Balance.md (hanya membaca). */
 import { PrismaClient } from "@prisma/client";
+import { PRISMA_CLIENT_OPTIONS } from "../../src/lib/prisma-options";
 import { getArAging, getApAging, getBalanceSheet, getIncomeStatement, getTrialBalance } from "../../src/lib/accounting";
 import { getCashFlow } from "../../src/lib/cashflow";
 import { getTaxPeriods } from "../../src/lib/tax";
 import { STATUS_LABEL } from "../../src/lib/tax-period";
 import { cashBalances } from "../../src/lib/cash-accounts";
 
-const db = new PrismaClient();
+const db = new PrismaClient(PRISMA_CLIENT_OPTIONS);
 const f = (n: number) => n.toLocaleString("id-ID", { maximumFractionDigits: 2 });
 const TODAY = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Jakarta" });
 
@@ -24,7 +25,7 @@ const TODAY = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Jakarta" 
   const neg = bs.assets.filter((a) => a.amount < 0);
   console.log("aset minus:", neg.length ? neg.map((a) => `${a.code} ${f(a.amount)}`).join(", ") : "tidak ada");
   console.log("jurnal:", await db.journalEntry.count());
-  const unbalanced: any[] = await db.$queryRaw`SELECT e.number FROM "JournalEntry" e JOIN "JournalLine" l ON l."entryId"=e.id GROUP BY e.id HAVING abs(sum(l.debit)-sum(l.credit))>0.005`;
+  const unbalanced: any[] = await db.$queryRaw`SELECT e.number FROM \`JournalEntry\` e JOIN \`JournalLine\` l ON l.\`entryId\`=e.id GROUP BY e.id HAVING abs(sum(l.debit)-sum(l.credit))>0.005`;
   console.log("jurnal tidak seimbang:", unbalanced.length);
   console.log(`AR aging ${f((await getArAging()).grandTotal)} | AP aging ${f((await getApAging()).grandTotal)}`);
   const notes = await db.note.groupBy({ by: ["kind"], where: { status: { not: "CANCELLED" } as any }, _sum: { amountIdr: true } });
@@ -42,7 +43,7 @@ const TODAY = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Jakarta" 
   // Flag costing vs dokumen
   const badInv = await db.costingLine.count({ where: { side: "SELLING", invoiced: true, job: { invoices: { none: { status: { not: "CANCELLED" } } } } } });
   const badInv2 = await db.costingLine.count({ where: { side: "SELLING", invoiced: false, invoiceId: { not: null } } });
-  const multi: any[] = await db.$queryRaw`SELECT "jobId" FROM "Invoice" WHERE status <> 'CANCELLED' AND "jobId" IS NOT NULL GROUP BY "jobId" HAVING count(*)>1`;
+  const multi: any[] = await db.$queryRaw`SELECT \`jobId\` FROM \`Invoice\` WHERE status <> 'CANCELLED' AND \`jobId\` IS NOT NULL GROUP BY \`jobId\` HAVING count(*)>1`;
   console.log(`costing: selling ditandai ditagih tanpa invoice ${badInv}, invoiceId tanpa flag ${badInv2}, job dengan >1 invoice aktif ${multi.length}`);
   const jobs = await db.job.count();
   console.log("jobs", jobs, "invoice aktif", await db.invoice.count({ where: { status: { not: "CANCELLED" } } }));

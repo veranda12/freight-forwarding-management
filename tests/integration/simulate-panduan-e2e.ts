@@ -5,6 +5,7 @@
  *   DATABASE_URL=.../ffms_test node node_modules/tsx/dist/cli.mjs tests/integration/simulate-panduan-e2e.ts
  */
 import { Prisma, PrismaClient } from "@prisma/client";
+import { PRISMA_CLIENT_OPTIONS } from "../../src/lib/prisma-options";
 import { getBalanceSheet, getTrialBalance } from "../../src/lib/accounting";
 import { createInvoiceFromJobCore, recordReceiptCore } from "../../src/lib/receivables";
 import { createBillFromJobCore, recordVendorPaymentCore } from "../../src/lib/payables";
@@ -16,7 +17,7 @@ import { createManualJournal } from "../../src/lib/manual-journal";
 import { genDocNumber, genJobNumber, SEQ } from "../../src/lib/sequence";
 import { modeDirKey } from "../../src/lib/enums";
 
-const db = new PrismaClient();
+const db = new PrismaClient(PRISMA_CLIENT_OPTIONS);
 const dbName = new URL(process.env.DATABASE_URL ?? "").pathname.slice(1);
 if (dbName === "ffms") throw new Error("Simulasi ini menulis data. Jalankan di database uji, bukan ffms.");
 

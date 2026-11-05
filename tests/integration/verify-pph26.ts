@@ -3,11 +3,12 @@
  *   node tests/integration/with-verify-db ... (lihat catatan di README uji) atau set DATABASE_URL ke ffms_verify.
  */
 import { PrismaClient } from "@prisma/client";
+import { PRISMA_CLIENT_OPTIONS } from "../../src/lib/prisma-options";
 import { createBillFromJobCore } from "../../src/lib/payables";
 import { getTaxRecap, getTaxPeriods, remitTaxPeriod } from "../../src/lib/tax";
 import { pph26Of } from "../../src/lib/accounting-core";
 
-const db = new PrismaClient();
+const db = new PrismaClient(PRISMA_CLIENT_OPTIONS);
 let failures = 0;
 const ok = (c: boolean, msg: string) => { console.log((c ? "PASS " : "FAIL ") + msg); if (!c) failures++; };
 

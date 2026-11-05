@@ -7,8 +7,9 @@
  * Jalankan di DB uji dulu. Untuk DB demo wajib CONFIRM_DB=ffms.
  */
 import { Prisma, PrismaClient } from "@prisma/client";
+import { PRISMA_CLIENT_OPTIONS } from "../../src/lib/prisma-options";
 
-const db = new PrismaClient();
+const db = new PrismaClient(PRISMA_CLIENT_OPTIONS);
 const TARGETS = [
   { job: "JOB/SEA-EXP/2026/10/0001", keep: "INV/2026/10/0005" },
   { job: "JOB/LAND-EXP/2026/09/0002", keep: "INV/2026/09/0013" },

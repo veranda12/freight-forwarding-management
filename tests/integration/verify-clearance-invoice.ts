@@ -3,6 +3,7 @@
  *   DATABASE_URL=.../ffms_test node node_modules/tsx/dist/cli.mjs tests/integration/verify-clearance-invoice.ts
  */
 import { PrismaClient } from "@prisma/client";
+import { PRISMA_CLIENT_OPTIONS } from "../../src/lib/prisma-options";
 import { seedClearance } from "../../prisma/seed-clearance";
 import { applyRateCard } from "../../src/lib/rate-card";
 import { prepareInvoiceCharges, updateJobCharge } from "../../src/lib/job-charges";
@@ -11,7 +12,7 @@ import { getTrialBalance } from "../../src/lib/accounting";
 import { genJobNumber } from "../../src/lib/sequence";
 import { modeDirKey } from "../../src/lib/enums";
 
-const db = new PrismaClient();
+const db = new PrismaClient(PRISMA_CLIENT_OPTIONS);
 const dbName = new URL(process.env.DATABASE_URL ?? "").pathname.slice(1);
 if (dbName === "ffms") throw new Error("Jalankan di database uji, bukan ffms.");
 let failures = 0;

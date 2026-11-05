@@ -3,9 +3,10 @@
  * Hanya untuk database UJI (menolak berjalan di "ffms"). Data uji tidak dihapus.
  */
 import { PrismaClient, Prisma } from "@prisma/client";
+import { PRISMA_CLIENT_OPTIONS } from "../../src/lib/prisma-options";
 import { createInvoiceFromJobCore, cancelInvoiceCore } from "../../src/lib/receivables";
 
-const db = new PrismaClient();
+const db = new PrismaClient(PRISMA_CLIENT_OPTIONS);
 let failures = 0;
 const ok = (c: boolean, msg: string) => { console.log((c ? "PASS " : "FAIL ") + msg); if (!c) failures++; };
 const throws = async (fn: () => Promise<unknown>, re: RegExp, msg: string) => {
@@ -19,7 +20,7 @@ async function addSelling(jobId: string, chargeCodeId: string, amount: number) {
 const lineState = (id: string) => db.costingLine.findUniqueOrThrow({ where: { id }, select: { invoiced: true, invoiceId: true } });
 
 async function main() {
-  const dbName = (await db.$queryRaw<{ d: string }[]>`SELECT current_database() AS d`)[0].d;
+  const dbName = (await db.$queryRaw<{ d: string }[]>`SELECT DATABASE() AS d`)[0].d;
   if (dbName === "ffms") throw new Error("Jangan jalankan uji ini di database demo ffms.");
   console.log(`   database: ${dbName}`);
 
