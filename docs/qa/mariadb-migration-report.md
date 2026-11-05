@@ -284,3 +284,29 @@ Uji ulang (MariaDB 12.3, `ffms_test` bersih dari snapshot seed):
 | D-11 di Excel | Unduhan AR/AP aging: 258 + 114 angka, **0** yang lebih dari 2 desimal (TOTAL `1542036833.07`, sebelumnya `1542036833.0700004`) |
 
 Status akhir semua temuan: D-01…D-11 **diperbaiki dan diuji**. Tidak ada satu pun yang disebabkan perpindahan database.
+
+## 14. Role Management (2026-11-06; commit `4d45966`, `aadc37f`)
+
+Fitur baru atas permintaan pemilik (bukan bagian migrasi DB): role kustom, izin per menu/tombol/persetujuan,
+maker-checker, dan batas data. Desain lengkap di `DECISIONS.md` § Role Management; katalog izin
+`src/lib/permissions.ts` (124 izin).
+
+| Uji | Hasil |
+|---|---|
+| Migrasi `20261106090000_role_management` pada DB **berisi data** (skema lama) | Lulus; 8 user terpetakan tepat ke role-nya; `migrate diff` tanpa beda |
+| Seed (dengan role & user Operation kedua) | Lulus; Trial Balance tetap 55.545.131.020,23 |
+| Typecheck / lint / build | Lulus (lint: 12 peringatan lama yang sama) |
+| Server action memanggil `assertPerm` | 81/81 (2 lainnya login/logout) — dicek skrip |
+| Unit | 175/175 (baru: `permissions.test.ts`) |
+| Integrasi | **25/25 skrip, 355 asersi PASS, 0 FAIL** (baru: `verify-permissions.ts` — role DB = katalog; batas data Sales: quotation 11/25, customer 27/61, job 132/303, invoice 125/296, STT 25/37, semuanya milik sendiri; maker-checker) |
+| E2E | **25/25** (baru: `quotation-flow.spec.ts` 4 skenario, `role-management.spec.ts` 2 skenario) |
+| Smoke 7 user × 44 halaman | 0 error HTTP, 0 error log; Admin & Management 44 halaman, role lain diarahkan sesuai izin |
+
+Temuan & keputusan selama pengujian:
+- **Redirect berputar** untuk user yang dinonaktifkan (token masih sah: `/login` → `/dashboard` → `/login`) — diperbaiki:
+  halaman login memeriksa user aktif dari DB.
+- Default maker-checker untuk pembatalan dokumen keuangan/STT **tidak** diaktifkan (role awal Finance/Operation memegang
+  `*Own`) agar perilaku lama tetap; satu-satunya maker-checker bawaan adalah aturan quotation yang diminta. Admin bisa
+  mengaktifkan yang lain dengan mencabut izin `*Own`.
+- Halaman detail ber-`loading.tsx` mengembalikan HTTP 200 untuk `notFound()` (streaming); data di luar batas tetap tidak
+  tampil (diverifikasi lewat curl: nomor quotation milik Sales lain tidak ada di HTML).
