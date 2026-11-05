@@ -223,3 +223,42 @@ Log aplikasi selama penelusuran: hanya 1 error (penolakan hak akses D-07), tanpa
 | D-09 | Rendah | Centang milestone tersimpan, tetapi timeline tidak diperbarui sampai halaman di-reload (aksi lain seperti Ubah Status ikut memperbaruinya) | DB `isDone=1` 04.38/04.39 UTC; UI tetap kosong setelah 6 detik | Periksa `router.refresh()` di `milestone-timeline.tsx` / sistem tab aplikasi |
 | D-10 | Rendah | Tombol "Catat Pembayaran" tetap tampil di invoice yang dibatalkan (server menolak: `receivables.ts:112`) | Screenshot INV/2026/11/0006 | Sembunyikan bila status CANCELLED |
 | D-11 | Rendah | Baris TOTAL Excel aging berisi galat floating point (`1216815106.6399999`) | Isi XLSX | Bulatkan (`r2`) sebelum ditulis ke sel |
+
+## 12. Apakah D-07…D-11 akibat migrasi? Pembanding PostgreSQL (2026-11-05, 13.00–13.25 WIB)
+
+**Kesimpulan: tidak. Kelimanya terjadi persis sama di PostgreSQL.**
+
+Metode:
+1. **Kode:** `git diff main..feat/mariadb-migration` tidak mengubah satu pun berkas yang terkait D-07…D-11 (`rbac.ts`,
+   modul quotation/job/invoice, export Excel, auth). Perubahan `src/` migrasi hanya 6 berkas akses data (pencarian,
+   pajak, penomoran, opsi Prisma).
+2. **Uji langsung:** `main` (kode PostgreSQL asli) dijalankan di git worktree terpisah `../ffms-pg-check` dengan
+   PostgreSQL 17 dan database **baru** `ffms_pgcheck` (migrate + seed; DB PG `ffms` lama tidak disentuh), port 3001.
+   Skenario yang sama dijalankan di Chrome dan dicek ke DB.
+
+| ID | PostgreSQL (`main`) | MariaDB (branch) | Kesimpulan |
+|---|---|---|---|
+| D-07 | Sales: tombol Convert tampil → toast "Gagal konversi ke job.", tetap di halaman; Operation: tombol tidak ada; Admin: berhasil (`JOB/SEA-EXP/2026/11/0001`) | Sama | Cacat lama logika hak akses |
+| D-08 | Job hasil convert: Rute "- → -", POL kosong (quotation Jakarta → Rotterdam) | Sama | Desain lama (rute quotation = teks bebas) |
+| D-09 | Milestone `isDone=true` di DB (06.18 UTC), tampilan tidak berubah setelah 6 dtk | Sama | Cacat lama tampilan |
+| D-10 | Invoice Cancelled, tombol "Catat Pembayaran" tetap tampil | Sama | Cacat lama tampilan |
+| D-11 | TOTAL Excel `1542036833.0700004`, `3203871258.7200003` | Sama (letak galat beda karena urutan penjumlahan; nilai ke sen identik: AR 3.203.871.258,72, AP 3.832.068.369,55) | Cacat lama (penjumlahan float di JS) |
+
+Mengapa D-07 bisa terlihat "tidak ada" di PostgreSQL: form login **terisi otomatis `admin@demo.com` / `demo123`**
+(`src/app/login/login-form.tsx:37,41`). Klik **Masuk** tanpa mengganti email = masuk sebagai Admin, satu-satunya role
+yang bisa convert sebelum perbaikan.
+
+Paritas data tambahan: invoice pertama yang dibuat dari `JOB/SEA-IMP/2026/11/0002` di kedua DB bernomor sama
+(`INV/2026/11/0005`) dengan nilai sama (subtotal 25.882.876,91, PPN 605.550, total 26.488.426,91).
+
+### 12.1 Perbaikan D-07 (commit `cac5705`)
+
+- `canConvertQuotation()` di `src/lib/rbac.ts`: Sales (pemilik quotation), Operation (pembuat job), Admin. Dipakai
+  bersama oleh tombol (`quotations/[id]/page.tsx`) dan server action (`quotations/actions.ts`), sehingga syaratnya tidak
+  bisa berbeda lagi. Tombol Kirim/Terima/Tolak tetap hanya untuk hak tulis `quotations`.
+- Gagal → pesan dari server ditampilkan (bukan lagi selalu "Gagal konversi ke job.").
+- Uji: unit `canConvertQuotation` (171/171), E2E baru `e2e/quotation-convert.spec.ts` (Sales convert, Operation
+  convert, Finance tanpa akses) → **E2E 20/20 lulus** di MariaDB 12.3; audit log mencatat convert oleh SALES dan
+  OPERATION. Build, typecheck, lint lulus.
+
+D-08…D-11 belum diperbaiki (cacat lama, bukan migrasi); menunggu keputusan pemilik.
