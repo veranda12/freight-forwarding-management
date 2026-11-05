@@ -4,7 +4,9 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { Prisma, type QuotationStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { assertCan } from "@/lib/auth-helpers";
+import { assertCan, requireUser, ForbiddenError } from "@/lib/auth-helpers";
+import { canConvertQuotation } from "@/lib/rbac";
+import { errorMessage } from "@/lib/action-error";
 import { writeAudit } from "@/lib/audit";
 import { genJobNumber } from "@/lib/sequence";
 import { modeDirKey } from "@/lib/enums";
@@ -84,15 +86,31 @@ export async function setQuotationStatus(id: string, status: QuotationStatus) {
   revalidatePath("/quotations");
 }
 
-export async function convertQuotationToJob(quotationId: string): Promise<void> {
-  const user = await assertCan("jobs", "write");
+/**
+ * Convert quotation → job. Berhasil: redirect ke job. Gagal: mengembalikan pesan untuk ditampilkan (pesan error yang
+ * dilempar server action disamarkan Next.js di production, jadi tidak dilempar).
+ */
+export async function convertQuotationToJob(quotationId: string): Promise<{ ok: false; error: string } | void> {
+  let jobId: string;
+  try {
+    const user = await requireUser();
+    if (!canConvertQuotation(user.role)) throw new ForbiddenError("quotations/jobs", "write");
+    jobId = await convertQuotationCore(quotationId, user.id);
+  } catch (e) {
+    return { ok: false, error: errorMessage(e, "Gagal konversi ke job.") };
+  }
+  revalidatePath("/jobs");
+  revalidatePath("/quotations");
+  redirect(`/jobs/${jobId}`);
+}
 
+async function convertQuotationCore(quotationId: string, userId: string): Promise<string> {
   const quo = await prisma.quotation.findUnique({
     where: { id: quotationId },
     include: { lines: { include: { chargeCode: true } }, customer: true, job: true },
   });
   if (!quo) throw new Error("Quotation tidak ditemukan.");
-  if (quo.job) redirect(`/jobs/${quo.job.id}`);
+  if (quo.job) return quo.job.id;
   if (quo.status !== "ACCEPTED") throw new Error("Quotation harus berstatus Diterima sebelum dikonversi ke job.");
 
   const jobId = await prisma.$transaction(async (tx) => {
@@ -141,7 +159,7 @@ export async function convertQuotationToJob(quotationId: string): Promise<void> 
         marginPct: new Prisma.Decimal(revenue > 0 ? r2((profit / revenue) * 100) : 0),
         costings: { createMany: { data: costings } },
         milestones: {
-          create: [{ code: "CREATED", title: "Job dibuat dari Quotation", isDone: true, actualAt: new Date(), sortOrder: 0, userId: user.id }],
+          create: [{ code: "CREATED", title: "Job dibuat dari Quotation", isDone: true, actualAt: new Date(), sortOrder: 0, userId }],
         },
       },
     });
@@ -149,8 +167,6 @@ export async function convertQuotationToJob(quotationId: string): Promise<void> 
     return job.id;
   });
 
-  await writeAudit({ entity: "Job", entityId: jobId, action: "CREATE_FROM_QUOTATION", summary: `Dari ${quo.number}`, userId: user.id });
-  revalidatePath("/jobs");
-  revalidatePath("/quotations");
-  redirect(`/jobs/${jobId}`);
+  await writeAudit({ entity: "Job", entityId: jobId, action: "CREATE_FROM_QUOTATION", summary: `Dari ${quo.number}`, userId });
+  return jobId;
 }

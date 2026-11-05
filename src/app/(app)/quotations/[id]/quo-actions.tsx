@@ -8,7 +8,9 @@ import type { QuotationStatus } from "@prisma/client";
 import { Button } from "@/components/ui/button";
 import { setQuotationStatus, convertQuotationToJob } from "../actions";
 
-export function QuoActions({ id, status, hasJob }: { id: string; status: QuotationStatus; hasJob: boolean }) {
+export function QuoActions({ id, status, hasJob, canWrite, canConvert }: {
+  id: string; status: QuotationStatus; hasJob: boolean; canWrite: boolean; canConvert: boolean;
+}) {
   const [pending, start] = useTransition();
   const router = useRouter();
 
@@ -20,8 +22,10 @@ export function QuoActions({ id, status, hasJob }: { id: string; status: Quotati
 
   const convert = () =>
     start(async () => {
-      try { await convertQuotationToJob(id); }
-      catch (e: any) {
+      try {
+        const res = await convertQuotationToJob(id);
+        if (res && !res.ok) toast.error(res.error);
+      } catch (e: any) {
         if (e?.digest?.startsWith?.("NEXT_REDIRECT")) return;
         toast.error("Gagal konversi ke job.");
       }
@@ -30,12 +34,12 @@ export function QuoActions({ id, status, hasJob }: { id: string; status: Quotati
   return (
     <div className="flex flex-wrap items-center gap-2">
       {pending && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
-      {status === "DRAFT" && <Button variant="outline" onClick={() => change("SENT", "Quotation dikirim.")}><Send /> Kirim</Button>}
-      {status === "SENT" && <>
+      {canWrite && status === "DRAFT" && <Button variant="outline" onClick={() => change("SENT", "Quotation dikirim.")}><Send /> Kirim</Button>}
+      {canWrite && status === "SENT" && <>
         <Button variant="outline" className="text-success" onClick={() => change("ACCEPTED", "Quotation diterima.")}><Check /> Terima</Button>
         <Button variant="outline" className="text-destructive" onClick={() => change("REJECTED", "Quotation ditolak.")}><X /> Tolak</Button>
       </>}
-      {status === "ACCEPTED" && !hasJob && (
+      {canConvert && status === "ACCEPTED" && !hasJob && (
         <Button onClick={convert} disabled={pending}><ArrowRightLeft /> Convert ke Job</Button>
       )}
       {status === "SENT" && !hasJob && (
