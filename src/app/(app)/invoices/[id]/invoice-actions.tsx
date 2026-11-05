@@ -17,10 +17,10 @@ import { formatIDR } from "@/lib/format";
 import { recordReceipt, cancelInvoice } from "../actions";
 
 export function InvoiceActions({
-  invoiceId, currency, outstanding, outstandingForeign, bookedRate, defaultPaymentRate, canWrite, cancellable, pph23Suggest, cashAccounts, defaultCashId,
+  invoiceId, currency, outstanding, outstandingForeign, bookedRate, defaultPaymentRate, canWrite, payable, cancellable, pph23Suggest, cashAccounts, defaultCashId,
 }: {
   invoiceId: string; currency: string; outstanding: number; outstandingForeign: number;
-  bookedRate: number; defaultPaymentRate: number | null; canWrite: boolean; cancellable: boolean; pph23Suggest: number;
+  bookedRate: number; defaultPaymentRate: number | null; canWrite: boolean; payable: boolean; cancellable: boolean; pph23Suggest: number;
   cashAccounts: { id: string; label: string }[]; defaultCashId: string | null;
 }) {
   const router = useRouter();
@@ -70,7 +70,7 @@ export function InvoiceActions({
 
   return (
     <div className="flex items-center gap-2">
-      {outstanding > 0 && (
+      {payable && outstanding > 0 && (
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild><Button><Wallet /> Catat Pembayaran</Button></DialogTrigger>
           <DialogContent>

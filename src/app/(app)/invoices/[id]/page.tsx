@@ -62,6 +62,7 @@ export default async function InvoiceDetail({ params }: { params: Promise<{ id: 
             cashAccounts={cash.options}
             defaultCashId={cash.defaultId}
             canWrite={can(user.role, "payments", "write") || can(user.role, "invoices", "write")}
+            payable={inv.status !== "CANCELLED" && inv.status !== "PAID"}
             cancellable={can(user.role, "invoices", "write") && Number(inv.amountPaid) === 0 && inv.status !== "CANCELLED"}
           />
         </PageHeader>

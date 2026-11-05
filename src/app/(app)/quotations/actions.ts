@@ -11,6 +11,7 @@ import { writeAudit } from "@/lib/audit";
 import { genJobNumber } from "@/lib/sequence";
 import { modeDirKey } from "@/lib/enums";
 import { resolveBuyingSource } from "@/lib/quote-source";
+import { resolveQuotationRoute } from "@/lib/route-match";
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -116,6 +117,7 @@ async function convertQuotationCore(quotationId: string, userId: string): Promis
   const jobId = await prisma.$transaction(async (tx) => {
     const modeDir = modeDirKey(quo.mode, quo.direction);
     const number = await genJobNumber(tx, modeDir);
+    const route = await resolveQuotationRoute(tx, quo.mode, quo.originText, quo.destText);
 
     let revenue = 0, cost = 0;
     const costings: Prisma.CostingLineCreateManyJobInput[] = [];
@@ -149,6 +151,7 @@ async function convertQuotationCore(quotationId: string, userId: string): Promis
     const job = await tx.job.create({
       data: {
         number, mode: quo.mode, direction: quo.direction, status: "DRAFT",
+        ...route,
         customerId: quo.customerId, salesPicId: quo.ownerId,
         incoterm: quo.incoterm,
         shipperName: quo.direction === "EXPORT" ? quo.customer.name : null,
