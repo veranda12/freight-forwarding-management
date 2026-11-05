@@ -29,9 +29,13 @@ let failures = 0;
 const ok = (c: boolean, msg: string) => { console.log((c ? "PASS " : "FAIL ") + msg); if (!c) failures++; };
 const CODES = ["1100", "1200", "1300", "1400", "1450", "2000", "2100", "2200", "6300", "6310", "6330", "6350"];
 
+// Transaksi simulasi bertanggal hari ini pukul 12.00 WIB; saldo diambil per akhir hari supaya hasil uji tidak
+// bergantung jam dijalankan (sebelum 12.00 jurnalnya belum terhitung).
+const AS_OF = new Date(`${TODAY}T23:59:59.999+07:00`);
+
 async function snapshot() {
-  const tb = await getTrialBalance(new Date());
-  const bs = await getBalanceSheet(new Date());
+  const tb = await getTrialBalance(AS_OF);
+  const bs = await getBalanceSheet(AS_OF);
   const bal: Record<string, number> = {};
   for (const c of CODES) {
     const r = tb.rows.find((x) => x.code === c);

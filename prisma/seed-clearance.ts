@@ -104,13 +104,13 @@ type DemoSpec = {
 const DEMOS: DemoSpec[] = [
   {
     mbl: "MEDUY1234567", vessel: "MSC BEATRICE", voyage: "612S",
-    containers: [["MSCU1234565", "40HC"], ["CAIU1234567", "40HC"], ["TGHU7654321", "40HC"]],
-    receipts: { lolo: { "40HC": 1_704_750 }, doFee: 10_579_247, storage: 3_021_773, lsRep: 5_750_100, parking: 182_000, extTruck: ["CAIU1234567", 750_000] },
+    containers: [["MSCU1234566", "40HC"], ["CAIU1234561", "40HC"], ["TGHU7654320", "40HC"]],
+    receipts: { lolo: { "40HC": 1_704_750 }, doFee: 10_579_247, storage: 3_021_773, lsRep: 5_750_100, parking: 182_000, extTruck: ["CAIU1234561", 750_000] },
   },
   {
     mbl: "MEDUY7654321", vessel: "MSC AURORA", voyage: "618S",
-    containers: [["MSCU2034561", "20GP"], ["TGBU2087654", "20GP", "Gudang Cikarang"], ["MEDU4412873", "40HC"]],
-    receipts: { lolo: { "20GP": 1_136_500, "40HC": 1_704_750 }, doFee: 7_052_831, storage: 1_847_390, lsRep: 4_312_575, parking: 121_000, extTruck: ["TGBU2087654", 650_000, "20GP"] },
+    containers: [["MSCU2034562", "20GP"], ["TGBU2087659", "20GP", "Gudang Cikarang"], ["MEDU4412879", "40HC"]],
+    receipts: { lolo: { "20GP": 1_136_500, "40HC": 1_704_750 }, doFee: 7_052_831, storage: 1_847_390, lsRep: 4_312_575, parking: 121_000, extTruck: ["TGBU2087659", 650_000, "20GP"] },
   },
 ];
 

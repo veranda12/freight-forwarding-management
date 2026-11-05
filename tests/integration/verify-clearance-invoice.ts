@@ -37,7 +37,7 @@ async function main() {
   ok(line("XDIST").note?.includes("8 km over 30 km") === true && n(line("XDIST").amount) === 2_400_000, `surcharge jarak: ${line("XDIST").note}`);
   ok(line("LOLO").asReceipt && n(line("LOLO").unitPrice) === 1_704_750 && line("LOLO").unitLabel === "40HC", "LOLO as receipt 3 x 40HC @ 1.704.750");
   ok(!line("CC").asReceipt && n(line("CC").amount) === 6_000_000, "clearance tarif jasa 3 x 2.000.000");
-  ok(line("EXTTRUCK").note === "Container CAIU1234567", "extended trucking membawa nomor container");
+  ok(line("EXTTRUCK").note === "Container CAIU1234561", "extended trucking membawa nomor container");
   const je = await db.journalEntry.findUniqueOrThrow({ where: { id: inv.journalEntryId! }, include: { lines: true } });
   const d = je.lines.reduce((t, l) => t + n(l.debit), 0), k = je.lines.reduce((t, l) => t + n(l.credit), 0);
   ok(Math.abs(d - k) < 0.01 && d === 49_847_370, `jurnal invoice seimbang D ${d} = K ${k}`);
@@ -51,7 +51,7 @@ async function main() {
     data: {
       number: await genJobNumber(tx, modeDirKey("SEA_FCL", "IMPORT")), mode: "SEA_FCL", direction: "IMPORT", customerId: job.customerId,
       customsLane: "RED", distanceKm: 25,
-      containers: { create: [{ containerNo: "TEST0000001", containerTypeId: t["20GP"] }, { containerNo: "TEST0000002", containerTypeId: t["20GP"] }, { containerNo: "TEST0000003", containerTypeId: t["40HC"] }] },
+      containers: { create: [{ containerNo: "TSTU0000009", containerTypeId: t["20GP"] }, { containerNo: "TSTU0000014", containerTypeId: t["20GP"] }, { containerNo: "TSTU0000020", containerTypeId: t["40HC"] }] },
     },
   }));
   const created = await applyRateCard(db, red.id);

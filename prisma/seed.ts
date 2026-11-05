@@ -80,55 +80,21 @@ async function main() {
   faker.seed(20261002);
   console.log("🌱 Seeding Freight Forwarding Management System…");
 
-  // ---------- Clean (order matters for FKs) ----------
+  // ---------- Clean ----------
+  // Semua tabel aplikasi dikosongkan (kecuali riwayat migrasi), sehingga seed ulang = seed ke database kosong.
+  // Daftar tabel dibaca dari information_schema: tabel baru otomatis ikut, tanpa perlu menjaga urutan FK.
   console.log("  • Membersihkan data lama…");
-  await prisma.$transaction([
-    prisma.paymentAllocation.deleteMany(),
-    prisma.payment.deleteMany(),
-    prisma.journalLine.deleteMany(),
-    prisma.note.deleteMany(),
-    prisma.invoiceLine.deleteMany(),
-    prisma.invoice.deleteMany(),
-    prisma.billLine.deleteMany(),
-    prisma.vendorBill.deleteMany(),
-    prisma.journalEntry.deleteMany(),
-    prisma.costingLine.deleteMany(),
-    prisma.milestone.deleteMany(),
-    prisma.jobDocument.deleteMany(),
-    prisma.jobContainer.deleteMany(),
-    prisma.booking.deleteMany(),
-  ]);
-  await prisma.$transaction([
-    prisma.job.deleteMany(),
-    prisma.quotationLine.deleteMany(),
-    prisma.quotation.deleteMany(),
-    prisma.rate.deleteMany(),
-  ]);
-  await prisma.$transaction([
-    prisma.customerContact.deleteMany(),
-    prisma.customer.deleteMany(),
-    prisma.vendor.deleteMany(),
-    prisma.overseasAgent.deleteMany(),
-    prisma.commodity.deleteMany(),
-    prisma.containerType.deleteMany(),
-    prisma.chargeCode.deleteMany(),
-    prisma.exchangeRate.deleteMany(),
-    prisma.currency.deleteMany(),
-    prisma.port.deleteMany(),
-    prisma.airport.deleteMany(),
-    prisma.taxRate.deleteMany(),
-  ]);
-  await prisma.$transaction([
-    prisma.taxRemittance.deleteMany(),
-    prisma.bankAccount.deleteMany(),
-    prisma.coaAccount.deleteMany(),
-    prisma.auditLog.deleteMany(),
-    prisma.sequence.deleteMany(),
-    prisma.companySetting.deleteMany(),
-    prisma.session.deleteMany(),
-    prisma.account.deleteMany(),
-    prisma.user.deleteMany(),
-  ]);
+  await prisma.$transaction(async (tx) => {
+    const tables = await tx.$queryRaw<{ t: string }[]>`
+      SELECT TABLE_NAME AS t FROM information_schema.TABLES
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE = 'BASE TABLE' AND TABLE_NAME <> '_prisma_migrations'`;
+    await tx.$executeRawUnsafe("SET FOREIGN_KEY_CHECKS = 0");
+    try {
+      for (const { t } of tables) await tx.$executeRawUnsafe(`DELETE FROM \`${t.replace(/`/g, "")}\``);
+    } finally {
+      await tx.$executeRawUnsafe("SET FOREIGN_KEY_CHECKS = 1");
+    }
+  }, { timeout: 120_000 });
 
   // ---------- Company ----------
   await prisma.companySetting.create({
@@ -263,10 +229,13 @@ async function main() {
     ["LSS", "Low Sulphur Surcharge", "4100", "5100", false, false],
   ];
   const charge: Record<string, { id: string; taxable: boolean; pph23: boolean }> = {};
+  // Kelompok cetak invoice, sama dengan aturan migrasi 20261105090000_invoice_print_rate_card.
+  const sectionOf = (code: string) =>
+    ["OF", "LCL", "AF", "LSS", "INS"].includes(code) ? "FREIGHT" as const : ["DOC", "BL"].includes(code) ? "DOCUMENTATION" as const : "LOCAL" as const;
   for (const [code, name, rev, exp, taxable, pph23] of chargeDefs) {
     const c = await prisma.chargeCode.create({
       data: {
-        code, name, defaultTaxable: taxable, isPph23: pph23,
+        code, name, defaultTaxable: taxable, isPph23: pph23, invoiceSection: sectionOf(code),
         revenueAccountId: acc[rev], expenseAccountId: acc[exp],
       },
     });
@@ -394,13 +363,13 @@ async function main() {
   const vendor: Record<string, { id: string; name: string; scac?: string }> = {};
   for (const [code, name, scac] of shippingLines) {
     const v = await prisma.vendor.create({
-      data: { code, name, type: "SHIPPING_LINE", scacCode: scac, country: "International", city: "Jakarta", npwp: npwp() },
+      data: { code, name, type: "SHIPPING_LINE", isForeign: true, scacCode: scac, country: "International", city: "Jakarta", npwp: npwp() },
     });
     vendor[code] = { id: v.id, name, scac };
   }
   for (const [code, name, prefix] of airlines) {
     const v = await prisma.vendor.create({
-      data: { code, name, type: "AIRLINE", scacCode: prefix, country: "International", city: "Jakarta" },
+      data: { code, name, type: "AIRLINE", isForeign: true, scacCode: prefix, country: "International", city: "Jakarta" },
     });
     vendor[code] = { id: v.id, name, scac: prefix };
   }
