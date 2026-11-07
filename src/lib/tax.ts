@@ -1,6 +1,6 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { accountMap, ACC } from "./coa";
-import { jktKey, PPN_RATE, r2 } from "./accounting-core";
+import { jktKey, r2 } from "./accounting-core";
 import { postJournal, reverseJournal, type JournalLineInput } from "./journal";
 import { resolveCashAccount, assertCashCurrency } from "./cash-accounts";
 import { nextCounter } from "./sequence";
@@ -19,7 +19,7 @@ export async function getTaxRecap(db: PrismaClient, fromKey: string, toKey: stri
     }),
     db.vendorBill.findMany({
       where: { date: { gte: from, lte: to }, status: { not: "CANCELLED" } },
-      include: { vendor: { select: { name: true } } },
+      include: { vendor: { select: { name: true } }, lines: { select: { amount: true, chargeCode: { select: { asReceipt: true } } } } },
       orderBy: { date: "asc" },
     }),
     db.coaAccount.findMany({ where: { code: { in: [ACC.PPN_OUT, ACC.PPN_IN, ACC.PPH23, ACC.PPH26] } }, select: { id: true, code: true } }),
@@ -31,7 +31,8 @@ export async function getTaxRecap(db: PrismaClient, fromKey: string, toKey: stri
   }));
   const ppnIn = bills.filter((b) => Number(b.ppnAmount) > 0).map((b) => ({
     date: jktKey(b.date), number: b.number, party: b.vendor.name,
-    dpp: r2(Number(b.ppnAmount) / PPN_RATE), ppn: Number(b.ppnAmount), currency: b.currency,
+    // DPP = nilai baris non-reimburse (C-4); dulu PPN / 11%, keliru sejak PPN bill diisi manual dengan tarif apa pun
+    dpp: r2(b.lines.filter((l) => !l.chargeCode.asReceipt).reduce((s, l) => s + Number(l.amount), 0)), ppn: Number(b.ppnAmount), currency: b.currency,
   }));
   const pph23 = bills.filter((b) => Number(b.pph23Amount) > 0).map((b) => ({
     date: jktKey(b.date), number: b.number, party: b.vendor.name,

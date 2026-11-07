@@ -133,7 +133,8 @@ export async function createInvoiceFromJobCore(db: PrismaClient, jobId: string, 
 /** Alasan invoice tidak bisa diedit, atau null bila masih bisa. Murni. */
 export function invoiceEditBlock(inv: { status: string; amountPaid: unknown }): string | null {
   if (inv.status === "CANCELLED") return "Invoice sudah dibatalkan.";
-  if (Number(inv.amountPaid) > 0 || inv.status !== "UNPAID") return "Invoice sudah ada pembayaran, jadi tidak bisa diedit.";
+  // OVERDUE = belum dibayar tapi lewat jatuh tempo, tetap boleh diedit (C-2)
+  if (Number(inv.amountPaid) > 0 || (inv.status !== "UNPAID" && inv.status !== "OVERDUE")) return "Invoice sudah ada pembayaran, jadi tidak bisa diedit.";
   return null;
 }
 

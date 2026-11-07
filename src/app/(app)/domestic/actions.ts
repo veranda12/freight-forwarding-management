@@ -174,10 +174,11 @@ export async function createInvoiceFromDomestic(id: string): Promise<ActionResul
     for (const p of parts) {
       const cc = code(p.code)!;
       subtotal += p.amount;
-      if (cc.defaultTaxable) taxableBase += p.amount;
-      const accId = cc.revenueAccountId ?? acc[ACC.REV_OTHER];
+      // Sama dengan invoice job (C-5): dasar PPN = semua baris non-reimburse; reimburse ke akun titipan 1350.
+      if (!cc.asReceipt) taxableBase += p.amount;
+      const accId = cc.asReceipt ? acc[ACC.REIMBURSE] : cc.revenueAccountId ?? acc[ACC.REV_OTHER];
       revByAccount[accId] = r2((revByAccount[accId] ?? 0) + p.amount);
-      lines.push({ chargeCode: { connect: { id: cc.id } }, description: p.label, qty: D(1), unitPrice: D(p.amount), amount: D(p.amount), taxable: cc.defaultTaxable });
+      lines.push({ chargeCode: { connect: { id: cc.id } }, description: p.label, qty: D(1), unitPrice: D(p.amount), amount: D(p.amount), taxable: !cc.asReceipt });
     }
     subtotal = r2(subtotal); taxableBase = r2(taxableBase);
     const ppnRate = await getPpnRate(tx);
