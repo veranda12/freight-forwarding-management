@@ -2,13 +2,12 @@
  * Uji pemetaan rute quotation → master Port/Airport (D-08) dan pembulatan aging AR/AP (D-11).
  * Hanya membaca; aman di database mana pun yang sudah di-seed.
  *
- *   DATABASE_URL=mysql://ffms:ffms123@127.0.0.1:3307/ffms_test node node_modules/tsx/dist/cli.mjs tests/integration/verify-route-aging.ts
+ *   DATABASE_URL=postgresql://…/ffms_part2 node node_modules/tsx/dist/cli.mjs tests/integration/verify-route-aging.ts
  */
 import { PrismaClient } from "@prisma/client";
-import { PRISMA_CLIENT_OPTIONS } from "../../src/lib/prisma-options";
 import { resolveQuotationRoute } from "../../src/lib/route-match";
 
-const db = new PrismaClient(PRISMA_CLIENT_OPTIONS);
+const db = new PrismaClient();
 let failures = 0;
 const ok = (c: boolean, msg: string) => { console.log((c ? "PASS " : "FAIL ") + msg); if (!c) failures++; };
 

@@ -17,6 +17,9 @@ export function parseRouteText(text: string | null | undefined): { label: string
 /** Satu-satunya id bila tepat satu kandidat; selain itu null (tidak menebak). */
 const only = (rows: { id: string }[]) => (rows.length === 1 ? rows[0].id : null);
 
+/** Nama kota/pelabuhan sama persis tanpa beda huruf besar/kecil (PostgreSQL peka huruf, MariaDB _ci tidak). */
+const sameText = (t: string) => ({ equals: t, mode: "insensitive" as const });
+
 async function findPort(db: Db, text: string | null | undefined): Promise<string | null> {
   const p = parseRouteText(text);
   if (!p) return null;
@@ -25,7 +28,7 @@ async function findPort(db: Db, text: string | null | undefined): Promise<string
     if (byCode) return byCode.id;
   }
   if (!p.label) return null;
-  return only(await db.port.findMany({ where: { OR: [{ city: p.label }, { name: p.label }] }, select: { id: true }, take: 2 }));
+  return only(await db.port.findMany({ where: { OR: [{ city: sameText(p.label) }, { name: sameText(p.label) }] }, select: { id: true }, take: 2 }));
 }
 
 async function findAirport(db: Db, text: string | null | undefined): Promise<string | null> {
@@ -36,7 +39,7 @@ async function findAirport(db: Db, text: string | null | undefined): Promise<str
     if (byCode) return byCode.id;
   }
   if (!p.label) return null;
-  return only(await db.airport.findMany({ where: { OR: [{ city: p.label }, { name: p.label }] }, select: { id: true }, take: 2 }));
+  return only(await db.airport.findMany({ where: { OR: [{ city: sameText(p.label) }, { name: sameText(p.label) }] }, select: { id: true }, take: 2 }));
 }
 
 /**
