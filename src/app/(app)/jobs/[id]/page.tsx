@@ -130,12 +130,19 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
         >
           <JobStatusBadge status={job.status} />
           {canCostingRead && <Button asChild variant="outline"><Link href={`/costing/${job.id}`}><Calculator /> Buka Costing</Link></Button>}
-          {((canStatus && (!lock || canClose)) || canCancel || canReopen) && (
-            <StatusControl
-              jobId={job.id} current={job.status} locked={!!lock}
-              canStatus={canStatus && (!lock || canClose)} canCancel={canCancel && !lock} canClose={canClose} canReopen={canReopen}
-            />
-          )}
+          {(() => {
+            // job terkunci: hanya pemegang jobs.close yang boleh mengubah status; Closed hanya bisa dibuka jobs.reopen
+            const statusOk = canStatus && (!lock || canClose);
+            const cancelOk = canCancel && !lock;
+            const reopenOk = canReopen && job.status === "CLOSED";
+            const show = job.status === "CLOSED" ? reopenOk : statusOk || cancelOk;
+            return show && (
+              <StatusControl
+                jobId={job.id} current={job.status} locked={!!lock}
+                canStatus={statusOk} canCancel={cancelOk} canClose={canClose} canReopen={reopenOk}
+              />
+            );
+          })()}
         </PageHeader>
       </div>
 
