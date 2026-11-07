@@ -26,6 +26,7 @@ export type Resource =
   | "notes"
   | "payments"
   | "accounting"
+  | "proofs"
   | "reports"
   | "users"
   | "settings"
@@ -77,6 +78,8 @@ const MATRIX: Record<Resource, { read: Role[]; write: Role[] }> = {
   notes: { read: ["FINANCE"], write: ["FINANCE"] },
   payments: { read: ["FINANCE"], write: ["FINANCE"] },
   accounting: { read: ["FINANCE"], write: ["FINANCE"] },
+  // Cari Bukti: halaman baca saja; jenis bukti yang tampil tetap mengikuti izin modul masing-masing.
+  proofs: { read: ["FINANCE", "SALES"], write: [] },
 
   reports: { read: ["SALES", "FINANCE"], write: [] },
   users: { read: [], write: [] },

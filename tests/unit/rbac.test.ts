@@ -32,6 +32,13 @@ describe("RBAC — can()", () => {
     expect(can("OPERATION", "bookings", "write")).toBe(true);
   });
 
+  it("Cari Bukti: baca saja untuk FINANCE dan SALES, tidak untuk OPERATION", () => {
+    expect(can("FINANCE", "proofs", "read")).toBe(true);
+    expect(can("SALES", "proofs", "read")).toBe(true);
+    expect(can("OPERATION", "proofs", "read")).toBe(false);
+    expect(can("FINANCE", "proofs", "write")).toBe(false);
+  });
+
   it("write menyiratkan read", () => {
     // SALES bisa write quotations → otomatis bisa read
     expect(can("SALES", "quotations", "read")).toBe(true);
