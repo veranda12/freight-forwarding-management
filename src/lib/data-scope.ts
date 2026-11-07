@@ -14,10 +14,16 @@ type U = Pick<SessionUser, "id" | "isAdmin" | "permissions">;
 
 const ownJob = (uid: string): Prisma.JobWhereInput => ({ OR: [{ salesPicId: uid }, { createdById: uid }] });
 const ownDomestic = (uid: string): Prisma.DomesticShipmentWhereInput => ({ OR: [{ createdById: uid }, { customer: { salesPicId: uid } }] });
+// Invoice/bill bisa memuat baris dari beberapa job (InvoiceLine/BillLine.jobId): pemilik job mana pun ikut melihatnya.
 const ownInvoice = (uid: string): Prisma.InvoiceWhereInput => ({
-  OR: [{ createdById: uid }, { job: ownJob(uid) }, { domesticShipment: ownDomestic(uid) }, { customer: { salesPicId: uid } }],
+  OR: [
+    { createdById: uid }, { job: ownJob(uid) }, { lines: { some: { job: ownJob(uid) } } },
+    { domesticShipment: ownDomestic(uid) }, { customer: { salesPicId: uid } },
+  ],
 });
-const ownBill = (uid: string): Prisma.VendorBillWhereInput => ({ OR: [{ createdById: uid }, { job: ownJob(uid) }] });
+const ownBill = (uid: string): Prisma.VendorBillWhereInput => ({
+  OR: [{ createdById: uid }, { job: ownJob(uid) }, { lines: { some: { job: ownJob(uid) } } }],
+});
 
 export function customerScope(u: U): Prisma.CustomerWhereInput {
   return hasPerm(u as SessionUser, "customers.viewAll") ? {} : { OR: [{ salesPicId: u.id }, { createdById: u.id }] };
@@ -41,6 +47,10 @@ export function invoiceScope(u: U): Prisma.InvoiceWhereInput {
 
 export function billScope(u: U): Prisma.VendorBillWhereInput {
   return hasPerm(u as SessionUser, "bills.viewAll") ? {} : ownBill(u.id);
+}
+
+export function voucherScope(u: U): Prisma.VoucherWhereInput {
+  return hasPerm(u as SessionUser, "vouchers.viewAll") ? {} : { OR: [{ createdById: u.id }, { job: ownJob(u.id) }] };
 }
 
 export function paymentScope(u: U): Prisma.PaymentWhereInput {

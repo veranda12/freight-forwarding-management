@@ -121,3 +121,10 @@ export async function deleteJobContainer(db: PrismaClient, jobId: string, contai
   await db.jobContainer.delete({ where: { id: containerId } });
   return existing;
 }
+
+/** Ringkas container per tipe, misalnya "3 × 40HC". */
+export function summarizeContainers(containers: { containerType: { code: string } | null }[]) {
+  const counts = new Map<string, number>();
+  for (const c of containers) counts.set(c.containerType?.code ?? "?", (counts.get(c.containerType?.code ?? "?") ?? 0) + 1);
+  return [...counts.entries()].map(([code, n]) => `${n} × ${code}`).join(", ");
+}

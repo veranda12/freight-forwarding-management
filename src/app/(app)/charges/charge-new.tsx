@@ -21,20 +21,16 @@ export function ChargeNew({ revenueAccounts, expenseAccounts }: { revenueAccount
   const [name, setName] = useState("");
   const [rev, setRev] = useState("");
   const [exp, setExp] = useState("");
-  const [ppn, setPpn] = useState(true);
-  const [p23, setP23] = useState(false);
-  const [p26, setP26] = useState(false);
-  const [rate, setRate] = useState("20");
 
   function reset() {
-    setCode(""); setName(""); setRev(""); setExp(""); setPpn(true); setP23(false); setP26(false); setRate("20");
+    setCode(""); setName(""); setRev(""); setExp("");
   }
 
   function save() {
     start(async () => {
       const res = await createChargeCodeAction({
         code, name, revenueAccountId: rev, expenseAccountId: exp,
-        defaultTaxable: ppn, isPph23: p23, isPph26: p26, pph26Rate: Number(rate || 0),
+        defaultTaxable: true, isPph23: false, isPph26: false, pph26Rate: 0,
       });
       if (res.ok) { toast.success(`Charge ${code.toUpperCase()} ditambahkan.`); setOpen(false); reset(); router.refresh(); }
       else toast.error(res.error);
@@ -51,7 +47,7 @@ export function ChargeNew({ revenueAccounts, expenseAccounts }: { revenueAccount
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Tambah charge code</DialogTitle>
-          <DialogDescription>Kode dipakai di costing job. Akun dan pajak di sini berlaku untuk invoice dan bill berikutnya.</DialogDescription>
+          <DialogDescription>Kode dipakai di costing job. Akun di sini berlaku untuk invoice, voucher, dan bill berikutnya.</DialogDescription>
         </DialogHeader>
         <div className="grid grid-cols-2 gap-3 text-sm">
           <div className="space-y-1.5"><Label>Kode</Label><Input value={code} onChange={(e) => setCode(e.target.value)} placeholder="OF" maxLength={15} /></div>
@@ -68,12 +64,6 @@ export function ChargeNew({ revenueAccounts, expenseAccounts }: { revenueAccount
               <SelectContent>{expenseAccounts.map((a) => <SelectItem key={a.id} value={a.id}>{label(a)}</SelectItem>)}</SelectContent>
             </Select>
           </div>
-          <label className="col-span-2 flex items-center gap-2"><input type="checkbox" checked={ppn} onChange={(e) => setPpn(e.target.checked)} className="h-4 w-4 accent-primary" /> Kena PPN 11%</label>
-          <label className="col-span-2 flex items-center gap-2"><input type="checkbox" checked={p23} onChange={(e) => setP23(e.target.checked)} className="h-4 w-4 accent-primary" /> Dipotong PPh 23 (vendor jasa dalam negeri)</label>
-          <label className="col-span-2 flex items-center gap-2"><input type="checkbox" checked={p26} onChange={(e) => setP26(e.target.checked)} className="h-4 w-4 accent-primary" /> Dipotong PPh 26 (vendor luar negeri yang ditandai)</label>
-          {p26 && (
-            <div className="col-span-2 space-y-1.5"><Label>Tarif PPh 26 (%)</Label><Input type="number" min={0} max={100} step="0.01" value={rate} onChange={(e) => setRate(e.target.value)} className="w-[10rem]" /></div>
-          )}
         </div>
         <DialogFooter>
           <DialogClose asChild><Button variant="ghost">Batal</Button></DialogClose>

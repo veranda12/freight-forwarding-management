@@ -1,5 +1,8 @@
+import Link from "next/link";
+import { Plus } from "lucide-react";
 import { requirePerm, hasPerm } from "@/lib/auth-helpers";
 import { invoiceScope } from "@/lib/data-scope";
+import { Button } from "@/components/ui/button";
 import { prisma } from "@/lib/prisma";
 import { formatIDR } from "@/lib/format";
 import { PageHeader } from "@/components/page-header";
@@ -8,18 +11,30 @@ import { InvoicesTable, type InvoiceRow } from "./invoices-table";
 
 export const dynamic = "force-dynamic";
 
+const JOB_REF = { number: true, hblNo: true, mblNo: true, hawbNo: true, mawbNo: true } as const;
+
 export default async function InvoicesPage() {
   const user = await requirePerm("invoices.view");
   const invoices = await prisma.invoice.findMany({
     where: invoiceScope(user),
     orderBy: { date: "desc" },
-    include: { customer: { select: { name: true } }, job: { select: { number: true } }, domesticShipment: { select: { number: true } } },
+    include: {
+      customer: { select: { name: true } }, domesticShipment: { select: { number: true } },
+      job: { select: JOB_REF }, lines: { select: { job: { select: JOB_REF } } },
+    },
   });
-  const rows: InvoiceRow[] = invoices.map((i) => ({
+  const rows: InvoiceRow[] = invoices.map((i) => {
+    const jobs = new Map(i.lines.flatMap((l) => (l.job ? [[l.job.number, l.job] as const] : [])));
+    if (i.job) jobs.set(i.job.number, i.job);
+    const list = [...jobs.values()];
+    return {
     id: i.id, number: i.number, customer: i.customer.name,
     date: i.date.toISOString(), dueDate: i.dueDate.toISOString(),
-    total: Number(i.total), paid: Number(i.amountPaid), status: i.status, job: i.job?.number ?? i.domesticShipment?.number ?? null,
-  }));
+    total: Number(i.total), paid: Number(i.amountPaid), status: i.status,
+    job: list.map((j) => j.number).join(", ") || i.domesticShipment?.number || "",
+    bl: list.flatMap((j) => [j.hblNo, j.mblNo, j.hawbNo, j.mawbNo]).filter(Boolean).join(", "),
+    };
+  });
 
   const outstanding = rows.filter((r) => r.status !== "PAID" && r.status !== "CANCELLED").reduce((s, r) => s + (r.total - r.paid), 0);
   const overdue = rows.filter((r) => r.status === "OVERDUE").reduce((s, r) => s + (r.total - r.paid), 0);
@@ -27,7 +42,9 @@ export default async function InvoicesPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Invoice (AR)" description={`${rows.length} invoice`} />
+      <PageHeader title="Invoice (AR)" description={`${rows.length} invoice`}>
+        {hasPerm(user, "invoices.create") && <Button asChild><Link href="/invoices/new"><Plus /> Buat Invoice</Link></Button>}
+      </PageHeader>
       <StatStrip items={[
         { label: "Total invoice", value: rows.length },
         { label: "Outstanding", value: formatIDR(outstanding), tone: "warning" },

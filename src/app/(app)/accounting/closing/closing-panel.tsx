@@ -33,7 +33,7 @@ export function ClosingButton({ year, disabled, reason }: { year: number; disabl
           <DialogTitle>Tutup buku tahun {year}?</DialogTitle>
           <DialogDescription>
             Pendapatan dan beban tahun {year} ditutup ke Laba Ditahan (3100) dengan satu jurnal penutup tanggal 31 Desember {year}.
-            Setelah ditutup, tahun ini tidak bisa diulang. Koreksi dilakukan dengan jurnal manual setelah tahun berikutnya dibuka.
+            Setelah ditutup, tahun ini tidak bisa diulang. Koreksi dilakukan dengan Jurnal Umum setelah tahun berikutnya dibuka.
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>

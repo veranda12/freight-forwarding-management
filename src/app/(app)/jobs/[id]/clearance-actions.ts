@@ -8,6 +8,7 @@ import { jobScope } from "@/lib/data-scope";
 import { assertJobInScope } from "../job-scope";
 import { writeAudit } from "@/lib/audit";
 import { applyRateCard } from "@/lib/rate-card";
+import { getJobLock } from "@/lib/job-lock";
 import { errorMessage } from "@/lib/action-error";
 
 type Result = { ok: true; message?: string } | { ok: false; error: string };
@@ -24,6 +25,8 @@ export async function updateJobClearanceAction(jobId: string, input: ClearanceIn
   const user = await assertPerm("jobs.clearance");
   const job = await prisma.job.findFirst({ where: { id: jobId, ...jobScope(user) }, select: { customerId: true, number: true } });
   if (!job) return { ok: false, error: "Job tidak ditemukan." };
+  const lock = await getJobLock(prisma, jobId);
+  if (lock) return { ok: false, error: lock };
   const wh = input.warehouseId ? await prisma.warehouse.findUnique({ where: { id: input.warehouseId } }) : null;
   if (input.warehouseId && (!wh || wh.customerId !== job.customerId)) return { ok: false, error: "Gudang bukan milik customer job ini." };
   const km = input.distanceKm.trim() === "" ? null : Number(input.distanceKm);
@@ -50,7 +53,7 @@ export async function applyRateCardAction(jobId: string): Promise<Result> {
     await assertJobInScope(user, jobId);
     const n = await applyRateCard(prisma, jobId);
     await writeAudit({ entity: "Job", entityId: jobId, action: "APPLY_RATE_CARD", summary: `${n} baris selling dari rate card`, userId: user.id });
-    revalidatePath(`/jobs/${jobId}`);
+    revalidatePath(`/costing/${jobId}`);
     return { ok: true, message: `${n} baris charge dibuat dari rate card.` };
   } catch (e) {
     return { ok: false, error: errorMessage(e, "Gagal menghitung dari rate card.") };

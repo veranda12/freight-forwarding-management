@@ -1,7 +1,7 @@
 import { PPH23_RATE } from "./accounting-core";
 
 /** Potongan yang dipotong pelanggan atau bank saat penerimaan. Nilai dalam IDR. */
-export type Deductions = { pph23?: number | string | null; admin?: number | string | null; other?: number | string | null };
+export type Deductions = { pph23?: number | string | null; admin?: number | string | null; other?: number | string | null; otherNote?: string | null };
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -16,7 +16,7 @@ export function normalizeDeductions(d?: Deductions) {
   const pph23 = pick(d?.pph23, "PPh 23");
   const admin = pick(d?.admin, "Biaya admin");
   const other = pick(d?.other, "Potongan lain");
-  return { pph23, admin, other, total: r2(pph23 + admin + other) };
+  return { pph23, admin, other, otherNote: (d?.otherNote ?? "").trim() || null, total: r2(pph23 + admin + other) };
 }
 
 /** Saran PPh 23 dari baris jasa yang kena PPh 23 (tarif 2%). */

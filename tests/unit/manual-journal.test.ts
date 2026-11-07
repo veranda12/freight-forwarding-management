@@ -35,7 +35,7 @@ describe("validateManualJournal: jurnal yang sah", () => {
     const r = v([{ accountId: "listrik", debit: 100 }, { accountId: "", debit: "", credit: "" }, { accountId: "kas", credit: 100 }]);
     expect(r.lines).toHaveLength(2);
   });
-  it("boleh ke akun pajak, karena koreksi PPN termasuk kasus jurnal manual", () => {
+  it("boleh ke akun pajak, karena koreksi PPN termasuk kasus jurnal umum", () => {
     expect(() => v([{ accountId: "ppn", debit: 1000 }, { accountId: "umum", credit: 1000 }])).not.toThrow();
   });
   it("memangkas keterangan dan referensi", () => {

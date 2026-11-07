@@ -97,7 +97,7 @@ export async function matchManual(db: PrismaClient, statementLineId: string, jou
   if (!l || l.accountId !== s.bankAccount.coaAccountId) throw new Error("Baris jurnal bukan milik rekening ini.");
   if (l.statementLine) throw new Error("Baris jurnal ini sudah dicocokkan dengan mutasi lain.");
   if (Math.abs(bookAmount(l, s.bankAccount.currency) - Number(s.amount)) >= 0.005) {
-    throw new Error("Nominal berbeda. Jika selisihnya biaya admin atau bunga, catat dulu lewat Kas Masuk / Keluar.");
+    throw new Error("Nominal berbeda. Jika selisihnya biaya admin atau bunga, catat dulu lewat Jurnal Penerimaan & Pengeluaran.");
   }
   await db.$transaction([
     db.bankStatementLine.update({ where: { id: s.id }, data: { matchedLineId: l.id, matchedBy: "MANUAL" } }),

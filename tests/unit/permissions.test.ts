@@ -60,7 +60,7 @@ describe("role awal", () => {
 
   it("Management hanya melihat (tanpa aksi); maker-checker quotation aktif bawaan", () => {
     const actionKinds = new Set(["action", "approve", "own"]);
-    const allowedExtra = new Set(["reports.export", "invoices.print", "documents.generate", "domestic.print"]);
+    const allowedExtra = new Set(["reports.export", "invoices.print", "documents.generate", "domestic.print", "vouchers.print"]);
     for (const k of role("MANAGEMENT")) {
       const def = ALL_PERMISSIONS.find((p) => p.key === k)!;
       if (actionKinds.has(def.kind)) expect(allowedExtra.has(k), k).toBe(true);

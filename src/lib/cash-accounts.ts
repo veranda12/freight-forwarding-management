@@ -73,7 +73,7 @@ export async function listCashAccounts(db: Db, opts: { activeOnly?: boolean } = 
 export async function cashAccountOptions(db: Db, purpose: "receipt" | "payment") {
   const list = await listCashAccounts(db, { activeOnly: true });
   const def = list.find((a) => (purpose === "receipt" ? a.isDefaultReceipt : a.isDefaultPayment)) ?? list.find((a) => a.kind === "BANK") ?? list[0];
-  return { options: list.map((a) => ({ id: a.id, label: `${a.coaCode} · ${a.label}`, currency: a.currency })), defaultId: def?.id ?? null };
+  return { options: list.map((a) => ({ id: a.id, label: `${a.coaCode} · ${a.label}`, currency: a.currency, kind: a.kind })), defaultId: def?.id ?? null };
 }
 
 /** Semua akun COA yang termasuk kas dan bank (dipakai arus kas dan rekonsiliasi). */
@@ -94,16 +94,16 @@ export async function resolveCashAccount(db: Db, bankAccountId: string | null | 
     const ba = await db.bankAccount.findUnique({ where: { id: bankAccountId }, include: { coaAccount: { select: { id: true, code: true } } } });
     if (!ba) throw new Error("Rekening tidak ditemukan.");
     if (!ba.isActive) throw new Error(`Rekening ${ba.name} sudah nonaktif.`);
-    return { bankAccountId: ba.id, coaId: ba.coaAccount.id, name: ba.name, currency: ba.currency };
+    return { bankAccountId: ba.id, coaId: ba.coaAccount.id, name: ba.name, currency: ba.currency, kind: ba.kind as CashKind };
   }
   const def = await db.bankAccount.findFirst({
     where: { isActive: true, ...(purpose === "receipt" ? { isDefaultReceipt: true } : { isDefaultPayment: true }) },
     include: { coaAccount: { select: { id: true } } },
   });
-  if (def) return { bankAccountId: def.id, coaId: def.coaAccount.id, name: def.name, currency: def.currency };
+  if (def) return { bankAccountId: def.id, coaId: def.coaAccount.id, name: def.name, currency: def.currency, kind: def.kind as CashKind };
   const fallback = await db.coaAccount.findUnique({ where: { code: ACC.BANK }, select: { id: true } });
   if (!fallback) throw new Error("Belum ada rekening bank. Tambahkan di menu Kas & Rekening.");
-  return { bankAccountId: null, coaId: fallback.id, name: "Bank", currency: "IDR" };
+  return { bankAccountId: null, coaId: fallback.id, name: "Bank", currency: "IDR", kind: "BANK" as CashKind };
 }
 
 /**

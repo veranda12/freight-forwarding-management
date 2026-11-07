@@ -1,34 +1,46 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { assertPerm, assertNotOwn } from "@/lib/auth-helpers";
-import { invoiceScope, jobScope } from "@/lib/data-scope";
+import { invoiceScope } from "@/lib/data-scope";
+import { assertCostingLinesInScope } from "../jobs/job-scope";
 import { writeAudit } from "@/lib/audit";
-import { prepareInvoiceCharges, type InvoicePrep } from "@/lib/job-charges";
-import { cancelInvoiceCore, createInvoiceFromJobCore, recordReceiptCore, type InvoiceOpts, type ReceiptInput } from "@/lib/receivables";
+import { cancelInvoiceCore, createInvoiceCore, recordReceiptCore, type InvoiceOpts, type ReceiptInput } from "@/lib/receivables";
 import { errorMessage } from "@/lib/action-error";
+import { editInvoiceCharges, type InvoiceEdit } from "@/lib/job-charges";
 
-/**
- * Buat AR Invoice dari selling costing sebuah job (IDR, atau valas dengan kurs tagihan).
- * `prep` menyesuaikan nilai aktual dan menambah biaya lain sebelum invoice dibuat.
- */
-export async function createInvoiceFromJob(jobId: string, opts: InvoiceOpts = {}, prep: InvoicePrep = {}): Promise<void> {
+type Saved = { ok: true; id: string } | { ok: false; error: string };
+
+/** Buat invoice dari baris selling yang dicentang. Semua baris harus dari job dalam batas data user. */
+export async function createInvoiceAction(lineIds: string[], opts: InvoiceOpts = {}): Promise<Saved> {
   const user = await assertPerm("invoices.create");
-  const job = await prisma.job.findFirst({ where: { id: jobId, ...jobScope(user) }, select: { number: true } });
-  if (!job) throw new Error("Job tidak ditemukan.");
-  if (prep.updates?.length || prep.extras?.length) {
-    await assertPerm("jobs.charges");
-    await prepareInvoiceCharges(prisma, jobId, prep);
-    await writeAudit({ entity: "Job", entityId: jobId, action: "INVOICE_PREP", summary: `${prep.updates?.length ?? 0} baris disesuaikan, ${prep.extras?.length ?? 0} biaya ditambah`, userId: user.id });
+  try {
+    await assertCostingLinesInScope(user, lineIds);
+    const id = await createInvoiceCore(prisma, lineIds, user.id, opts);
+    await writeAudit({ entity: "Invoice", entityId: id, action: "CREATE", summary: `${lineIds.length} baris`, userId: user.id });
+    revalidatePath("/invoices");
+    return { ok: true, id };
+  } catch (e) {
+    return { ok: false, error: errorMessage(e, "Gagal membuat invoice.") };
   }
-  const invoiceId = await createInvoiceFromJobCore(prisma, jobId, user.id, opts);
-  const cur = opts.currency && opts.currency !== "IDR" ? ` (${opts.currency})` : "";
-  await writeAudit({ entity: "Invoice", entityId: invoiceId, action: "CREATE_FROM_JOB", summary: `${job.number}${cur}`, userId: user.id });
-  revalidatePath(`/jobs/${jobId}`);
-  revalidatePath("/invoices");
-  redirect(`/invoices/${invoiceId}`);
+}
+
+/** Edit isi invoice: ubah, hapus, atau tambah baris. Nomor tetap, isi lama tercatat. */
+export async function editInvoiceAction(invoiceId: string, edit: InvoiceEdit): Promise<Saved> {
+  const user = await assertPerm("invoices.edit");
+  try {
+    const own = await prisma.invoice.findFirst({ where: { id: invoiceId, ...invoiceScope(user) }, select: { id: true } });
+    if (!own) throw new Error("Data tidak ditemukan.");
+    const changes = await editInvoiceCharges(prisma, invoiceId, edit);
+    await writeAudit({ entity: "Invoice", entityId: invoiceId, action: "EDIT", summary: "Edit isi invoice", changes, userId: user.id });
+    revalidatePath("/invoices");
+    revalidatePath(`/invoices/${invoiceId}`);
+    revalidatePath("/costing");
+    return { ok: true, id: invoiceId };
+  } catch (e) {
+    return { ok: false, error: errorMessage(e, "Gagal mengubah invoice.") };
+  }
 }
 
 /** Catat penerimaan. IDR: nominal IDR. Valas: nominal valas + kurs pembayaran. */

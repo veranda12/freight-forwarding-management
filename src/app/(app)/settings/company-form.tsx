@@ -29,6 +29,7 @@ const BANK: Field[] = [
   { key: "bankBranch", label: "Cabang" },
   { key: "signatoryName", label: "Penandatangan invoice" },
   { key: "signatoryTitle", label: "Jabatan" },
+  { key: "docCode", label: "Kode nomor bukti" },
 ];
 
 /** Identitas, rekening, penandatangan, dan logo perusahaan untuk dokumen & invoice. */

@@ -1,20 +1,21 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import { Download, Loader2, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
+import { SearchableSelect } from "@/components/searchable-select";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { EmptyState } from "@/components/empty-state";
 import { formatIDR, formatDate } from "@/lib/format";
-import { SOURCE_LABEL, quickRange } from "@/lib/journal-filter";
+import { quickRange } from "@/lib/journal-filter";
 
 type Acc = { code: string; name: string };
-type Row = { date: string; number: string; source: string; description: string; debit: number; credit: number; balance: number; counter: string };
+type Row = { entryId: string; date: string; number: string; source: string; description: string; debit: number; credit: number; balance: number; counter: string };
 type Ledger = { account: { code: string; name: string }; openingBalance: number; rows: Row[]; totalDebit: number; totalCredit: number; closingBalance: number };
 
 export function LedgerView({ accounts }: { accounts: Acc[] }) {
@@ -47,12 +48,20 @@ export function LedgerView({ accounts }: { accounts: Acc[] }) {
       (!needle || `${r.number} ${r.description} ${r.counter}`.toLowerCase().includes(needle)));
   }, [data, q, side]);
 
+  function pickMonth(m: string) {
+    if (!m) return;
+    const [y, mo] = m.split("-").map(Number);
+    const f = `${m}-01`;
+    const t = `${m}-${String(new Date(y, mo, 0).getDate()).padStart(2, "0")}`;
+    setFrom(f); setTo(t); load(code, f, t);
+  }
+
   function exportCsv() {
     if (!data) return;
     const cell = (v: string | number) => { const s = String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
-    const lines = [["Tanggal", "No. Jurnal", "Sumber", "Keterangan", "Akun lawan", "Debit", "Kredit", "Saldo"].join(",")];
-    lines.push(["", "", "", "Saldo awal", "", "", "", data.openingBalance].map(cell).join(","));
-    for (const r of shown) lines.push([r.date.slice(0, 10), r.number, SOURCE_LABEL[r.source] ?? r.source, r.description, r.counter, r.debit, r.credit, r.balance].map(cell).join(","));
+    const lines = [["Tanggal Transaksi", "Keterangan", "No. Bukti", "Debit", "Kredit", "Saldo"].join(",")];
+    lines.push(["", "Saldo awal", "", "", "", data.openingBalance].map(cell).join(","));
+    for (const r of shown) lines.push([r.date.slice(0, 10), r.description, r.number, r.debit, r.credit, r.balance].map(cell).join(","));
     const blob = new Blob(["﻿" + lines.join("\n")], { type: "text/csv;charset=utf-8" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
@@ -64,14 +73,12 @@ export function LedgerView({ accounts }: { accounts: Acc[] }) {
   return (
     <Card>
       <CardContent className="space-y-4 p-5">
-        <form className="grid gap-3 md:grid-cols-2 lg:grid-cols-6" onSubmit={(e) => { e.preventDefault(); load(); }}>
+        <form className="grid gap-3 md:grid-cols-2 lg:grid-cols-7" onSubmit={(e) => { e.preventDefault(); load(); }}>
           <div className="space-y-1.5 lg:col-span-2">
             <Label className="text-xs">Akun</Label>
-            <Select value={code} onValueChange={(v) => { setCode(v); load(v); }}>
-              <SelectTrigger><SelectValue placeholder="Pilih akun…" /></SelectTrigger>
-              <SelectContent>{accounts.map((a) => <SelectItem key={a.code} value={a.code}>{a.code} · {a.name}</SelectItem>)}</SelectContent>
-            </Select>
+            <SearchableSelect value={code} onChange={(v) => { setCode(v); load(v); }} options={accounts.map((a) => ({ id: a.code, label: `${a.code} · ${a.name}` }))} placeholder="Pilih akun…" ariaLabel="Akun" />
           </div>
+          <div className="space-y-1.5"><Label className="text-xs">Bulan</Label><Input type="month" onChange={(e) => pickMonth(e.target.value)} /></div>
           <div className="space-y-1.5"><Label className="text-xs">Dari tanggal</Label><Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></div>
           <div className="space-y-1.5"><Label className="text-xs">Sampai tanggal</Label><Input type="date" value={to} onChange={(e) => setTo(e.target.value)} /></div>
           <div className="space-y-1.5">
@@ -87,9 +94,9 @@ export function LedgerView({ accounts }: { accounts: Acc[] }) {
           </div>
           <div className="space-y-1.5">
             <Label className="text-xs">Cari</Label>
-            <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="no., keterangan, akun lawan" />
+            <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="no. bukti atau keterangan" />
           </div>
-          <div className="flex flex-wrap items-center gap-2 md:col-span-2 lg:col-span-6">
+          <div className="flex flex-wrap items-center gap-2 md:col-span-2 lg:col-span-7">
             <span className="text-xs text-muted-foreground">Rentang cepat:</span>
             {([["this_month", "Bulan ini"], ["last_month", "Bulan lalu"], ["this_year", "Tahun ini"], ["last_year", "Tahun lalu"]] as const).map(([k, l]) => (
               <Button key={k} type="button" variant="outline" size="sm" onClick={() => { const r = quickRange(k); setFrom(r.from); setTo(r.to); load(code, r.from, r.to); }}>{l}</Button>
@@ -122,17 +129,15 @@ export function LedgerView({ accounts }: { accounts: Acc[] }) {
               <div className="rounded-lg border">
                 <Table>
                   <TableHeader><TableRow>
-                    <TableHead>Tanggal</TableHead><TableHead>No. Jurnal</TableHead><TableHead>Keterangan</TableHead>
-                    <TableHead>Akun lawan</TableHead>
+                    <TableHead>Tanggal Transaksi</TableHead><TableHead>Keterangan</TableHead><TableHead>No. Bukti</TableHead>
                     <TableHead className="text-right">Debit</TableHead><TableHead className="text-right">Kredit</TableHead><TableHead className="text-right">Saldo</TableHead>
                   </TableRow></TableHeader>
                   <TableBody>
                     {shown.map((l, i) => (
                       <TableRow key={i}>
                         <TableCell className="whitespace-nowrap">{formatDate(l.date)}</TableCell>
-                        <TableCell className="font-mono text-xs">{l.number}<div><Badge variant="outline" className="mt-0.5 text-[10px]">{SOURCE_LABEL[l.source] ?? l.source}</Badge></div></TableCell>
-                        <TableCell className="max-w-xs truncate">{l.description}</TableCell>
-                        <TableCell className="max-w-xs truncate text-muted-foreground" title={l.counter}>{l.counter || "-"}</TableCell>
+                        <TableCell className="max-w-sm truncate" title={l.description}>{l.description}</TableCell>
+                        <TableCell className="whitespace-nowrap"><Link href={`/accounting/journal/${l.entryId}`} className="font-medium text-primary hover:underline">{l.number}</Link></TableCell>
                         <TableCell className="text-right tabular-nums">{l.debit ? formatIDR(l.debit) : "-"}</TableCell>
                         <TableCell className="text-right tabular-nums">{l.credit ? formatIDR(l.credit) : "-"}</TableCell>
                         <TableCell className="text-right tabular-nums font-medium">{formatIDR(l.balance)}</TableCell>

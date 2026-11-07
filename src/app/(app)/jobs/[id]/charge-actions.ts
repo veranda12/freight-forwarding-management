@@ -17,7 +17,8 @@ export async function addJobChargeAction(jobId: string, input: JobChargeInput): 
     await assertJobInScope(user, jobId);
     const id = await addJobCharge(prisma, jobId, input);
     await writeAudit({ entity: "CostingLine", entityId: id, action: "CREATE", summary: `Tambah charge ${input.side}`, userId: user.id });
-    revalidatePath(`/jobs/${jobId}`);
+    revalidatePath(`/costing/${jobId}`);
+    revalidatePath("/invoices");
     return { ok: true };
   } catch (e) {
     return fail(e, "Gagal menambah charge.");
@@ -30,7 +31,8 @@ export async function updateJobChargeAction(lineId: string, input: JobChargeInpu
     await assertCostingLineInScope(user, lineId);
     const jobId = await updateJobCharge(prisma, lineId, input);
     await writeAudit({ entity: "CostingLine", entityId: lineId, action: "UPDATE", summary: "Ubah charge", userId: user.id });
-    revalidatePath(`/jobs/${jobId}`);
+    revalidatePath(`/costing/${jobId}`);
+    revalidatePath("/invoices");
     return { ok: true };
   } catch (e) {
     return fail(e, "Gagal mengubah charge.");
@@ -43,7 +45,8 @@ export async function deleteJobChargeAction(lineId: string): Promise<Result> {
     await assertCostingLineInScope(user, lineId);
     const jobId = await deleteJobCharge(prisma, lineId);
     await writeAudit({ entity: "CostingLine", entityId: lineId, action: "DELETE", summary: "Hapus charge", userId: user.id });
-    revalidatePath(`/jobs/${jobId}`);
+    revalidatePath(`/costing/${jobId}`);
+    revalidatePath("/invoices");
     return { ok: true };
   } catch (e) {
     return fail(e, "Gagal menghapus charge.");

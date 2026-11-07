@@ -1,11 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
-  Ship, Plane, Truck, FileCheck, Package, Download, ExternalLink,
+  Ship, Plane, Truck, FileCheck, Package, Download, ExternalLink, Calculator,
 } from "lucide-react";
 import { requirePerm, hasPerm } from "@/lib/auth-helpers";
-import { prisma } from "@/lib/prisma";
 import { jobScope } from "@/lib/data-scope";
+import { prisma } from "@/lib/prisma";
 import { MODE_LABELS, DIRECTION_LABELS, LANE_LABELS } from "@/lib/enums";
 import { formatIDR, formatMoney, formatDate, formatNumber, formatPercent } from "@/lib/format";
 import { PageHeader } from "@/components/page-header";
@@ -14,19 +14,17 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { JobStatusBadge, InvoiceStatusBadge, BookingStatusBadge } from "@/components/status-badge";
+import { JobStatusBadge, BookingStatusBadge } from "@/components/status-badge";
 import { EmptyState } from "@/components/empty-state";
 import { Breadcrumbs } from "@/components/breadcrumbs";
 import { cn } from "@/lib/utils";
 import { StatusControl } from "./status-control";
+import { BlForm } from "./bl-form";
 import { MilestoneTimeline, type MilestoneItem } from "./milestone-timeline";
-import { CreateInvoiceButton, type ExtraChargeOpt } from "./create-invoice-button";
-import { ClearanceForm, ApplyRateCardButton } from "./clearance-form";
-import { CreateBillButton } from "./create-bill-button";
-import { FleetCostButton } from "./fleet-cost-button";
+import { ClearanceForm } from "./clearance-form";
+import { getJobLock } from "@/lib/job-lock";
+import { summarizeContainers } from "@/lib/job-containers";
 import { ContainerForm } from "./container-form";
-import { ChargeForm, DeleteChargeButton, type ChargeFormOptions } from "./charge-form";
-import { chargeLockReason } from "@/lib/job-charges";
 
 export const dynamic = "force-dynamic";
 
@@ -61,13 +59,17 @@ const DOC_TYPES = [
 export default async function JobDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const user = await requirePerm("jobs.view");
+  const lock = await getJobLock(prisma, id).catch(() => null);
+  // Job terkunci (Closed, atau Delivered dengan invoice): tombol ubah data disembunyikan; server tetap menolak.
   const canStatus = hasPerm(user, "jobs.status");
   const canCancel = hasPerm(user, "jobs.cancel");
-  const canMilestone = hasPerm(user, "jobs.milestone");
-  const canClearance = hasPerm(user, "jobs.clearance");
+  const canClose = hasPerm(user, "jobs.close");
+  const canReopen = hasPerm(user, "jobs.reopen");
+  const canMilestone = hasPerm(user, "jobs.milestone") && !lock;
+  const canClearance = hasPerm(user, "jobs.clearance") && !lock;
+  const canBl = hasPerm(user, "jobs.bl") && !lock;
   const canGenerateDocs = hasPerm(user, "documents.generate");
-  const canInvoice = hasPerm(user, "invoices.create");
-  // Proksi sementara kolom uang: role yang boleh melihat invoice (dulu ADMIN/FINANCE/SALES/MANAGEMENT).
+  const canCostingRead = hasPerm(user, "costing.view");
   const canFin = hasPerm(user, "jobs.viewFinancials");
 
   const job = await prisma.job.findFirst({
@@ -77,14 +79,10 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
       warehouse: true,
       salesPic: { select: { name: true } },
       pol: true, pod: true, originAirport: true, destAirport: true,
-      commodity: true,
       containers: { include: { containerType: true, warehouse: true } },
       milestones: { orderBy: { sortOrder: "asc" } },
       documents: { orderBy: { createdAt: "desc" } },
       booking: { include: { vendor: true } },
-      costings: { include: { chargeCode: true, vendor: true, vehicle: true }, orderBy: [{ side: "asc" }, { sortOrder: "asc" }] },
-      invoices: { orderBy: { date: "desc" } },
-      bills: { include: { vendor: true }, orderBy: { date: "desc" } },
     },
   });
   if (!job) notFound();
@@ -96,60 +94,13 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
   const originCode = job.pol?.unlocode ?? job.originAirport?.iata ?? "-";
   const destCode = job.pod?.unlocode ?? job.destAirport?.iata ?? "-";
 
-  const selling = job.costings.filter((c) => c.side === "SELLING");
-  const buying = job.costings.filter((c) => c.side === "BUYING");
-  const currencies = await prisma.currency.findMany({ where: { isBase: false }, select: { code: true, name: true }, orderBy: { code: "asc" } });
-  const unbilled = Object.values(buying.filter((c) => !c.billed && c.vendorId).reduce<Record<string, { vendorId: string; name: string; amount: number }>>((acc, c) => {
-    const k = c.vendorId as string;
-    acc[k] = acc[k] ?? { vendorId: k, name: c.vendor?.name ?? "-", amount: 0 };
-    acc[k].amount += Number(c.actualIdr);
-    return acc;
-  }, {}));
-  const canBill = hasPerm(user, "bills.create");
-  const canFleetCost = hasPerm(user, "jobs.fleetCost");
-  const canContainers = hasPerm(user, "jobs.containers");
+  const canContainers = hasPerm(user, "jobs.containers") && !lock;
   const containerTypes = await prisma.containerType.findMany({ where: { isActive: true }, orderBy: { code: "asc" }, select: { id: true, code: true, name: true } });
-  const canCosting = hasPerm(user, "jobs.charges") && job.status !== "CANCELLED";
-  let chargeOptions: ChargeFormOptions | null = null;
-  if (canCosting) {
-    const [charges, allCurrencies, vendors, vehicles] = await Promise.all([
-      prisma.chargeCode.findMany({ where: { isActive: true }, orderBy: { code: "asc" }, select: { id: true, code: true, name: true, defaultTaxable: true } }),
-      prisma.currency.findMany({ orderBy: { code: "asc" }, select: { code: true } }),
-      prisma.vendor.findMany({ where: { isActive: true }, orderBy: { name: "asc" }, select: { id: true, name: true, code: true } }),
-      prisma.vehicle.findMany({ where: { isActive: true }, orderBy: { plate: "asc" }, select: { id: true, plate: true, type: true } }),
-    ]);
-    const rateRows = await Promise.all(allCurrencies.filter((c) => c.code !== "IDR").map(async (c) => {
-      const r = await prisma.exchangeRate.findFirst({ where: { currencyCode: c.code }, orderBy: { date: "desc" }, select: { rate: true } });
-      return [c.code, r ? Number(r.rate) : 0] as const;
-    }));
-    chargeOptions = {
-      charges: charges.map((c) => ({ id: c.id, code: c.code, name: c.name, taxable: c.defaultTaxable })),
-      currencies: allCurrencies.map((c) => c.code),
-      rates: Object.fromEntries(rateRows.filter(([, r]) => r > 0)),
-      vendors: vendors.map((v) => ({ id: v.id, label: `${v.name} (${v.code})` })),
-      vehicles: vehicles.map((v) => ({ id: v.id, label: `${v.plate} · ${v.type}` })),
-    };
-  }
   const warehouses = canClearance || canContainers
     ? (await prisma.warehouse.findMany({ where: { customerId: job.customerId, isActive: true }, orderBy: { name: "asc" } }))
         .map((w) => ({ id: w.id, name: w.name, address: w.address, city: w.city, distanceKm: w.distanceKm == null ? null : Number(w.distanceKm) }))
     : [];
   const jobDest = [job.warehouse?.name ?? job.deliveryAddress, job.distanceKm == null ? null : `${formatNumber(Number(job.distanceKm), 1)} km`].filter(Boolean).join(", ") || "belum diisi";
-  const unbilledSelling = selling.filter((c) => !c.invoiced);
-  let extraCharges: ExtraChargeOpt[] = [];
-  if (canInvoice && unbilledSelling.length > 0) {
-    const [codes, rateItems] = await Promise.all([
-      prisma.chargeCode.findMany({ where: { isActive: true }, orderBy: { code: "asc" }, select: { id: true, code: true, name: true, defaultTaxable: true, asReceipt: true } }),
-      prisma.rateCardItem.findMany({ where: { isActive: true }, orderBy: { sortOrder: "asc" } }),
-    ]);
-    extraCharges = codes.map((c) => {
-      const r = rateItems.find((i) => i.chargeCodeId === c.id);
-      return {
-        id: c.id, code: c.code, name: c.name, asReceipt: c.asReceipt, taxable: r ? r.taxable : c.defaultTaxable,
-        price: r && Number(r.price) > 0 ? Number(r.price) : null, unitLabel: r?.basis === "PER_BL" ? "B/L" : null,
-      };
-    });
-  }
   const revenue = Number(job.revenueIdr);
   const cost = Number(job.costIdr);
   const profit = Number(job.profitIdr);
@@ -178,9 +129,17 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
           description={`${MODE_LABELS[job.mode]} · ${DIRECTION_LABELS[job.direction]} · ${job.customer.name}`}
         >
           <JobStatusBadge status={job.status} />
-          {(canStatus || canCancel) && <StatusControl jobId={job.id} current={job.status} canStatus={canStatus} canCancel={canCancel} />}
+          {canCostingRead && <Button asChild variant="outline"><Link href={`/costing/${job.id}`}><Calculator /> Buka Costing</Link></Button>}
+          {((canStatus && (!lock || canClose)) || canCancel || canReopen) && (
+            <StatusControl
+              jobId={job.id} current={job.status} locked={!!lock}
+              canStatus={canStatus && (!lock || canClose)} canCancel={canCancel && !lock} canClose={canClose} canReopen={canReopen}
+            />
+          )}
         </PageHeader>
       </div>
+
+      {lock && <p className="rounded-lg border bg-muted/40 px-4 py-2.5 text-sm text-muted-foreground">{lock}</p>}
 
       {/* Status & jadwal — operasional dulu (D-06) */}
       <Card>
@@ -213,8 +172,6 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
           {!isAir && <TabsTrigger value="containers">Containers ({job.containers.length})</TabsTrigger>}
           <TabsTrigger value="milestones">Milestones</TabsTrigger>
           <TabsTrigger value="documents">Documents</TabsTrigger>
-          <TabsTrigger value="costing">Costing</TabsTrigger>
-          <TabsTrigger value="invoices">Invoices ({job.invoices.length})</TabsTrigger>
         </TabsList>
 
         {/* OVERVIEW */}
@@ -229,7 +186,6 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
                   <Field label={isAir ? "Origin Airport" : "Port of Loading"}>{origin ? `${origin.name}` : "-"}</Field>
                   <Field label={isAir ? "Dest. Airport" : "Port of Discharge"}>{dest ? `${dest.name}` : "-"}</Field>
                   <Field label="Incoterm">{job.incoterm}</Field>
-                  <Field label="Commodity">{job.commodity?.name}</Field>
                   {isAir ? <Field label="Flight No">{job.flightNo}</Field> : <Field label="Vessel / Voyage">{job.vesselName} {job.voyageNo}</Field>}
                   <Field label="Sales PIC">{job.salesPic?.name}</Field>
                   <Field label="Gross Weight">{job.grossWeightKg ? `${formatNumber(Number(job.grossWeightKg), 0)} kg` : "-"}</Field>
@@ -240,7 +196,10 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
               </CardContent>
             </Card>
             <Card>
-              <CardHeader><CardTitle className="text-base">Jadwal & Dokumen</CardTitle></CardHeader>
+              <CardHeader className="flex-row items-center justify-between">
+                <CardTitle className="text-base">Jadwal & Dokumen</CardTitle>
+                {canBl && <BlForm jobId={job.id} isAir={isAir} master={isAir ? job.mawbNo : job.mblNo} house={isAir ? job.hawbNo : job.hblNo} />}
+              </CardHeader>
               <CardContent>
                 <dl className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3">
                   <Field label="ETD">{formatDate(job.etd)}</Field>
@@ -410,212 +369,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
             </Card>
           </div>
         </TabsContent>
-
-        {/* COSTING */}
-        <TabsContent value="costing">
-          <div className="space-y-4">
-            {selling.length === 0 && buying.length === 0 && (
-              <p className="rounded-lg border border-dashed px-4 py-3 text-sm text-muted-foreground">
-                Job ini belum punya charge. Job dari quotation membawa charge-nya otomatis. Untuk job yang dibuat langsung, tambahkan charge selling (untuk invoice) dan buying (untuk bill vendor) di bawah.
-              </p>
-            )}
-            {canClearance && job.status !== "CANCELLED" && !isAir && (
-              <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/30 px-4 py-3 text-sm">
-                <p className="text-muted-foreground">
-                  Selling charge bisa dihitung otomatis dari rate card: {job.containers.length ? summarizeContainers(job.containers) : "belum ada container"}
-                  {" · "}{job.customsLane ? LANE_LABELS[job.customsLane] : "jalur belum diisi"}{" · "}{job.distanceKm == null ? "jarak belum diisi" : `${formatNumber(Number(job.distanceKm), 1)} km`}.
-                </p>
-                <ApplyRateCardButton jobId={job.id} hasRateCardLines={selling.some((c) => c.fromRateCard && !c.invoiced)} />
-              </div>
-            )}
-            <CostTable title="Selling (Revenue)" side="SELLING" jobId={job.id} rows={selling} totalIdr={revenue} tone="success" chargeOptions={chargeOptions} />
-            <CostTable title="Buying (Cost)" side="BUYING" jobId={job.id} rows={buying} totalIdr={cost} tone="destructive" recordable={canFleetCost} chargeOptions={chargeOptions} />
-            <Card>
-              <CardContent className="flex flex-wrap items-center justify-between gap-4 p-5">
-                <div><p className="text-sm text-muted-foreground">Gross Profit</p><p className={cn("text-2xl font-semibold", profit < 0 && "text-destructive")}>{formatIDR(profit)}</p></div>
-                <div className="text-right"><p className="text-sm text-muted-foreground">Margin</p>
-                  <p className={cn("text-2xl font-semibold", margin < 10 ? "text-destructive" : margin < 15 ? "text-warning" : "text-success")}>{formatPercent(margin)}</p></div>
-              </CardContent>
-            </Card>
-          </div>
-        </TabsContent>
-
-        {/* INVOICES */}
-        <TabsContent value="invoices">
-          <div className="space-y-4">
-            <Card>
-              <CardHeader className="flex-row items-center justify-between">
-                <CardTitle className="text-base">AR Invoice</CardTitle>
-                {canInvoice && unbilledSelling.length > 0 && (
-                  <CreateInvoiceButton jobId={job.id} currencies={currencies} extraCharges={extraCharges} lines={unbilledSelling.map((c) => ({
-                    id: c.id, code: c.chargeCode.code, name: c.chargeCode.name, description: c.description, qty: Number(c.qty), unitPrice: Number(c.unitPrice),
-                    currency: c.currency, rate: Number(c.exchangeRate), taxable: c.taxable, asReceipt: c.asReceipt, unitLabel: c.unitLabel,
-                  }))} />
-                )}
-                {canInvoice && selling.length > 0 && !selling.some((c) => !c.invoiced) && <span className="text-xs text-muted-foreground">Semua selling charge sudah ditagih</span>}
-                {canInvoice && selling.length === 0 && <span className="text-xs text-muted-foreground">Belum ada selling charge. Tambahkan di tab Costing.</span>}
-              </CardHeader>
-              <CardContent className="p-0">
-                {job.invoices.length ? (
-                  <Table>
-                    <TableHeader><TableRow>
-                      <TableHead>No. Invoice</TableHead><TableHead>Tanggal</TableHead>
-                      <TableHead>Jatuh Tempo</TableHead><TableHead>Total</TableHead><TableHead>Status</TableHead>
-                    </TableRow></TableHeader>
-                    <TableBody>
-                      {job.invoices.map((inv) => (
-                        <TableRow key={inv.id}>
-                          <TableCell><Link href={`/invoices/${inv.id}`} className="font-medium text-primary hover:underline">{inv.number}</Link></TableCell>
-                          <TableCell>{formatDate(inv.date)}</TableCell>
-                          <TableCell>{formatDate(inv.dueDate)}</TableCell>
-                          <TableCell>{formatIDR(Number(inv.total))}</TableCell>
-                          <TableCell><InvoiceStatusBadge status={inv.status} /></TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                ) : <EmptyState title="Belum ada invoice" className="border-0 py-8" />}
-              </CardContent>
-            </Card>
-            {canBill && unbilled.length > 0 && (
-              <Card>
-                <CardHeader><CardTitle className="text-base">Biaya Beli Belum di-Bill</CardTitle></CardHeader>
-                <CardContent className="p-0">
-                  <Table>
-                    <TableHeader><TableRow><TableHead>Vendor</TableHead><TableHead>Biaya (IDR)</TableHead><TableHead className="text-right">Aksi</TableHead></TableRow></TableHeader>
-                    <TableBody>
-                      {unbilled.map((u) => (
-                        <TableRow key={u.vendorId}>
-                          <TableCell className="font-medium">{u.name}</TableCell>
-                          <TableCell>{formatIDR(u.amount)}</TableCell>
-                          <TableCell className="text-right"><CreateBillButton jobId={job.id} vendorId={u.vendorId} vendorName={u.name} amountIdr={u.amount} currencies={currencies} /></TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </CardContent>
-              </Card>
-            )}
-            {job.bills.length > 0 && (
-              <Card>
-                <CardHeader><CardTitle className="text-base">AP Vendor Bill</CardTitle></CardHeader>
-                <CardContent className="p-0">
-                  <Table>
-                    <TableHeader><TableRow>
-                      <TableHead>No. Bill</TableHead><TableHead>Vendor</TableHead>
-                      <TableHead>Tanggal</TableHead><TableHead>Net Payable</TableHead>
-                    </TableRow></TableHeader>
-                    <TableBody>
-                      {job.bills.map((b) => (
-                        <TableRow key={b.id}>
-                          <TableCell className="font-medium">{b.number}</TableCell>
-                          <TableCell>{b.vendor.name}</TableCell>
-                          <TableCell>{formatDate(b.date)}</TableCell>
-                          <TableCell>{formatIDR(Number(b.total))}</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </CardContent>
-              </Card>
-            )}
-          </div>
-        </TabsContent>
       </Tabs>
     </div>
   );
-}
-
-function CostTable({
-  title, side, jobId, rows, totalIdr, tone, recordable = false, chargeOptions,
-}: {
-  title: string;
-  side: "SELLING" | "BUYING";
-  jobId: string;
-  rows: {
-    id: string; side: string; chargeCodeId: string; chargeCode: { code: string; name: string }; description: string | null;
-    vendorId: string | null; vehicleId: string | null; vendor: { name: string } | null; vehicle: { plate: string } | null;
-    currency: string; exchangeRate: any; qty: any; unitPrice: any; amountForeign: any; actualIdr: any; taxable: boolean;
-    asReceipt: boolean; unitLabel: string | null; invoiced: boolean; billed: boolean; recordedAt: Date | null;
-  }[];
-  totalIdr: number;
-  tone: "success" | "destructive";
-  recordable?: boolean;
-  chargeOptions: ChargeFormOptions | null;
-}) {
-  return (
-    <Card>
-      <CardHeader className="flex-row items-center justify-between">
-        <CardTitle className="text-base">{title}</CardTitle>
-        {chargeOptions && <ChargeForm jobId={jobId} side={side} options={chargeOptions} />}
-      </CardHeader>
-      <CardContent className="p-0">
-        {rows.length ? (
-          <Table>
-            <TableHeader><TableRow>
-              <TableHead>Charge</TableHead><TableHead>Vendor / Armada</TableHead><TableHead>Qty</TableHead>
-              <TableHead>Harga</TableHead><TableHead>Valas</TableHead><TableHead className="text-right">IDR</TableHead>
-              <TableHead>Status</TableHead>
-              {recordable && <TableHead className="text-right">Beban armada</TableHead>}
-              {chargeOptions && <TableHead className="text-right">Aksi</TableHead>}
-            </TableRow></TableHeader>
-            <TableBody>
-              {rows.map((r) => {
-                const locked = chargeLockReason(r);
-                const status = side === "SELLING" ? (r.invoiced ? "Ditagih" : "Belum ditagih") : r.billed ? "Di-bill" : r.recordedAt ? "Dicatat" : "Belum di-bill";
-                return (
-                <TableRow key={r.id}>
-                  <TableCell>
-                    <span className="font-medium">{r.chargeCode.code}</span> <span className="text-muted-foreground">{r.chargeCode.name}</span>
-                    {r.taxable && <Badge variant="outline" className="ml-1.5 text-[10px]">PPN</Badge>}
-                    {r.asReceipt && <Badge variant="outline" className="ml-1 text-[10px]">As receipt</Badge>}
-                    {r.description && r.description !== r.chargeCode.code && <p className="text-xs text-muted-foreground">{r.description}</p>}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">{r.vendor?.name ?? (r.vehicle ? `Armada ${r.vehicle.plate}` : "-")}</TableCell>
-                  <TableCell className="whitespace-nowrap">{formatNumber(Number(r.qty), 0)}{r.unitLabel && <span className="text-muted-foreground"> × {r.unitLabel}</span>}</TableCell>
-                  <TableCell>{formatMoney(Number(r.unitPrice), r.currency, r.currency === "IDR" ? 0 : 2)}</TableCell>
-                  <TableCell>{formatMoney(Number(r.amountForeign), r.currency, r.currency === "IDR" ? 0 : 2)}</TableCell>
-                  <TableCell className="text-right tabular-nums">{formatIDR(Number(r.actualIdr))}</TableCell>
-                  <TableCell><span className={cn("text-xs", locked ? "text-muted-foreground" : "text-warning")}>{status}</span></TableCell>
-                  {recordable && (
-                    <TableCell className="text-right">
-                      {r.vehicle && !r.vendor
-                        ? <FleetCostButton lineId={r.id} plate={r.vehicle.plate} defaultAmount={Number(r.actualIdr)} recorded={!!r.recordedAt} />
-                        : <span className="text-muted-foreground">-</span>}
-                    </TableCell>
-                  )}
-                  {chargeOptions && (
-                    <TableCell className="text-right">
-                      {locked ? <span className="text-xs text-muted-foreground" title={locked}>Terkunci</span> : (
-                        <span className="inline-flex gap-0.5">
-                          <ChargeForm jobId={jobId} side={side} options={chargeOptions} initial={{
-                            id: r.id, chargeCodeId: r.chargeCodeId, description: r.description, qty: Number(r.qty), unitPrice: Number(r.unitPrice),
-                            currency: r.currency, rate: Number(r.exchangeRate), taxable: r.taxable, vendorId: r.vendorId, vehicleId: r.vehicleId,
-                          }} />
-                          <DeleteChargeButton lineId={r.id} label={r.chargeCode.code} />
-                        </span>
-                      )}
-                    </TableCell>
-                  )}
-                </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        ) : <p className="p-5 text-sm text-muted-foreground">Tidak ada baris.</p>}
-      </CardContent>
-      <div className={cn("flex items-center justify-between border-t px-5 py-3 text-sm font-semibold",
-        tone === "success" ? "text-success" : "text-foreground")}>
-        <span>Total {title.split(" ")[0]}</span>
-        <span className="tabular-nums">{formatIDR(totalIdr)}</span>
-      </div>
-    </Card>
-  );
-}
-
-/** Ringkas container per tipe, misalnya "3 × 40HC". */
-function summarizeContainers(containers: { containerType: { code: string } | null }[]) {
-  const counts = new Map<string, number>();
-  for (const c of containers) counts.set(c.containerType?.code ?? "?", (counts.get(c.containerType?.code ?? "?") ?? 0) + 1);
-  return [...counts.entries()].map(([code, n]) => `${n} × ${code}`).join(", ");
 }

@@ -14,6 +14,7 @@ export const ACC = {
   KAS: "1100",
   BANK: "1200",
   AR: "1300",
+  REIMBURSE: "1350", // titipan biaya as receipt, tidak masuk pendapatan maupun beban
   WIP: "1500",
   AP: "2000",
   PPN_OUT: "2100",

@@ -16,3 +16,14 @@ export async function assertCostingLineInScope(user: SessionUser, lineId: string
   await assertJobInScope(user, line.jobId);
   return line.jobId;
 }
+
+/**
+ * Semua baris costing (berdasarkan id) harus ada dan job-nya dalam batas data user. Dipakai builder invoice, bill, dan
+ * voucher yang menerima daftar id baris dari browser; satu baris di luar batas menolak seluruh permintaan.
+ */
+export async function assertCostingLinesInScope(user: SessionUser, lineIds: string[]) {
+  const ids = [...new Set(lineIds)];
+  if (ids.length === 0) return;
+  const n = await prisma.costingLine.count({ where: { id: { in: ids }, job: jobScope(user) } });
+  if (n !== ids.length) throw new Error("Data tidak ditemukan.");
+}

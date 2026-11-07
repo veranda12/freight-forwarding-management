@@ -21,21 +21,23 @@ export type JobWeightRules = Record<string, WeightRuleInput>;
 const BASIS = { ACTUAL: "berat aktual", VOLUME: "berat volume", MIN_VOLUME: "volume minimum", MINIMUM: "berat minimum" } as const;
 
 export function JobForm({
-  customers, sales, commodities, ports, airports, weightRules,
+  customers, sales, ports, airports, weightRules,
 }: {
-  customers: Opt[]; sales: Opt[]; commodities: Opt[]; ports: Opt[]; airports: Opt[]; weightRules: JobWeightRules;
+  customers: Opt[]; sales: Opt[]; ports: Opt[]; airports: Opt[]; weightRules: JobWeightRules;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [f, setF] = useState<Record<string, string>>({
     mode: "SEA_FCL", direction: "EXPORT", customerId: "", salesPicId: "", incoterm: "FOB",
-    commodityId: "", goodsDescription: "", polId: "", podId: "", originAirportId: "", destAirportId: "",
-    vesselName: "", voyageNo: "", flightNo: "", etd: "", eta: "",
+    polId: "", podId: "", originAirportId: "", destAirportId: "",
+    vesselName: "", voyageNo: "", flightNo: "", etd: "", eta: "", mblNo: "", hblNo: "",
     grossWeightKg: "", volumeCbm: "", chargeableWeight: "", packages: "", packageType: "",
     shipperName: "", consigneeName: "", notifyName: "",
   });
   const set = (k: string, v: string) => setF((p) => ({ ...p, [k]: v }));
   const isAir = f.mode === "AIR";
+  const isFcl = f.mode === "SEA_FCL";
+  const isLcl = f.mode === "SEA_LCL";
 
   // Chargeable weight otomatis dari Aturan Berat (Air / LCL / Land); bisa ditimpa manual
   const [cwManual, setCwManual] = useState(false);
@@ -47,6 +49,7 @@ export function JobForm({
 
   function submit() {
     if (!f.customerId) { toast.error("Pilih customer."); return; }
+    if (isLcl && !(Number(f.packages) > 0 && Number(f.volumeCbm) > 0)) { toast.error("Sea LCL wajib mengisi jumlah koli dan volume."); return; }
     start(async () => {
       const res = await createJob({ ...f, chargeableWeight: chargeable });
       if (res.ok && res.id) { toast.success("Job dibuat."); router.push(`/jobs/${res.id}`); router.refresh(); }
@@ -64,8 +67,6 @@ export function JobForm({
           <Sel label="Incoterm" value={f.incoterm} onChange={(v) => set("incoterm", v)} options={["FOB", "CIF", "CFR", "EXW", "DAP", "FCA"].map((x) => ({ id: x, label: x }))} />
           <div className="sm:col-span-2"><Sel label="Customer" value={f.customerId} onChange={(v) => set("customerId", v)} options={customers} placeholder="Pilih customer…" /></div>
           <Sel label="Sales PIC" value={f.salesPicId} onChange={(v) => set("salesPicId", v)} options={sales} placeholder="(otomatis = Anda)" />
-          <div className="sm:col-span-2"><Sel label="Commodity" value={f.commodityId} onChange={(v) => set("commodityId", v)} options={commodities} placeholder="Pilih komoditas…" /></div>
-          <Fld label="Deskripsi Barang"><Input value={f.goodsDescription} onChange={(e) => set("goodsDescription", e.target.value)} /></Fld>
         </CardContent>
       </Card>
 
@@ -83,11 +84,17 @@ export function JobForm({
             <>
               <Sel label="Port of Loading" value={f.polId} onChange={(v) => set("polId", v)} options={ports} placeholder="Pilih…" />
               <Sel label="Port of Discharge" value={f.podId} onChange={(v) => set("podId", v)} options={ports} placeholder="Pilih…" />
-              <Fld label="Vessel"><Input value={f.vesselName} onChange={(e) => set("vesselName", e.target.value)} /></Fld>
-              <Fld label="Voyage No"><Input value={f.voyageNo} onChange={(e) => set("voyageNo", e.target.value)} /></Fld>
-              <Fld label="Volume (CBM)"><Input type="number" value={f.volumeCbm} onChange={(e) => set("volumeCbm", e.target.value)} /></Fld>
+              {f.mode !== "LAND" && (
+                <>
+                  <Fld label="Vessel"><Input value={f.vesselName} onChange={(e) => set("vesselName", e.target.value)} /></Fld>
+                  <Fld label="Voyage No"><Input value={f.voyageNo} onChange={(e) => set("voyageNo", e.target.value)} /></Fld>
+                </>
+              )}
+              {!isFcl && <Fld label={isLcl ? "Volume (CBM) *" : "Volume (CBM)"}><Input type="number" value={f.volumeCbm} onChange={(e) => set("volumeCbm", e.target.value)} /></Fld>}
             </>
           )}
+          <Fld label={isAir ? "MAWB" : "Master B/L"}><Input value={f.mblNo} onChange={(e) => set("mblNo", e.target.value)} placeholder="Boleh diisi nanti" /></Fld>
+          <Fld label={isAir ? "HAWB" : "House B/L"}><Input value={f.hblNo} onChange={(e) => set("hblNo", e.target.value)} placeholder="Boleh diisi nanti" /></Fld>
           <Fld label="ETD"><Input type="date" value={f.etd} onChange={(e) => set("etd", e.target.value)} /></Fld>
           <Fld label="ETA"><Input type="date" value={f.eta} onChange={(e) => set("eta", e.target.value)} /></Fld>
           <Fld label="Gross Weight (kg)"><Input type="number" value={f.grossWeightKg} onChange={(e) => set("grossWeightKg", e.target.value)} /></Fld>
@@ -109,8 +116,12 @@ export function JobForm({
               </p>
             </div>
           )}
-          <Fld label="Jumlah Koli"><Input type="number" value={f.packages} onChange={(e) => set("packages", e.target.value)} /></Fld>
-          <Fld label="Jenis Kemasan"><Input value={f.packageType} onChange={(e) => set("packageType", e.target.value)} placeholder="Carton / Pallet" /></Fld>
+          {!isFcl && (
+            <>
+              <Fld label={isLcl ? "Jumlah Koli *" : "Jumlah Koli"}><Input type="number" value={f.packages} onChange={(e) => set("packages", e.target.value)} /></Fld>
+              <Fld label="Jenis Kemasan"><Input value={f.packageType} onChange={(e) => set("packageType", e.target.value)} placeholder="Carton / Pallet" /></Fld>
+            </>
+          )}
         </CardContent>
       </Card>
 

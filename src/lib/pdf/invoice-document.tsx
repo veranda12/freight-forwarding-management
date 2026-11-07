@@ -48,6 +48,7 @@ export type PdfInvoiceLine = {
 export type PdfExcludedLine = { section: InvoiceSection | null; name: string; unitLabel: string | null; reason: string };
 
 export type PdfInvoice = {
+  ppnRate: number;
   number: string; date: Date; dueDate: Date; termDays: number; currency: string; exchangeRate: number; amountForeign: number;
   subtotal: number; ppn: number; total: number; status: string;
   customer: { name: string; address: string | null; city: string | null; country: string | null; npwp: string | null };
@@ -164,7 +165,7 @@ function Parties({ inv }: { inv: PdfInvoice }) {
 /** Subtotal, PPN, dan total dalam tabel bergaris di sisi kanan. */
 function Totals({ inv }: { inv: PdfInvoice }) {
   const rows: [string, string][] = [["Subtotal", `IDR ${num(inv.subtotal)}`]];
-  if (inv.ppn > 0) rows.push(["VAT (PPN) 11%", `IDR ${num(inv.ppn)}`]);
+  if (inv.ppn > 0) rows.push([`VAT (PPN) ${(inv.ppnRate * 100).toLocaleString("en-US", { maximumFractionDigits: 2 })}%`, `IDR ${num(inv.ppn)}`]);
   return (
     <View style={[s.grid, { marginLeft: "auto", width: 250, marginTop: 8 }]} wrap={false}>
       {rows.map(([k, v]) => (

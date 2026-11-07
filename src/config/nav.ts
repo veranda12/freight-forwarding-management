@@ -4,7 +4,7 @@ import {
   Package, Percent, BookOpen, FileText, Briefcase, CalendarCheck, FileSignature,
   Calculator, Receipt, FileInput, StickyNote, Wallet, BookMarked, BarChart3,
   UserCog, Settings, History, MapPin, Truck, PackageCheck, Scale, Calculator as CalcIcon,
-  ArrowLeftRight, BookCheck, Landmark, GitCompare, RefreshCw, Banknote, ArrowDownUp, NotebookPen, ListChecks, Bug, ShieldCheck,
+  ArrowLeftRight, BookCheck, Landmark, GitCompare, RefreshCw, Banknote, ArrowDownUp, NotebookPen, ListChecks, Bug, ShieldCheck, Ticket,
 } from "lucide-react";
 
 export type NavItem = {
@@ -54,11 +54,13 @@ export const NAV: NavGroup[] = [
       { label: "Costing", href: "/costing", icon: Calculator, perm: "costing.view" },
       { label: "Invoice (AR)", href: "/invoices", icon: Receipt, perm: "invoices.view" },
       { label: "Vendor Bill (AP)", href: "/bills", icon: FileInput, perm: "bills.view" },
+      { label: "Voucher", href: "/vouchers", icon: Ticket, perm: "vouchers.view" },
       { label: "Debit/Credit Note", href: "/notes", icon: StickyNote, perm: "notes.view" },
       { label: "Receipt & Payment", href: "/payments", icon: Wallet, perm: "payments.view" },
       { label: "Accounting", href: "/accounting", icon: BookMarked, perm: "accounting.view" },
-      { label: "Kas Masuk / Keluar", href: "/accounting/cash-entry", icon: ArrowDownUp, perm: "cashEntry.view" },
-      { label: "Jurnal Manual", href: "/accounting/manual-journal", icon: NotebookPen, perm: "manualJournal.view" },
+      { label: "Jurnal Penerimaan & Pengeluaran", href: "/accounting/cash-entry", icon: ArrowDownUp, perm: "cashEntry.view" },
+      { label: "Jurnal Umum", href: "/accounting/manual-journal", icon: NotebookPen, perm: "manualJournal.view" },
+      { label: "Kasir All", href: "/accounting/kasir", icon: ListChecks, perm: "kasir.view" },
       { label: "Arus Kas", href: "/accounting/cash-flow", icon: ArrowLeftRight, perm: "cashFlow.view" },
       { label: "Tutup Buku", href: "/accounting/closing", icon: BookCheck, perm: "closing.view" },
       { label: "Aset Tetap", href: "/accounting/fixed-assets", icon: Building2, perm: "fixedAssets.view" },

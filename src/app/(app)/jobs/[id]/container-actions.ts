@@ -7,6 +7,7 @@ import { assertJobInScope } from "../job-scope";
 import { writeAudit } from "@/lib/audit";
 import { saveJobContainer, deleteJobContainer, type ContainerInput } from "@/lib/job-containers";
 import { errorMessage } from "@/lib/action-error";
+import { assertJobEditable } from "@/lib/job-lock";
 
 type Result = { ok: true } | { ok: false; error: string };
 
@@ -14,6 +15,7 @@ export async function saveJobContainerAction(jobId: string, input: ContainerInpu
   const user = await assertPerm("jobs.containers");
   try {
     await assertJobInScope(user, jobId);
+    await assertJobEditable(prisma, jobId);
     const c = await saveJobContainer(prisma, jobId, input);
     await writeAudit({ entity: "JobContainer", entityId: c.id, action: input.id ? "UPDATE" : "CREATE", summary: c.containerNo, userId: user.id });
     revalidatePath(`/jobs/${jobId}`);
@@ -27,6 +29,7 @@ export async function deleteJobContainerAction(jobId: string, containerId: strin
   const user = await assertPerm("jobs.containers");
   try {
     await assertJobInScope(user, jobId);
+    await assertJobEditable(prisma, jobId);
     const c = await deleteJobContainer(prisma, jobId, containerId);
     await writeAudit({ entity: "JobContainer", entityId: containerId, action: "DELETE", summary: c.containerNo, userId: user.id });
     revalidatePath(`/jobs/${jobId}`);

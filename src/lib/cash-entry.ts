@@ -1,15 +1,22 @@
-import type { PrismaClient } from "@prisma/client";
-import { postJournal, reverseJournal } from "./journal";
+import type { Prisma, PrismaClient } from "@prisma/client";
+import { postJournal, replaceJournal, reverseJournal, type JournalLineInput } from "./journal";
 import { cashCoaIds, resolveCashAccount } from "./cash-accounts";
+import { jktKey } from "./accounting-core";
+import { cashProofCode, genProofNumber } from "./sequence";
 import { latestRate } from "./fx";
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
+export type CashEntryRow = { counterAccountId: string; amount: number | string; description?: string | null };
+
 export type CashEntryInput = {
   direction: "IN" | "OUT";
   bankAccountId: string;
-  counterAccountId: string;
-  amount: number;
+  /** Baris akun lawan. Satu nomor bukti bisa berisi beberapa baris. */
+  rows?: CashEntryRow[];
+  /** Bentuk ringkas untuk satu baris. */
+  counterAccountId?: string;
+  amount?: number;
   dateKey: string;
   description: string;
   reference?: string | null;
@@ -21,13 +28,45 @@ export type CashEntryInput = {
 export function validateCashEntry(input: CashEntryInput) {
   if (input.direction !== "IN" && input.direction !== "OUT") throw new Error("Pilih kas masuk atau kas keluar.");
   if (!input.bankAccountId) throw new Error("Pilih kas atau rekening.");
-  if (!input.counterAccountId) throw new Error("Pilih akun lawan.");
-  const amount = r2(Number(input.amount));
-  if (!(amount > 0)) throw new Error("Nominal harus lebih dari 0.");
+  const raw = input.rows ?? [{ counterAccountId: input.counterAccountId ?? "", amount: input.amount ?? 0 }];
+  if (raw.length === 0) throw new Error("Isi minimal satu baris.");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(input.dateKey)) throw new Error("Tanggal tidak valid.");
   const description = (input.description ?? "").trim();
   if (description.length < 3) throw new Error("Keterangan wajib diisi, minimal 3 karakter.");
-  return { ...input, amount, description, reference: (input.reference ?? "").trim() || null };
+  const rows = raw.map((r, i) => {
+    const label = raw.length > 1 ? `Baris ${i + 1}: ` : "";
+    if (!r.counterAccountId) throw new Error(`${label}Pilih akun lawan.`);
+    const amount = r2(Number(r.amount));
+    if (!(amount > 0)) throw new Error(`${label}Nominal harus lebih dari 0.`);
+    return { counterAccountId: r.counterAccountId, amount, description: (r.description ?? "").trim() || description };
+  });
+  return { ...input, rows, amount: r2(rows.reduce((s, r) => s + r.amount, 0)), description, reference: (input.reference ?? "").trim() || null };
+}
+
+type Valid = ReturnType<typeof validateCashEntry>;
+
+/** Susun isi jurnal kas: satu baris kas atau bank, dan satu baris per akun lawan. */
+async function cashContent(tx: Prisma.TransactionClient, v: Valid) {
+  const cash = await resolveCashAccount(tx, v.bankAccountId, v.direction === "IN" ? "receipt" : "payment");
+  const cashIds = await cashCoaIds(tx);
+  for (const r of v.rows) {
+    const counter = await tx.coaAccount.findUnique({ where: { id: r.counterAccountId } });
+    if (!counter || !counter.isPostable || !counter.isActive) throw new Error("Akun lawan tidak valid atau tidak bisa diposting.");
+    if (cashIds.has(counter.id)) throw new Error("Akun lawan tidak boleh akun kas atau bank. Untuk pindah dana antar rekening gunakan transfer.");
+  }
+  // Rekening valas: nominal dalam mata uang rekening, dicatat ke buku dalam rupiah dengan kurs yang diisi.
+  const isFx = cash.currency !== "IDR";
+  const rate = isFx ? Number(v.rate) || (await latestRate(tx, cash.currency, v.dateKey)) || 0 : 1;
+  if (!(rate > 0)) throw new Error(`Kurs ${cash.currency} untuk tanggal ini belum ada. Isi kurs secara manual.`);
+  const idrRows = v.rows.map((r) => ({ ...r, idr: r2(r.amount * rate) }));
+  const idr = r2(idrRows.reduce((s, r) => s + r.idr, 0));
+  const fx = isFx ? v.amount : null;
+  const desc = `${v.direction === "IN" ? "Penerimaan" : "Pengeluaran"} ${cash.name}: ${v.description}${isFx ? ` (${cash.currency} ${v.amount} @ ${rate})` : ""}${v.reference ? ` (${v.reference})` : ""}`;
+  const cashLine = { accountId: cash.coaId, description: v.description, amountForeign: fx };
+  const lines: JournalLineInput[] = v.direction === "IN"
+    ? [{ ...cashLine, debit: idr }, ...idrRows.map((r) => ({ accountId: r.counterAccountId, credit: r.idr, description: r.description }))]
+    : [...idrRows.map((r) => ({ accountId: r.counterAccountId, debit: r.idr, description: r.description })), { ...cashLine, credit: idr }];
+  return { cash, desc, lines, idr };
 }
 
 /**
@@ -37,25 +76,32 @@ export function validateCashEntry(input: CashEntryInput) {
 export async function createCashEntry(db: PrismaClient, input: CashEntryInput, userId?: string) {
   const v = validateCashEntry(input);
   return db.$transaction(async (tx) => {
-    const cash = await resolveCashAccount(tx, v.bankAccountId, v.direction === "IN" ? "receipt" : "payment");
-    const counter = await tx.coaAccount.findUnique({ where: { id: v.counterAccountId } });
-    if (!counter || !counter.isPostable || !counter.isActive) throw new Error("Akun lawan tidak valid atau tidak bisa diposting.");
-    if ((await cashCoaIds(tx)).has(counter.id)) throw new Error("Akun lawan tidak boleh akun kas atau bank. Untuk pindah dana antar rekening gunakan transfer.");
+    const { cash, desc, lines, idr } = await cashContent(tx, v);
     const date = new Date(`${v.dateKey}T12:00:00+07:00`);
-    // Rekening valas: nominal dalam mata uang rekening, dicatat ke buku dalam rupiah dengan kurs yang diisi.
-    const isFx = cash.currency !== "IDR";
-    const rate = isFx ? Number(v.rate) || (await latestRate(tx, cash.currency, v.dateKey)) || 0 : 1;
-    if (!(rate > 0)) throw new Error(`Kurs ${cash.currency} untuk tanggal ini belum ada. Isi kurs secara manual.`);
-    const idr = r2(v.amount * rate);
-    const fx = isFx ? v.amount : null;
-    const desc = `${v.direction === "IN" ? "Kas masuk" : "Kas keluar"} ${cash.name}: ${v.description}${isFx ? ` (${cash.currency} ${v.amount} @ ${rate})` : ""}${v.reference ? ` (${v.reference})` : ""}`;
-    const id = await postJournal(tx, {
-      date, description: desc, source: "CASH_ENTRY", sourceId: cash.bankAccountId ?? undefined, createdById: userId,
-      lines: v.direction === "IN"
-        ? [{ accountId: cash.coaId, debit: idr, description: v.description, amountForeign: fx }, { accountId: counter.id, credit: idr, description: v.description }]
-        : [{ accountId: counter.id, debit: idr, description: v.description }, { accountId: cash.coaId, credit: idr, description: v.description, amountForeign: fx }],
-    });
-    return { journalEntryId: id, amount: idr };
+    const number = await genProofNumber(tx, cashProofCode(cash.kind, v.direction), date);
+    const id = await postJournal(tx, { date, description: desc, source: "CASH_ENTRY", sourceId: cash.bankAccountId ?? undefined, createdById: userId, lines, number });
+    return { journalEntryId: id, amount: idr, number };
+  });
+}
+
+/**
+ * Edit isi bukti kas, nomor tetap. Rekening boleh diganti antar bank.
+ * Kas ke bank atau sebaliknya, arah uang, dan pindah bulan tidak bisa, karena mengubah nomor bukti.
+ */
+export async function updateCashEntry(db: PrismaClient, journalEntryId: string, input: CashEntryInput) {
+  const v = validateCashEntry(input);
+  return db.$transaction(async (tx) => {
+    const e = await tx.journalEntry.findUnique({ where: { id: journalEntryId }, include: { lines: true } });
+    if (!e || e.source !== "CASH_ENTRY" || e.isReversal) throw new Error("Transaksi kas tidak ditemukan.");
+    const { cash, desc, lines } = await cashContent(tx, v);
+    const oldCash = e.sourceId ? await tx.bankAccount.findUnique({ where: { id: e.sourceId }, select: { kind: true } }) : null;
+    if (oldCash && oldCash.kind !== cash.kind) throw new Error("Rekening tidak bisa diganti dari kas ke bank atau sebaliknya.");
+    const cashIds = await cashCoaIds(tx);
+    const inflow = e.lines.some((l) => cashIds.has(l.accountId) && Number(l.debit) > 0);
+    if (inflow !== (v.direction === "IN")) throw new Error("Arah uang tidak bisa diubah.");
+    const date = new Date(`${v.dateKey}T12:00:00+07:00`);
+    if (jktKey(date).slice(0, 7) !== jktKey(e.date).slice(0, 7)) throw new Error("Tanggal tidak bisa pindah bulan, karena bulan ada di nomor bukti.");
+    return replaceJournal(tx, journalEntryId, { date, description: desc, lines, sourceId: cash.bankAccountId ?? undefined });
   });
 }
 
@@ -69,21 +115,32 @@ export async function listCashEntries(db: PrismaClient, opts: { from?: string; t
       ...(opts.from || opts.to ? { date: { ...(opts.from ? { gte: new Date(`${opts.from}T00:00:00+07:00`) } : {}), ...(opts.to ? { lte: new Date(`${opts.to}T23:59:59+07:00`) } : {}) } } : {}),
       ...(opts.bankAccountId ? { sourceId: opts.bankAccountId } : {}),
     },
-    include: { lines: { include: { account: { select: { id: true, code: true, name: true } } } } },
+    include: { lines: { include: { account: { select: { id: true, code: true, name: true } }, statementLine: { select: { id: true } } } } },
     orderBy: [{ date: "desc" }, { number: "desc" }],
     take: 500,
   });
   return entries.map((e) => {
     const cashLine = e.lines.find((l) => cashIds.has(l.accountId))!;
-    const counter = e.lines.find((l) => l.id !== cashLine?.id);
+    const counters = e.lines.filter((l) => l.id !== cashLine?.id);
+    const counter = counters[0];
     const bank = banks.find((b) => b.coaAccountId === cashLine?.accountId);
     const inflow = Number(cashLine?.debit ?? 0) > 0;
+    // Isi form edit: keterangan asli ada di baris kas, referensi ada di akhir keterangan jurnal.
+    const note = cashLine?.description ?? "";
+    const tail = e.description.slice(e.description.indexOf(": ") + 2);
+    const isFx = !!cashLine?.amountForeign;
+    const ref = !isFx && tail.startsWith(note) ? /\(([^()]*)\)\s*$/.exec(tail.slice(note.length))?.[1] ?? "" : "";
+    const idrTotal = Number(inflow ? cashLine?.debit ?? 0 : cashLine?.credit ?? 0);
+    const rate = isFx ? idrTotal / Number(cashLine!.amountForeign) : 1;
     return {
+      bankAccountId: bank?.id ?? e.sourceId ?? "", note, reference: ref, rate: isFx ? rate : null,
+      reconciled: e.lines.some((l) => l.reconciledAt || l.statementLine),
+      rows: counters.map((c) => ({ counterAccountId: c.accountId, amount: r2(Number(inflow ? c.credit : c.debit) / rate), description: c.description === note ? "" : c.description ?? "" })),
       id: e.id, number: e.number, date: e.date.toISOString(), description: e.description,
       direction: inflow ? "IN" as const : "OUT" as const,
       amount: r2(Number(inflow ? cashLine.debit : cashLine?.credit ?? 0)),
       bankName: bank?.name ?? cashLine?.account.name ?? "-",
-      counter: counter ? `${counter.account.code} ${counter.account.name}` : "-",
+      counter: counter ? `${counter.account.code} ${counter.account.name}${counters.length > 1 ? ` +${counters.length - 1} lainnya` : ""}` : "-",
       reversed: e.isReversed,
       currency: bank?.currency ?? "IDR",
       amountForeign: cashLine?.amountForeign ? Number(cashLine.amountForeign) : null,

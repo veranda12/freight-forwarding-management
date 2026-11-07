@@ -7,7 +7,7 @@ export const JOURNAL_SOURCES = [
 
 export const SOURCE_LABEL: Record<string, string> = {
   INVOICE: "Invoice", RECEIPT: "Penerimaan", BILL: "Vendor bill", PAYMENT: "Bayar vendor",
-  CASH_ENTRY: "Kas masuk/keluar", BANK_TRANSFER: "Transfer antar rekening", TAX_REMIT: "Setor pajak", MANUAL: "Jurnal manual, modal", FLEET_COST: "Beban armada", DEBIT_NOTE: "Debit note",
+  CASH_ENTRY: "Penerimaan/pengeluaran", VOUCHER: "Voucher", BANK_TRANSFER: "Transfer antar rekening", TAX_REMIT: "Setor pajak", MANUAL: "Jurnal umum, modal", FLEET_COST: "Beban armada", DEBIT_NOTE: "Debit note",
   CREDIT_NOTE: "Credit note", FX: "Selisih kurs", FX_REVAL: "Revaluasi kurs",
   DEPRECIATION: "Penyusutan", CLOSING: "Tutup buku",
 };
