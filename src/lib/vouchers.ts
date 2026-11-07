@@ -4,6 +4,7 @@ import { r2 } from "./accounting-core";
 import { postJournal } from "./journal";
 import { assertCashCurrency, resolveCashAccount } from "./cash-accounts";
 import { cashProofCode, genProofNumber } from "./sequence";
+import { getLockKey } from "./period-lock";
 
 export type VoucherInput = { jobId: string; lineIds: string[]; dateKey: string; payee: string; vendorId?: string | null; notes?: string | null };
 export type VoucherPayment = { bankAccountId: string; dateKey: string; method?: string | null; reference?: string | null };
@@ -25,6 +26,9 @@ export function validateVoucher(input: VoucherInput) {
 export async function createVoucher(db: PrismaClient, input: VoucherInput, userId?: string): Promise<string> {
   const v = validateVoucher(input);
   return db.$transaction(async (tx) => {
+    // Voucher belum punya jurnal saat dibuat, jadi kunci periode dicek di sini, bukan di postJournal.
+    const lock = await getLockKey(tx);
+    if (lock && v.dateKey <= lock) throw new Error(`Periode terkunci sampai ${lock}. Voucher tanggal ${v.dateKey} tidak bisa dibuat.`);
     const lines = await tx.costingLine.findMany({ where: { id: { in: v.lineIds }, jobId: v.jobId, side: "BUYING" } });
     if (lines.length !== v.lineIds.length) throw new Error("Ada biaya yang tidak ditemukan di job ini. Muat ulang halaman.");
     if (lines.some((l) => l.billed || l.voucherId || l.recordedAt)) throw new Error("Ada biaya yang sudah di-bill atau sudah masuk voucher lain. Muat ulang halaman.");
@@ -81,7 +85,10 @@ export async function payVoucher(db: PrismaClient, voucherId: string, input: Vou
   });
 }
 
-/** Batalkan voucher yang belum dibayar. Nomornya tidak dipakai ulang, baris biaya terbuka lagi. */
+/**
+ * Batalkan voucher yang belum dibayar. Nomornya tidak dipakai ulang, baris biaya terbuka lagi.
+ * Tetap boleh di periode terkunci: belum ada jurnal, dan biaya voucher lama yang tak jadi dibayar harus bisa dilepas.
+ */
 export async function cancelVoucher(db: PrismaClient, voucherId: string, reason: string) {
   const why = (reason ?? "").trim();
   if (why.length < 3) throw new Error("Alasan pembatalan wajib diisi.");
