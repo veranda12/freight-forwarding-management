@@ -84,20 +84,22 @@ kirimannya sendiri.
 1. **Login sebagai Management** (`manager@demo.com`) → Dashboard: KPI (shipment aktif, revenue/profit bulan ini, AR overdue), grafik volume per mode, revenue vs cost 12 bulan, top 10 customer. _(±2 mnt)_
 2. **Login sebagai Sales** (`sales@demo.com`) → **Quotation**: buka quotation *Draft* → tunjukkan rincian charge multi-currency, margin otomatis, flag approval bila margin <10% → klik **Ajukan** (Sales tidak punya tombol Kirim/Terima/Convert). _(±2 mnt)_
 3. **Login sebagai Operation** (`ops@demo.com`) → buka quotation *Diajukan* → **Kirim** (atau **Kembalikan** dengan catatan revisi). Lalu **login sebagai `ops2@demo.com`** (pengirim tidak boleh memutuskan kirimannya sendiri) → **Terima** → **Convert ke Job** → sistem membuat Job baru (nomor otomatis `JOB/…`, POL/POD dari rute quotation), seluruh charge terbawa ke Costing. _(±2 mnt)_
-4. **Login sebagai Operation** (`ops@demo.com`) → **Job / Shipment**: buka sebuah job → tab **Overview, Parties, Containers, Milestones, Documents, Costing, Invoices**. Ubah **Status** job dan centang **Milestone** (lihat timeline update). _(±3 mnt)_
+4. **Login sebagai Operation** (`ops@demo.com`) → **Job / Shipment**: buka sebuah job → tab **Overview, Parties, Containers, Milestones, Documents**, isi **No. B/L**, lalu **Buka Costing** (halaman costing per job). Ubah **Status** job dan centang **Milestone** (lihat timeline update). Job Delivered yang sudah ditagih **terkunci**; Closed hanya bisa dibuka Admin. _(±3 mnt)_
 5. Di tab **Documents**, generate **House B/L / SI / Arrival Notice / DO** (PDF dengan kop perusahaan). _(±1 mnt)_
 6. **Tracking publik**: buka menu Tracking → "Lihat" pada sebuah job → halaman `/track/<nomor>` tanpa login, menampilkan milestone tanpa data harga. _(±1 mnt)_
 7. **Login sebagai Finance** (`finance@demo.com`):
    - **Costing**: profitability per job (margin diberi warna; merah bila <10%).
-   - **Invoice (AR)**: buka invoice → subtotal, PPN 11%, jurnal otomatis, alokasi pembayaran.
-   - **Vendor Bill (AP)**: PPh 23 2% otomatis pada jasa.
+   - **Invoice (AR)**: **Buat Invoice** (pilih job) → subtotal, reimburse tanpa PPN, **PPN 1,1%** (tarif diatur di menu Pajak), nomor `INV/yy/mm/nnn`, jurnal otomatis; invoice belum dibayar bisa **Edit** (nomor tetap).
+   - **Vendor Bill (AP)**: **Buat Bill** (pilih vendor, centang biaya dari satu atau beberapa job), PPN/PPh 23/PPh 26 diisi sesuai tagihan vendor.
+   - **Voucher**: biaya harian job → **Bayar** (nomor bukti `SLG/BK/…` atau `SLG/KK/…`) → **Print**.
+   - **Jurnal Penerimaan & Pengeluaran / Jurnal Umum / Kasir All**: bukti bernomor `SLG/BM|BK|KM|KK|JU/…`, bisa diedit dengan nomor tetap dan dicetak.
    - **Receipt & Payment**: penerimaan/pembayaran dengan alokasi.
    - **Accounting**: **Trial Balance (balance ✓)**, **Laba Rugi**, **Neraca**, **Jurnal**. _(±4 mnt)_
 8. **Reporting**: profitability per mode, shipment per status, sales performance, **AR/AP Aging** + **Export Excel**. _(±1 mnt)_
 
 ## 5. Modul
 
-Master Data (Customer, Vendor, Overseas Agent, Port & Airport, Currency & Kurs, Charge Code, Aturan Berat, Container Type, Commodity, Pajak, COA) · **Ekspor-Impor** (Rate, Quotation, Job, Booking, Dokumentasi PDF, Tracking publik) · **Domestik** (STT antar kota, Cek Tarif, Tarif Domestik) · Finance (Costing, AR Invoice, AP Bill, Debit/Credit Note, Payment, Accounting, Laporan) · Dashboard · Sistem (User, Audit Log, Setting).
+Master Data (Customer, Vendor, Overseas Agent, Port & Airport, Currency & Kurs, Charge Code, Aturan Berat, Container Type, Commodity, Pajak, COA) · **Ekspor-Impor** (Rate, Quotation, Job, Booking, Dokumentasi PDF, Tracking publik) · **Domestik** (STT antar kota, Cek Tarif, Tarif Domestik) · Finance (Costing per job, AR Invoice, AP Bill, Voucher, Debit/Credit Note, Payment, Jurnal Penerimaan & Pengeluaran, Jurnal Umum, Kasir All, Accounting, Pajak & tarif PPN, Laporan) · Dashboard · Sistem (User, Audit Log, Setting).
 
 ## 6. Prinsip Teknis
 
@@ -131,7 +133,7 @@ npm run test:e2e     # end-to-end test (Playwright)
   `ffms_test`), bukan database demo: `DATABASE_URL=mysql://ffms:ffms123@127.0.0.1:3306/ffms_test node node_modules/tsx/dist/cli.mjs tests/integration/verify-mariadb.ts`.
   `verify-mariadb.ts` menguji risiko khusus MariaDB (teks panjang, pencarian, penomoran & setor pajak paralel, zona
   waktu, presisi Decimal, utf8mb4). Laporan uji perpindahan database: `docs/qa/mariadb-migration-report.md`.
-- **E2E (Playwright)** — `npm run test:e2e` (sekali pasang browser: `npx playwright install chromium`): 25 skenario (termasuk alur Domestik & Aturan Berat di `e2e/domestic.spec.ts`, alur quotation & maker-checker di `e2e/quotation-flow.spec.ts`, dan Role Management di `e2e/role-management.spec.ts`) menelusuri UI nyata (dashboard, RBAC, Job+PDF, Accounting balance, buat Invoice→bayar, tracking publik, CRUD Vendor/Commodity, form Quotation & Job). Detail & flow demo ada di `DEMO.md`.
+- **E2E (Playwright)** — `npm run test:e2e` (sekali pasang browser: `npx playwright install chromium`): 76 skenario, termasuk alur Domestik & Aturan Berat (`e2e/domestic.spec.ts`), quotation & maker-checker (`e2e/quotation-flow.spec.ts`), Role Management (`e2e/role-management.spec.ts`), dan suite QA `e2e/qa/` (alur per role, keamanan & replay server action, anomali, matriks izin, fitur client SLG: voucher, edit bukti, kunci job, builder invoice/bill; butuh `DATABASE_URL` database uji yang sama dengan server) menelusuri UI nyata (dashboard, RBAC, Job+PDF, Accounting balance, buat Invoice→bayar, tracking publik, CRUD Vendor/Commodity, form Quotation & Job). Detail & flow demo ada di `DEMO.md`.
 
 ## 9. CRUD & Form Manual
 

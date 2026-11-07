@@ -354,3 +354,65 @@ sebagai error, yang berguna sebagai jejak keamanan.
 
 Menjalankan: `bash "Claude outputs/rbac/qa-run.sh" yes [e2e/qa/<spec>]` (memulihkan `ffms_test` dari snapshot seed,
 menyalakan `next start` di port 3000 dengan DB uji, menjalankan Playwright, lalu mematikan server).
+
+## 16. Porting penyesuaian client SLG (3330c48, PostgreSQL) ke MariaDB (2026-11-07 s.d. 2026-11-08)
+
+Branch `feat/mariadb-slg` (dari `feat/mariadb-migration` @ `887dcfd`) me-merge `feat/slg-penyesuaian-client` @ `3330c48`
+(99 berkas, rekan tim, sudah diuji client di PostgreSQL). Commit: `c5f18e6` (merge + porting), `a16c3e1` (perbaikan
+cacat client), `53c1404` (perbaikan temuan uji), `870ae31` (uji). Keputusan pemilik: role bawaan mengikuti Role
+Management (Operation tetap memegang alur quotation & charge), edit jurnal nomor tetap ikut client apa adanya, cacat
+client diperbaiki di MariaDB lalu dilaporkan ke sesi PostgreSQL.
+
+### 16.1 Yang dikerjakan
+
+| Area | Isi |
+|---|---|
+| Konflik merge | 25 berkas (24 isi + `rbac.ts` dihapus kita/diubah client); `rbac.ts` tetap dihapus |
+| Hak akses | 38 berkas memakai API izin lama dipindah ke `requirePerm/assertPerm/hasPerm`; 16 kunci izin baru (voucher, Kasir All, edit invoice/kas/Jurnal Umum, B/L, tutup/buka job, tambah COA, tarif PPN); helper `journal-access.ts` |
+| Batas data | `voucherScope`; invoice/bill lintas job terlihat pemilik job baris mana pun; `assertCostingLinesInScope` untuk builder invoice/bill/voucher; `createdById` pada invoice, bill, voucher |
+| Migrasi | `20261107120000_slg_adjustments` (MariaDB): DDL, `jobId` baris lama (938 invoice line, 546 bill line), akun 1350, izin baru role bawaan (Finance +13, Management +4, Operation/Documentation +1). Migrasi PostgreSQL client diarsipkan |
+| Kueri | `mode: "insensitive"` dihapus; `current_database()` → `DATABASE()` di uji client |
+
+### 16.2 Cacat yang ditemukan dan diperbaiki
+
+| ID | Asal | Cacat | Bukti |
+|---|---|---|---|
+| C-1 | client | Nomor invoice tahunan memanggil `upsert` tanpa retry → invoice pertama yang dibuat bersamaan gagal P2002 | Kontrol negatif: kode lama → `Unique constraint failed on Sequence_key_year_month_key`; perbaikan → 2/2 sukses, nomor 001/002 |
+| C-2 | client | Invoice OVERDUE belum dibayar tidak bisa diedit (pesan "sudah ada pembayaran") | Integrasi |
+| C-3 | client | Jurnal VOUCHER tidak bisa difilter | Integrasi |
+| C-4 | client | DPP PPN masukan bill = PPN / 11% (meleset 10× untuk PPN 1,1%) | Integrasi: DPP = 4.000.000 biaya non-reimburse |
+| C-5 | client | Invoice STT memakai aturan PPN lama (flag taxable) | E2E QA-02 |
+| C-6 | client (menimpa logika kita) | Invoice/bill baru tanpa `createdById` → batas data & maker-checker gagal diam-diam | Integrasi + E2E |
+| D-16 | porting | Job terkunci: tombol Ubah Status tetap tampil (menu kosong) untuk pemegang `jobs.cancel` | E2E QA-07 merah sebelum perbaikan |
+| — | aksesibilitas | `SearchableSelect` tanpa role listbox/option | E2E memilih akun lewat role |
+
+Tidak diubah, dilaporkan ke sesi PostgreSQL untuk keputusan client: invoice dibatasi satu job, voucher yang sudah
+dibayar tanpa jalur pembalik, `editInvoiceCharges` tanpa `assertJobEditable`, tutup job otomatis tanpa `userId`.
+
+### 16.3 Uji pembanding PostgreSQL (sesi `ffms-pg-check`, DB baru `ffms_part2`, seed baru per skrip)
+
+| Skrip client | PostgreSQL | MariaDB (sebelum penyesuaian uji) | Kesimpulan |
+|---|---|---|---|
+| verify-clearance-invoice | 22 PASS / 3 FAIL (PPN 268.950, revenue 24.450.000) | sama | ekspektasi uji lama, bukan porting |
+| simulate-panduan-e2e | FAIL PPN 280.500 + ERROR receipt | sama | ekspektasi uji lama |
+| verify-pph26 | ERROR (seed PG tanpa vendor luar negeri) | FAIL PPh 26 = 0 | PPh 26 kini manual; seed MariaDB punya vendor asing (D-03) |
+| verify-job-charges / verify-manual-journal / verify-slg-flow | 11 / 36 / 53 PASS | sama | — |
+
+Ketiga skrip lama disesuaikan ke aturan client (PPN dari pendapatan non-reimburse × tarif setting, PPN/PPh bill manual).
+
+### 16.4 Regresi akhir
+
+| Uji | MariaDB 12.3 | MariaDB 10.11 |
+|---|---|---|
+| Migrasi pada DB berisi data (skema Role Management) | lulus, `migrate diff` kosong | lulus, `migrate diff` kosong |
+| Migrasi + seed DB baru | lulus | lulus |
+| Unit (Vitest) | 193/193 | — |
+| Typecheck / lint / build | lulus | — |
+| Integrasi (27 skrip, termasuk `verify-slg-flow` client dan `verify-slg-mariadb` baru) | 27/27, 430 PASS, 0 FAIL | 27/27, 430 PASS, 0 FAIL |
+| E2E penuh (76 skenario: lama + `e2e/qa/` QA-01..07) | 76/76 | 76/76 |
+| Smoke 7 user × 49 halaman (termasuk Voucher, Kasir All, builder invoice/bill/voucher) | 0 error HTTP; Manager dialihkan dari 3 halaman builder (dicek dari isi respons karena streaming) | — |
+
+QA-07 (baru): voucher dibuat → biaya terkunci → dibayar (`SLG/BK/…`, jurnal VOUCHER seimbang, PDF); batal sebelum dibayar
+membuka biaya; maker-checker `vouchers.cancelOwn`; edit bukti pengeluaran nomor tetap + Audit Log; job terkunci tidak
+bisa diubah Operation (UI & kiriman paksa server action), Admin menutup lalu membuka kembali; builder invoice role
+terbatas hanya menampilkan job miliknya dan menolak `lineIds` job lain walau dikirim paksa.

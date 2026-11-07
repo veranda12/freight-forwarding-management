@@ -26,10 +26,10 @@ Format: **Keputusan** — _alasan_.
 
 - **Uang = Decimal(18,2)**, kurs & kuantitas = Decimal(18,6)/(18,3). Tidak pernah float.
 - **Nilai GL disimpan dalam IDR**. Transaksi valas dikonversi dengan kurs pada tanggal dokumen; selisih kurs saat pelunasan diposting ke akun Laba/Rugi Selisih Kurs.
-- **PPN keluaran 11%** otomatis pada baris invoice yang taxable. **PPh 23 2%** dipotong pada vendor bill untuk charge jasa (`isPph23`), mengurangi kas yang dibayar (utang PPh 23 dicatat).
-- **Jurnal tidak pernah dihapus.** Pembatalan dokumen membuat **jurnal reversal** (balik debit/kredit) yang menunjuk jurnal asal.
+- **PPN keluaran** = semua pendapatan non-reimburse × tarif setting (`AccountingSetting.ppnRate`, bawaan **1,1%**, diubah di menu Pajak; invoice menyimpan tarifnya sendiri). Baris reimburse (`asReceipt`) tanpa PPN dan masuk akun titipan **1350**, bukan pendapatan/beban. **PPN masukan, PPh 23, dan PPh 26 pada vendor bill diisi manual** sesuai tagihan vendor (sejak penyesuaian client SLG; lihat bagian di bawah).
+- **Pembatalan dokumen = jurnal reversal** (balik debit/kredit) yang menunjuk jurnal asal. Pengecualian yang diminta client: **edit** invoice belum dibayar, bukti kas/bank, dan Jurnal Umum mengganti baris jurnal dengan **nomor tetap** (`replaceJournal`, cek kunci periode tanggal lama & baru, isi lama di Audit Log).
 - **Costing menyimpan estimated & actual (IDR)** per baris, plus detail valas (currency, rate, amountForeign) pada sisi actual. Profit job = Σ selling − Σ buying (actual).
-- **Penomoran dokumen** via tabel `Sequence` dengan unique `(key, year, month)` di dalam transaksi DB → aman dari race condition. Format: `JOB/SEA-EXP/2026/10/0001`, `QUO/2026/10/0001`, `INV/2026/10/0001`, `BILL/...`, `PAY-R/...`, `PAY-P/...`, `BKG/...`, `JE/...`, `DN/`, `CN/`.
+- **Penomoran dokumen** via tabel `Sequence` dengan unique `(key, year, month)` di dalam transaksi DB (`nextCounter`, retry P2002 untuk MariaDB) → aman dari race condition. Format: `JOB/SEA-EXP/2026/10/0001`, `QUO/2026/10/0001`, `BILL/...`, `BKG/...`, `JE/...` (jurnal sistem & pembalik), `DN/`, `CN/`; invoice `INV/yy/mm/nnn` (urutan **tahunan**, counter `month 0`); nomor bukti `SLG/BM|BK|KM|KK|JU|VC/yy/mm/nnn` (kode perusahaan `CompanySetting.docCode`; BM/BK bank, KM/KK kas, JU Jurnal Umum, VC voucher).
 
 ## Role Management (sejak 2026-11-06, menggantikan RBAC 6 role tetap)
 
@@ -41,6 +41,34 @@ Format: **Keputusan** — _alasan_.
 - **Maker-checker** (`assertNotOwn`): pembuat/pengaju/pengirim quotation tidak boleh mengirim/mengembalikan/memutuskannya, kecuali punya `quotations.decideOwn` (bawaan: tidak ada yang punya). Pembatalan invoice, kas, transfer, jurnal manual, setoran pajak, dan STT punya pasangan `*Own`; role awal Finance/Operation **memegangnya** agar perilaku lama tetap (bisa dicabut admin).
 - Role awal: Sales (buat/ajukan, data sendiri), Operation (review/kirim/putuskan/convert, job, domestik), Documentation, Finance, Management (semua `view` + `viewAll`, tanpa aksi kecuali export/cetak). Seed demo punya **dua** user Operation (`ops@`, `ops2@`) karena maker-checker.
 - Migrasi `20261106090000_role_management` aman untuk DB berisi data (buat role → petakan enum lama → hapus enum). Role awal di migrasi dibuat dari katalog saat itu (`Claude outputs/rbac/gen-migration.ts`, di luar git); `ensureDefaultRoles` (seed) hanya membuat role yang belum ada.
+
+## Penyesuaian client SLG (sejak 2026-11-07, branch `feat/mariadb-slg`)
+
+Kebutuhan client dibangun rekan tim di `feat/slg-penyesuaian-client` (PostgreSQL, commit `3330c48`, sudah diuji client)
+lalu di-**merge** ke branch MariaDB (bukan cherry-pick, supaya commit `part2` berikutnya cukup di-merge lagi).
+`main` dan branch client tetap PostgreSQL.
+
+- **Fitur**: Voucher pengeluaran biaya job (buat → bayar BK/KK → batal sebelum dibayar; biaya terkunci sejak voucher
+  dibuat), Kasir All (semua baris jurnal kas/bank), builder invoice (satu job) dan bill (satu vendor, boleh beberapa
+  job; `InvoiceLine.jobId`/`BillLine.jobId`), edit invoice/bukti kas/Jurnal Umum nomor tetap, kunci job (Closed, atau
+  Delivered + invoice) dan tutup otomatis saat lunas, buka job, form B/L, tambah akun COA, tarif PPN, halaman
+  `/costing/[id]` (pindahan tab Costing/Invoices di halaman job).
+- **Hak akses** (keputusan pemilik): role bawaan tetap mengikuti alur Role Management — Operation tetap memegang alur
+  quotation & charge/costing (berbeda dari `rbac.ts` client yang mencabutnya); `rbac.ts` client tidak dipakai. Izin baru:
+  `vouchers.*` (+`cancelOwn`), `kasir.view`, `invoices.edit`, `cashEntry.edit`, `manualJournal.edit`, `jobs.bl`,
+  `jobs.close`/`jobs.reopen` (bawaan: Admin saja, sama dengan client), `coa.create`, `taxes.ppnRate`. Ubah/hapus charge
+  yang sudah masuk invoice juga butuh `invoices.edit`. Hak lihat/edit jurnal per sumber: `src/lib/journal-access.ts`.
+- **Batas data**: `voucherScope`; invoice/bill terlihat oleh pemilik job **baris** mana pun (dokumen lintas job); builder
+  dan action berbasis `lineIds` menolak baris di luar `jobScope` (`assertCostingLinesInScope`).
+- **Migrasi** `20261107120000_slg_adjustments` (MariaDB, kompatibel 10.11): DDL + `jobId` baris lama dari kepala
+  dokumen + akun 1350 + izin baru untuk role bawaan yang sudah tersimpan (role kustom tidak disentuh). Migrasi
+  PostgreSQL client diarsipkan di `prisma/migrations-postgresql-archive/`.
+- **Cacat client yang diperbaiki di MariaDB** (dilaporkan ke sesi PostgreSQL, `docs/` worktree `ffms-pg-check`):
+  C-1 nomor invoice tahunan tanpa retry (P2002 saat paralel), C-2 invoice OVERDUE belum dibayar tidak bisa diedit,
+  C-3 sumber VOUCHER tidak bisa difilter, C-4 DPP PPN masukan = PPN/11%, C-5 PPN invoice STT memakai aturan lama,
+  C-6 invoice/bill tanpa `createdById`. Temuan yang **tidak** diubah (perlu keputusan client): invoice dibatasi satu
+  job, voucher dibayar tanpa jalur pembalik, `editInvoiceCharges` tanpa `assertJobEditable`, tutup job otomatis tanpa
+  `userId`.
 
 ## Master & Seed
 

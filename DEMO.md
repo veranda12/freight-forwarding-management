@@ -113,7 +113,7 @@ Jadi Sales tidak bisa ngutak-atik uang, dan bos tidak sengaja menghapus data. Se
 ### Babak 7 — "Urusan uang" (Finance) · 4 menit
 14. Logout, login `finance@demo.com`.
 15. **Costing** → tunjukkan profit & margin per job (merah jika margin < 10%).
-16. Buka sebuah **Job** → tab Invoices → **Buat Invoice dari Job** → muncul **Invoice** (subtotal + **PPN 11%** otomatis).
+16. Menu **Invoice (AR)** → **Buat Invoice** → pilih satu job → **Buat Invoice** → muncul **Invoice** `INV/yy/mm/nnn` (subtotal + **PPN** dari pendapatan non-reimburse, tarif setting bawaan 1,1%).
 17. Di invoice → **Catat Pembayaran** → isi nominal → **Simpan** → status jadi **Paid**, **jurnal otomatis** terbentuk.
 18. (Opsional) Klik **Batalkan** pada invoice tanpa pembayaran → **jurnal reversal** dibuat (jurnal lama tidak dihapus).
 19. Masuk **Accounting** → tunjukkan **Trial Balance (BALANCE ✓)**, **Laba Rugi**, **Neraca (BALANCE ✓)**, **Buku Besar** per akun, dan daftar **Jurnal**.
@@ -153,7 +153,7 @@ npm run test:e2e:report
 | 2 | **RBAC**: Sales | Menu Accounting tidak muncul; akses paksa `/accounting` dialihkan ke dashboard |
 | 3 | Operation buka Job | Tab Costing tampil "Gross Profit"; endpoint **PDF** B/L mengembalikan file PDF (200) |
 | 4 | Finance buka Accounting | **Trial Balance** & **Neraca** menampilkan **Balance ✓** |
-| 5 | Finance alur uang | **Buat Invoice dari Job** → **Catat Pembayaran** → toast sukses |
+| 5 | Finance alur uang | **Buat Invoice** (builder, pilih job) → **Catat Pembayaran** → toast sukses |
 | 6 | Tracking publik | Halaman `/track/...` terbuka **tanpa login** & **tanpa** kata Revenue/Profit/Margin |
 
 ### Tambahan uji CRUD & form manual (`e2e/crud.spec.ts`)
