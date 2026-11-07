@@ -2,7 +2,7 @@ import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { requirePerm } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
-import { ALL_PERMISSION_KEYS, PERMISSION_GROUPS, normalizePermissions } from "@/lib/permissions";
+import { EDITABLE_PERMISSION_GROUPS, normalizeCustomPermissions, permissionsOfRole } from "@/lib/permissions";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { RoleEditor } from "../role-editor";
@@ -14,7 +14,8 @@ export default async function NewRolePage({ searchParams }: { searchParams: Prom
   const { from } = await searchParams;
   const src = from ? await prisma.appRole.findUnique({ where: { id: from } }) : null;
   const initial = src
-    ? { name: `${src.name} (salinan)`, description: src.description ?? "", permissions: src.isSystem ? [...ALL_PERMISSION_KEYS] : normalizePermissions(src.permissions) }
+    ? { name: `${src.name} (salinan)`, description: src.description ?? "", // Duplikat role sistem: izin khusus Super Admin tidak ikut ke role kustom.
+      permissions: normalizeCustomPermissions(permissionsOfRole(src)) }
     : { name: "", description: "", permissions: [] as string[] };
   return (
     <div className="space-y-6">
@@ -22,7 +23,7 @@ export default async function NewRolePage({ searchParams }: { searchParams: Prom
         <Button asChild variant="ghost" size="sm" className="mb-2 -ml-2"><Link href="/roles"><ArrowLeft /> Kembali</Link></Button>
         <PageHeader title={src ? `Duplikat Role · ${src.name}` : "Role Baru"} description="Centang menu, tombol, persetujuan, dan batas data yang boleh dipakai role ini." />
       </div>
-      <RoleEditor groups={PERMISSION_GROUPS} mode="create" initial={initial} />
+      <RoleEditor groups={EDITABLE_PERMISSION_GROUPS} mode="create" initial={initial} />
     </div>
   );
 }

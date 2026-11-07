@@ -2,7 +2,9 @@ import { cache } from "react";
 import { notFound, redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { prisma } from "./prisma";
-import { ALL_PERMISSION_KEYS, ALL_PERMISSIONS, holderHasAnyPerm, holderHasPerm, normalizePermissions, type PermissionKey } from "./permissions";
+import {
+  ALL_PERMISSIONS, SUPER_ADMIN_ROLE_KEY, holderHasAnyPerm, holderHasPerm, permissionsOfRole, type PermissionKey,
+} from "./permissions";
 
 export type SessionUser = {
   id: string;
@@ -11,9 +13,24 @@ export type SessionUser = {
   roleId: string;
   roleKey: string;
   roleName: string;
+  /** Role sistem (Admin atau Super Admin). Bukan jalan pintas izin: izin selalu dibaca dari `permissions`. */
   isAdmin: boolean;
+  /** Role sistem Super Admin: satu-satunya yang memegang Role Management dan boleh mengelola akun Super Admin. */
+  isSuperAdmin: boolean;
   permissions: ReadonlySet<PermissionKey>;
 };
+
+/** SessionUser dari baris user + role-nya (dipakai getCurrentUser dan uji integrasi). */
+export function sessionFromUser(u: {
+  id: string; name: string; email: string; appRole: { id: string; key: string; name: string; isSystem: boolean; permissions: unknown };
+}): SessionUser {
+  return {
+    id: u.id, name: u.name, email: u.email,
+    roleId: u.appRole.id, roleKey: u.appRole.key, roleName: u.appRole.name,
+    isAdmin: u.appRole.isSystem, isSuperAdmin: u.appRole.isSystem && u.appRole.key === SUPER_ADMIN_ROLE_KEY,
+    permissions: new Set(permissionsOfRole(u.appRole)),
+  };
+}
 
 const PERM_LABEL = new Map<string, string>(ALL_PERMISSIONS.map((p) => [p.key, p.label]));
 
@@ -30,12 +47,7 @@ export const getCurrentUser = cache(async (): Promise<SessionUser | null> => {
     select: { id: true, name: true, email: true, isActive: true, appRole: { select: { id: true, key: true, name: true, isSystem: true, permissions: true } } },
   });
   if (!u || !u.isActive) return null;
-  const perms = u.appRole.isSystem ? ALL_PERMISSION_KEYS : normalizePermissions(u.appRole.permissions);
-  return {
-    id: u.id, name: u.name, email: u.email,
-    roleId: u.appRole.id, roleKey: u.appRole.key, roleName: u.appRole.name, isAdmin: u.appRole.isSystem,
-    permissions: new Set(perms),
-  };
+  return sessionFromUser(u);
 });
 
 export function hasPerm(user: SessionUser | null | undefined, key: PermissionKey): boolean {

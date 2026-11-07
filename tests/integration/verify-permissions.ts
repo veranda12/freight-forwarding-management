@@ -3,14 +3,17 @@
  *
  *   DATABASE_URL=postgresql://…/ffms_part2 node node_modules/tsx/dist/cli.mjs tests/integration/verify-permissions.ts
  *
- * - role di DB sesuai katalog (src/lib/permissions.ts), setiap user punya role, minimal satu Admin aktif;
+ * - role di DB sesuai katalog (src/lib/permissions.ts), setiap user punya role, minimal satu Super Admin aktif;
+ * - Super Admin memegang semua izin, Admin semua kecuali Role Management (izin khusus Super Admin);
  * - batas data "milik sendiri" untuk Sales di 8 modul: semua baris yang terlihat memang miliknya, dan role "semua data"
  *   melihat semua;
  * - maker-checker (assertNotOwn) menolak/menerima sesuai izin.
  */
 import { PrismaClient } from "@prisma/client";
-import { ALL_PERMISSION_KEYS, DEFAULT_ROLES, normalizePermissions, type PermissionKey } from "../../src/lib/permissions";
-import { assertNotOwn, hasPerm, type SessionUser } from "../../src/lib/auth-helpers";
+import {
+  ALL_PERMISSION_KEYS, DEFAULT_ROLES, SUPER_ADMIN_ONLY, normalizeCustomPermissions, type PermissionKey,
+} from "../../src/lib/permissions";
+import { assertNotOwn, hasPerm, sessionFromUser, type SessionUser } from "../../src/lib/auth-helpers";
 import { billScope, customerScope, domesticScope, invoiceScope, jobScope, noteScope, paymentScope, quotationScope } from "../../src/lib/data-scope";
 
 const db = new PrismaClient();
@@ -19,25 +22,23 @@ const ok = (c: boolean, msg: string) => { console.log((c ? "PASS " : "FAIL ") + 
 
 async function sessionOf(email: string): Promise<SessionUser> {
   const u = await db.user.findUniqueOrThrow({ where: { email }, include: { appRole: true } });
-  return {
-    id: u.id, name: u.name, email: u.email, roleId: u.appRole.id, roleKey: u.appRole.key, roleName: u.appRole.name,
-    isAdmin: u.appRole.isSystem, permissions: new Set(u.appRole.isSystem ? ALL_PERMISSION_KEYS : normalizePermissions(u.appRole.permissions)),
-  };
+  return sessionFromUser(u);
 }
 
 async function main() {
   // 1. Role & user
   const roles = await db.appRole.findMany();
-  const admin = roles.find((r) => r.isSystem);
-  ok(!!admin && admin.key === "ADMIN", "role sistem Admin ada");
+  const system = roles.filter((r) => r.isSystem).map((r) => r.key).sort();
+  ok(JSON.stringify(system) === '["ADMIN","SUPER_ADMIN"]', `role sistem tepat Admin dan Super Admin (${system.join(", ")})`);
   for (const def of DEFAULT_ROLES) {
     const r = roles.find((x) => x.key === def.key);
-    const same = !!r && JSON.stringify(normalizePermissions(r.permissions)) === JSON.stringify(normalizePermissions(def.permissions));
-    ok(same, `role ${def.key} di DB sama dengan katalog (${r ? normalizePermissions(r.permissions).length : 0} izin)`);
+    const same = !!r && JSON.stringify(normalizeCustomPermissions(r.permissions)) === JSON.stringify(normalizeCustomPermissions(def.permissions));
+    ok(same, `role ${def.key} di DB sama dengan katalog (${r ? normalizeCustomPermissions(r.permissions).length : 0} izin)`);
+    ok(!!r && !SUPER_ADMIN_ONLY.some((k) => normalizeCustomPermissions(r.permissions).includes(k)), `role ${def.key} tanpa izin Role Management`);
   }
   const users = await db.user.findMany({ include: { appRole: true } });
   ok(users.every((u) => !!u.appRole), `semua ${users.length} user punya role`);
-  ok(users.some((u) => u.isActive && u.appRole.isSystem), "minimal satu Admin aktif");
+  ok(users.some((u) => u.isActive && u.appRole.isSystem && u.appRole.key === "SUPER_ADMIN"), "minimal satu Super Admin aktif");
 
   // 2. Batas data
   const sales = await sessionOf("sales@demo.com");
@@ -89,7 +90,13 @@ async function main() {
   const ownOk = (() => { try { assertNotOwn(withOwn, "quotations.decideOwn", [ops.id], "menerima"); return true; } catch { return false; } })();
   ok(ownOk, "maker-checker: dengan izin 'dokumen sendiri', boleh memutuskan kiriman sendiri");
   const adminUser = await sessionOf("admin@demo.com");
-  ok(ALL_PERMISSION_KEYS.every((k) => hasPerm(adminUser, k)), "Admin memegang semua izin");
+  const superUser = await sessionOf("superadmin@demo.com");
+  ok(superUser.isSuperAdmin && ALL_PERMISSION_KEYS.every((k) => hasPerm(superUser, k)), "Super Admin memegang semua izin");
+  ok(!adminUser.isSuperAdmin && ALL_PERMISSION_KEYS.filter((k) => !SUPER_ADMIN_ONLY.includes(k)).every((k) => hasPerm(adminUser, k)),
+    "Admin memegang semua izin selain Role Management");
+  ok(SUPER_ADMIN_ONLY.every((k) => !hasPerm(adminUser, k)), "Admin TIDAK memegang roles.view / roles.manage");
+  const mgmt = await sessionOf("manager@demo.com");
+  ok(!hasPerm(mgmt, "roles.view"), "Management (lihat semua modul) tetap tanpa Role Management");
 
   console.log(failures === 0 ? "\nSEMUA LULUS" : `\nGAGAL: ${failures} kasus`);
   if (failures) process.exitCode = 1;

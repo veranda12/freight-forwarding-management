@@ -1,5 +1,6 @@
 import { requirePerm, hasPerm } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
+import { canTouchUser } from "@/lib/roles";
 import { formatDate } from "@/lib/format";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
@@ -13,7 +14,7 @@ export const dynamic = "force-dynamic";
 
 export default async function UsersPage() {
   const user = await requirePerm("users.view");
-  const users = await prisma.user.findMany({ orderBy: { createdAt: "asc" }, include: { appRole: { select: { name: true } } } });
+  const users = await prisma.user.findMany({ orderBy: { createdAt: "asc" }, include: { appRole: { select: { name: true, key: true, isSystem: true } } } });
   const canWrite = hasPerm(user, "users.manage");
   return (
     <div className="space-y-6">
@@ -29,7 +30,7 @@ export default async function UsersPage() {
             </TableRow></TableHeader>
             <TableBody>
               {users.map((u) => (
-                <TableRow key={u.id}>
+                <TableRow key={u.id} data-user-id={u.id}>
                   <TableCell className="font-medium">{u.name}</TableCell>
                   <TableCell className="text-muted-foreground">{u.email}</TableCell>
                   <TableCell><Badge variant="outline">{u.appRole.name}</Badge></TableCell>
@@ -37,7 +38,9 @@ export default async function UsersPage() {
                   <TableCell>{formatDate(u.createdAt)}</TableCell>
                   {canWrite && (
                     <TableCell>
-                      <Button asChild variant="ghost" size="sm"><Link href={`/users/${u.id}/edit`} aria-label={`Ubah ${u.email}`}><Pencil /> Ubah</Link></Button>
+                      {canTouchUser(user, u.appRole) && (
+                        <Button asChild variant="ghost" size="sm"><Link href={`/users/${u.id}/edit`} aria-label={`Ubah ${u.email}`}><Pencil /> Ubah</Link></Button>
+                      )}
                     </TableCell>
                   )}
                 </TableRow>

@@ -153,6 +153,8 @@ async function main() {
   const hash = await bcrypt.hash("demo123", 10);
   await ensureDefaultRoles(prisma);
   const demoUsers = [
+    // Super Admin: satu-satunya pemegang Role Management. Admin: semua menu selain Role Management.
+    { name: "Super Admin", email: "superadmin@demo.com", role: "SUPER_ADMIN" },
     { name: "Admin Sistem", email: "admin@demo.com", role: "ADMIN" },
     { name: "Rina Sales", email: "sales@demo.com", role: "SALES" },
     { name: "Budi Operasional", email: "ops@demo.com", role: "OPERATION" },

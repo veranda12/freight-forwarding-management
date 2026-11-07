@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { parseIdAmount, parseProofQuery, proofKindsFor } from "@/lib/proof-search";
-import { ALL_PERMISSION_KEYS, DEFAULT_ROLES, normalizePermissions } from "@/lib/permissions";
+import { DEFAULT_ROLES, permissionsOfRole } from "@/lib/permissions";
 
 describe("parseIdAmount — nominal format Indonesia", () => {
   it.each([
@@ -39,9 +39,9 @@ describe("parseProofQuery", () => {
 
 describe("proofKindsFor — jenis bukti mengikuti izin modul (role bawaan katalog)", () => {
   const userOf = (key: string) => {
-    if (key === "ADMIN") return { id: "u", isAdmin: true, permissions: new Set(ALL_PERMISSION_KEYS) };
+    if (key === "ADMIN") return { permissions: new Set(permissionsOfRole({ key, isSystem: true, permissions: [] })) };
     const role = DEFAULT_ROLES.find((r) => r.key === key)!;
-    return { id: "u", isAdmin: false, permissions: new Set(normalizePermissions(role.permissions)) };
+    return { permissions: new Set(permissionsOfRole({ key, isSystem: false, permissions: role.permissions })) };
   };
   it("FINANCE, ADMIN, MANAGEMENT melihat semua jenis", () => {
     for (const r of ["FINANCE", "ADMIN", "MANAGEMENT"]) expect(proofKindsFor(userOf(r))).toHaveLength(7);
@@ -57,6 +57,6 @@ describe("proofKindsFor — jenis bukti mengikuti izin modul (role bawaan katalo
     expect(proofKindsFor(null)).toEqual([]);
   });
   it("jurnal cukup dengan Kasir All, tanpa accounting.view", () => {
-    expect(proofKindsFor({ isAdmin: false, permissions: new Set(["kasir.view" as const]) })).toEqual(["journal"]);
+    expect(proofKindsFor({ permissions: new Set(["kasir.view" as const]) })).toEqual(["journal"]);
   });
 });

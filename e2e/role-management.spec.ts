@@ -14,15 +14,15 @@ async function newSession(browser: Browser) {
   return { ctx, page: await ctx.newPage() };
 }
 
-test("Admin membuat role terbatas, user hanya melihat yang diizinkan, perubahan langsung berlaku, nonaktif langsung keluar", async ({ browser }) => {
+test("Super Admin membuat role terbatas, user hanya melihat yang diizinkan, perubahan langsung berlaku, nonaktif langsung keluar", async ({ browser }) => {
   const stamp = Date.now();
   const roleName = `Sales Terbatas ${stamp}`;
   const email = `terbatas.${stamp}@example.com`;
   const admin = await newSession(browser);
   const limited = await newSession(browser);
   try {
-    // 1. Admin membuat role: hanya Dashboard + lihat Quotation (tanpa buat/ajukan)
-    await login(admin.page, "admin@demo.com");
+    // 1. Super Admin (satu-satunya pemegang Role Management) membuat role: hanya Dashboard + lihat Quotation
+    await login(admin.page, "superadmin@demo.com");
     await admin.page.waitForURL("**/dashboard");
     await admin.page.goto("/roles/new");
     await admin.page.getByLabel("Nama role").fill(roleName);
@@ -86,7 +86,7 @@ test("Admin membuat role terbatas, user hanya melihat yang diizinkan, perubahan 
 });
 
 test("Role sistem Admin tidak bisa diubah; role yang masih dipakai tidak bisa dihapus", async ({ page }) => {
-  await login(page, "admin@demo.com");
+  await login(page, "superadmin@demo.com");
   await page.waitForURL("**/dashboard");
   await page.goto("/roles");
   await page.getByRole("link", { name: "Admin", exact: true }).click();

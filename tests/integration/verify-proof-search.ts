@@ -11,8 +11,7 @@ import { recalcJobTotals } from "../../src/lib/job-charges";
 import { setLockKey } from "../../src/lib/period-lock";
 import { parseProofQuery, proofKindsFor, searchProofs, type ProofKind, type ProofResult } from "../../src/lib/proof-search";
 import { proofScopes } from "../../src/lib/data-scope";
-import { ALL_PERMISSION_KEYS, normalizePermissions } from "../../src/lib/permissions";
-import type { SessionUser } from "../../src/lib/auth-helpers";
+import { sessionFromUser, type SessionUser } from "../../src/lib/auth-helpers";
 
 const db = new PrismaClient();
 let failures = 0;
@@ -32,10 +31,7 @@ async function line(jobId: string, side: "SELLING" | "BUYING", chargeCodeId: str
 /** User seed sebagai SessionUser (izin dari role di DB, sama seperti getCurrentUser). */
 async function sessionOf(email: string): Promise<SessionUser> {
   const u = await db.user.findUniqueOrThrow({ where: { email }, include: { appRole: true } });
-  return {
-    id: u.id, name: u.name, email: u.email, roleId: u.appRole.id, roleKey: u.appRole.key, roleName: u.appRole.name,
-    isAdmin: u.appRole.isSystem, permissions: new Set(u.appRole.isSystem ? ALL_PERMISSION_KEYS : normalizePermissions(u.appRole.permissions)),
-  };
+  return sessionFromUser(u);
 }
 
 let FINANCE: SessionUser;

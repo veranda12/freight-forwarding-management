@@ -11,7 +11,7 @@ import type { ProofScopes } from "./proof-search";
  * `findFirst({ where: { id, ...scope } })`), pencarian, dashboard, laporan, PDF, dan export.
  */
 
-type U = Pick<SessionUser, "id" | "isAdmin" | "permissions">;
+type U = Pick<SessionUser, "id" | "permissions">;
 
 const ownJob = (uid: string): Prisma.JobWhereInput => ({ OR: [{ salesPicId: uid }, { createdById: uid }] });
 const ownDomestic = (uid: string): Prisma.DomesticShipmentWhereInput => ({ OR: [{ createdById: uid }, { customer: { salesPicId: uid } }] });
