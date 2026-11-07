@@ -62,8 +62,9 @@ test.describe("CRUD Master & Form Manual", () => {
   test("Operation membuka form Job manual", async ({ page }) => {
     await login(page, "ops@demo.com");
     await page.goto("/jobs/new");
-    await expect(page.getByText("Data Shipment")).toBeVisible();
-    await expect(page.getByText("Routing & Transport")).toBeVisible();
+    // Dibatasi ke <main>: selama streaming Next.js ada salinan tersembunyi (div#S:n[hidden]) yang ikut terhitung.
+    await expect(page.locator("main").getByText("Data Shipment")).toBeVisible();
+    await expect(page.locator("main").getByText("Routing & Transport")).toBeVisible();
     await expect(page.getByRole("button", { name: /Simpan Job/ })).toBeVisible();
   });
 

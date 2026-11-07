@@ -44,20 +44,26 @@ Password semua akun: **`demo123`**
 
 | Role | Email | Akses |
 |---|---|---|
-| Admin | admin@demo.com | Semua modul + user management + setting + audit |
-| Sales | sales@demo.com | Customer, rate, quotation |
-| Operation | ops@demo.com | Job, booking, container, tracking, dokumen |
+| Super Admin | superadmin@demo.com | Semua modul + **Role Management** + User Management + setting + audit (role sistem) |
+| Admin | admin@demo.com | Semua modul + User Management + setting + audit, **tanpa** Role Management (role sistem) |
+| Sales | sales@demo.com | Buat & **ajukan** quotation, customer, rate — hanya data miliknya sendiri |
+| Operation | ops@demo.com, ops2@demo.com | Review/kirim/kembalikan, terima/tolak, convert quotation; job, booking, container, tracking, dokumen, domestik |
 | Documentation | docs@demo.com | Dokumen B/L/AWB/SI/DO, tracking |
 | Finance | finance@demo.com | Costing, invoice, bill, payment, accounting, laporan |
 | Management | manager@demo.com | Read-only semua modul + dashboard & laporan |
 
-RBAC ditegakkan di server (`requireCan`/`assertCan`) — bukan sekadar menyembunyikan menu.
+Hak akses diatur di menu **Sistem → Role Management** (khusus **Super Admin**): Super Admin membuat/mengubah role dengan daftar centang izin per
+menu → tombol/aksi → persetujuan → "boleh dokumen sendiri" (maker-checker) → "lihat semua data" (batas data). Izin
+dibaca dari database setiap request, jadi perubahan role dan penonaktifan user langsung berlaku tanpa login ulang, dan
+ditegakkan di server (`requirePerm`/`assertPerm`), bukan sekadar menyembunyikan tombol. Katalog izin:
+`src/lib/permissions.ts`. Ada dua user Operation karena pengirim quotation tidak boleh menerima/menolak quotation
+kirimannya sendiri.
 
 ## 4. Skenario Demo (±15 menit)
 
 1. **Login sebagai Management** (`manager@demo.com`) → Dashboard: KPI (shipment aktif, revenue/profit bulan ini, AR overdue), grafik volume per mode, revenue vs cost 12 bulan, top 10 customer. _(±2 mnt)_
-2. **Login sebagai Sales** (`sales@demo.com`) → **Quotation**: buka satu quotation berstatus *Sent* → tunjukkan rincian charge multi-currency, margin otomatis, flag approval bila margin <10%. Klik **Kirim/Terima**. _(±2 mnt)_
-3. Pada quotation *Accepted*, klik **Convert ke Job** → sistem membuat Job baru (nomor otomatis `JOB/…`), seluruh charge terbawa ke Costing. _(±1 mnt)_
+2. **Login sebagai Sales** (`sales@demo.com`) → **Quotation**: buka quotation *Draft* → tunjukkan rincian charge multi-currency, margin otomatis, flag approval bila margin <10% → klik **Ajukan** (Sales tidak punya tombol Kirim/Terima/Convert). _(±2 mnt)_
+3. **Login sebagai Operation** (`ops@demo.com`) → buka quotation *Diajukan* → **Kirim** (atau **Kembalikan** dengan catatan revisi). Lalu **login sebagai `ops2@demo.com`** (pengirim tidak boleh memutuskan kirimannya sendiri) → **Terima** → **Convert ke Job** → sistem membuat Job baru (nomor otomatis `JOB/…`, POL/POD dari rute quotation), seluruh charge terbawa ke Costing. _(±2 mnt)_
 4. **Login sebagai Operation** (`ops@demo.com`) → **Job / Shipment**: buka sebuah job → tab **Overview, Parties, Containers, Milestones, Documents, Costing, Invoices**. Ubah **Status** job dan centang **Milestone** (lihat timeline update). _(±3 mnt)_
 5. Di tab **Documents**, generate **House B/L / SI / Arrival Notice / DO** (PDF dengan kop perusahaan). _(±1 mnt)_
 6. **Tracking publik**: buka menu Tracking → "Lihat" pada sebuah job → halaman `/track/<nomor>` tanpa login, menampilkan milestone tanpa data harga. _(±1 mnt)_
@@ -97,8 +103,11 @@ npm run test:e2e     # end-to-end test (Playwright)
 
 ## 8. Testing
 
-- **Unit (Vitest)** — `npm run test`: RBAC, format mata uang/tanggal, enum, check digit ISO 6346, dan perhitungan berat kena biaya (28 test).
-- **E2E (Playwright)** — `npm run test:e2e`: 14 skenario (termasuk alur Domestik & Aturan Berat di `e2e/domestic.spec.ts`) menelusuri UI nyata (dashboard, RBAC, Job+PDF, Accounting balance, buat Invoice→bayar, tracking publik, CRUD Vendor/Commodity, form Quotation & Job). Detail & flow demo ada di `DEMO.md`.
+- **Unit (Vitest)** — `npm run test`: katalog izin & role awal (termasuk Super Admin vs Admin), format mata uang/tanggal, enum, check digit ISO 6346, perhitungan berat kena biaya, dll.
+- **Integrasi** — skrip `tests/integration/*.ts` dijalankan dengan `tsx` terhadap database **uji** (bukan demo `ffms` atau
+  `ffms_pgcheck`; skrip yang menulis data menolak keduanya), mis.
+  `DATABASE_URL=postgresql://…/ffms_part2 node node_modules/tsx/dist/cli.mjs tests/integration/verify-super-admin.ts`.
+- **E2E (Playwright)** — `npm run test:e2e` (sekali pasang browser: `npx playwright install chromium`): alur Domestik & Aturan Berat (`e2e/domestic.spec.ts`), alur quotation & maker-checker (`e2e/quotation-flow.spec.ts`), Role Management (`e2e/role-management.spec.ts`), Super Admin vs Admin (`e2e/super-admin.spec.ts`), dan suite QA `e2e/qa/` (alur per role, keamanan & replay server action, anomali, matriks izin) menelusuri UI nyata. Suite QA butuh `DATABASE_URL` database uji yang sama dengan server. Detail & flow demo ada di `DEMO.md`.
 
 ## 9. CRUD & Form Manual
 

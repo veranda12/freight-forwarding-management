@@ -96,7 +96,7 @@ Jadi Sales tidak bisa ngutak-atik uang, dan bos tidak sengaja menghapus data. Se
 6. Tunjukkan: rincian charge multi-currency (USD/IDR), **margin dihitung otomatis**, dan **flag approval** jika margin < 10%.
 
 ### Babak 3 — "Satu klik jadi pekerjaan" · 1 menit
-7. Pada quotation yang **Accepted**, klik **Convert ke Job** → sistem membuat **Job baru** (nomor otomatis `JOB/…`), semua charge otomatis pindah ke Costing.
+7. Logout, login `ops@demo.com` (Operation — Sales hanya membuat dan **mengajukan**; kirim, terima/tolak, dan convert dikerjakan Operation sesuai Role Management). Pada quotation yang **Accepted**, klik **Convert ke Job** → sistem membuat **Job baru** (nomor otomatis `JOB/…`), semua charge otomatis pindah ke Costing.
 
 ### Babak 4 — "Mengurus barang" (Operation) · 3 menit
 8. Logout, login `ops@demo.com` → **Job / Shipment** → buka satu job.

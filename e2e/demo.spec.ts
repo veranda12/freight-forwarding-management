@@ -56,12 +56,13 @@ test.describe("Demo Freight Forwarding Management System", () => {
     await page.locator("table tbody tr").first().click();
     await page.waitForURL(/\/jobs\/.+/);
 
-    // tab Costing → profitabilitas
-    await page.getByRole("tab", { name: "Costing" }).click();
-    await expect(page.getByText("Gross Profit")).toBeVisible();
-
     // generate dokumen PDF (House B/L) — cek endpoint menghasilkan PDF
     const id = page.url().split("/jobs/")[1].split(/[?#]/)[0];
+
+    // costing pindah ke halaman sendiri (penyesuaian client SLG): tombol Buka Costing → profitabilitas
+    await page.getByRole("link", { name: /Buka Costing/ }).click();
+    await page.waitForURL(/\/costing\/.+/);
+    await expect(page.getByText("Gross Profit")).toBeVisible();
     const resp = await page.request.get(`/api/documents/hbl/${id}`);
     expect(resp.status()).toBe(200);
     expect(resp.headers()["content-type"]).toContain("pdf");
@@ -82,19 +83,13 @@ test.describe("Demo Freight Forwarding Management System", () => {
   // 5) FINANCE — alur uang: buat Invoice dari Job → catat pembayaran → jurnal
   test("5. Finance: buat Invoice dari Job lalu catat pembayaran", async ({ page }) => {
     await login(page, "finance@demo.com");
-    // Cari job yang masih punya selling charge belum ditagih (satu baris hanya bisa ditagih sekali).
-    let found = false;
-    for (let i = 0; i < 25 && !found; i++) {
-      await page.goto("/jobs");
-      await page.locator("table tbody tr").nth(i).click();
-      await page.waitForURL(/\/jobs\/.+/);
-      await page.getByRole("tab", { name: /Invoices/ }).click();
-      found = (await page.getByRole("button", { name: /Buat Invoice dari Job/ }).count()) > 0;
-    }
-    expect(found, "ada job dengan selling charge yang belum ditagih").toBe(true);
-    await page.getByRole("button", { name: /Buat Invoice dari Job/ }).click();
-    await page.getByRole("dialog").getByRole("button", { name: "Buat Invoice", exact: true }).click();
-    await page.waitForURL(/\/invoices\/.+/);
+    // Builder invoice (penyesuaian client SLG): pilih satu job yang selling-nya belum ditagih, lalu Buat Invoice.
+    await page.goto("/invoices/new");
+    const pick = page.locator('input[type="radio"][name="invoice-job"]:not([disabled])').first();
+    await expect(pick, "ada job dengan selling charge yang belum ditagih").toBeVisible();
+    await pick.check();
+    await page.locator("main").getByRole("button", { name: "Buat Invoice", exact: true }).click();
+    await page.waitForURL(/\/invoices\/(?!new)[^/]+$/);
 
     // invoice baru → catat pembayaran penuh
     await page.getByRole("button", { name: /Catat Pembayaran/ }).click();
