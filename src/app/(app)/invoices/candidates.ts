@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 
 export type InvoiceCandidate = {
   jobId: string; number: string; bl: string; customerId: string; customer: string;
@@ -6,10 +6,11 @@ export type InvoiceCandidate = {
 };
 
 /** Job yang punya selling belum ditagih, ditambah baris milik invoice yang sedang diedit. */
-export async function invoiceCandidates(db: PrismaClient, invoiceId?: string): Promise<InvoiceCandidate[]> {
+/** `scope` = batas data job user (jobScope); kosong berarti semua job. */
+export async function invoiceCandidates(db: PrismaClient, invoiceId?: string, scope: Prisma.JobWhereInput = {}): Promise<InvoiceCandidate[]> {
   const lines = await db.costingLine.findMany({
     where: {
-      side: "SELLING", job: { status: { not: "CANCELLED" } },
+      side: "SELLING", job: { status: { not: "CANCELLED" }, ...scope },
       OR: [{ invoiced: false }, ...(invoiceId ? [{ invoiceId }] : [])],
     },
     include: { job: { select: { id: true, number: true, hblNo: true, mblNo: true, hawbNo: true, mawbNo: true, customerId: true, customer: { select: { name: true } } } } },

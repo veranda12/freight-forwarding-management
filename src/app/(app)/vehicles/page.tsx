@@ -1,6 +1,5 @@
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm, hasPerm } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
-import { can } from "@/lib/rbac";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -10,8 +9,8 @@ import { VehicleForm } from "./vehicle-form";
 export const dynamic = "force-dynamic";
 
 export default async function VehiclesPage() {
-  const user = await requireCan("vehicles", "read");
-  const canWrite = can(user.role, "vehicles", "write");
+  const user = await requirePerm("vehicles.view");
+  const canWrite = hasPerm(user, "vehicles.edit");
   const vehicles = await prisma.vehicle.findMany({ orderBy: { plate: "asc" } });
   const active = vehicles.filter((v) => v.isActive).length;
   return (

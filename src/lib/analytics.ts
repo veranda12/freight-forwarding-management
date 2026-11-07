@@ -2,7 +2,20 @@ import { prisma } from "./prisma";
 import { toZonedTime } from "date-fns-tz";
 import { TZ } from "./format";
 import { MODE_SHORT } from "./enums";
-import type { TransportMode } from "@prisma/client";
+import type { Prisma, TransportMode } from "@prisma/client";
+
+/**
+ * Batas data untuk dashboard (lib/data-scope.ts). Kosong = semua data (perilaku lama, dipakai skrip/uji).
+ * Booking ikut job-nya.
+ */
+export type AnalyticsScope = {
+  job?: Prisma.JobWhereInput;
+  invoice?: Prisma.InvoiceWhereInput;
+  bill?: Prisma.VendorBillWhereInput;
+  customer?: Prisma.CustomerWhereInput;
+  quotation?: Prisma.QuotationWhereInput;
+  domestic?: Prisma.DomesticShipmentWhereInput;
+};
 
 function monthKey(d: Date): string {
   const z = toZonedTime(d, TZ);
@@ -21,7 +34,8 @@ function last12Months(): { key: string; label: string }[] {
 }
 
 /** Antrian aksi operasional untuk dashboard (D-02). */
-export async function getWorklist() {
+export async function getWorklist(scope: AnalyticsScope = {}) {
+  const { job = {}, invoice = {}, bill = {}, domestic = {} } = scope;
   const now = new Date();
   const in3 = new Date(now.getTime() + 3 * 86400000);
   const in2 = new Date(now.getTime() + 2 * 86400000);
@@ -29,37 +43,37 @@ export async function getWorklist() {
 
   const [departingSoon, cutoffSoon, blPending, arOverdue, apDueSoon, domLate, domPickup] = await Promise.all([
     prisma.job.findMany({
-      where: { status: { in: ["BOOKED", "STUFFING"] }, etd: { lte: in3 } },
+      where: { ...job, status: { in: ["BOOKED", "STUFFING"] }, etd: { lte: in3 } },
       orderBy: { etd: "asc" }, take: 8,
       select: { id: true, number: true, etd: true, status: true, customer: { select: { name: true } } },
     }),
     prisma.booking.findMany({
-      where: { status: { in: ["REQUESTED", "CONFIRMED"] }, cyCutoff: { lte: in2, gte: new Date(now.getTime() - 2 * 86400000) } },
+      where: { job, status: { in: ["REQUESTED", "CONFIRMED"] }, cyCutoff: { lte: in2, gte: new Date(now.getTime() - 2 * 86400000) } },
       orderBy: { cyCutoff: "asc" }, take: 8,
       select: { id: true, cyCutoff: true, job: { select: { id: true, number: true } }, vendor: { select: { name: true } } },
     }),
     prisma.job.findMany({
-      where: { status: { in: ["DEPARTED", "IN_TRANSIT", "ARRIVED"] }, mode: { in: ["SEA_FCL", "SEA_LCL"] }, hblNo: null },
+      where: { ...job, status: { in: ["DEPARTED", "IN_TRANSIT", "ARRIVED"] }, mode: { in: ["SEA_FCL", "SEA_LCL"] }, hblNo: null },
       orderBy: { etd: "asc" }, take: 8,
       select: { id: true, number: true, etd: true, customer: { select: { name: true } } },
     }),
     prisma.invoice.findMany({
-      where: { status: "OVERDUE" }, orderBy: { dueDate: "asc" }, take: 8,
+      where: { ...invoice, status: "OVERDUE" }, orderBy: { dueDate: "asc" }, take: 8,
       select: { id: true, number: true, total: true, amountPaid: true, dueDate: true, customer: { select: { name: true } } },
     }),
     prisma.vendorBill.findMany({
-      where: { status: { in: ["UNPAID", "PARTIAL"] }, dueDate: { lte: in7 } },
+      where: { ...bill, status: { in: ["UNPAID", "PARTIAL"] }, dueDate: { lte: in7 } },
       orderBy: { dueDate: "asc" }, take: 8,
       select: { id: true, number: true, total: true, amountPaid: true, dueDate: true, vendor: { select: { name: true } } },
     }),
     // Domestik (modul terpisah): lewat estimasi tiba & belum dijemput
     prisma.domesticShipment.findMany({
-      where: { status: { notIn: ["DELIVERED", "CANCELLED"] }, etaDate: { lt: now } },
+      where: { ...domestic, status: { notIn: ["DELIVERED", "CANCELLED"] }, etaDate: { lt: now } },
       orderBy: { etaDate: "asc" }, take: 8,
       select: { id: true, number: true, etaDate: true, destCity: true, customer: { select: { name: true } } },
     }),
     prisma.domesticShipment.findMany({
-      where: { status: "BOOKED" },
+      where: { ...domestic, status: "BOOKED" },
       orderBy: { createdAt: "asc" }, take: 8,
       select: { id: true, number: true, pickupDate: true, createdAt: true, originCity: true, destCity: true, customer: { select: { name: true } } },
     }),
@@ -76,22 +90,23 @@ export async function getWorklist() {
   };
 }
 
-export async function getDashboardData() {
+export async function getDashboardData(scope: AnalyticsScope = {}) {
+  const { job = {}, invoice = {}, customer = {}, quotation = {} } = scope;
   const now = toZonedTime(new Date(), TZ);
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
   const yearAgo = new Date(now.getFullYear(), now.getMonth() - 11, 1);
 
   const [activeJobs, monthJobs, allJobsYear, monthInvoices, overdue, totalCustomers, openQuotations] = await Promise.all([
-    prisma.job.count({ where: { status: { in: ["BOOKED", "STUFFING", "DEPARTED", "IN_TRANSIT", "ARRIVED", "CUSTOMS_CLEARANCE"] } } }),
-    prisma.job.count({ where: { openedAt: { gte: monthStart } } }),
+    prisma.job.count({ where: { ...job, status: { in: ["BOOKED", "STUFFING", "DEPARTED", "IN_TRANSIT", "ARRIVED", "CUSTOMS_CLEARANCE"] } } }),
+    prisma.job.count({ where: { ...job, openedAt: { gte: monthStart } } }),
     prisma.job.findMany({
-      where: { openedAt: { gte: yearAgo } },
+      where: { ...job, openedAt: { gte: yearAgo } },
       select: { openedAt: true, mode: true, revenueIdr: true, costIdr: true, profitIdr: true, customerId: true, status: true },
     }),
-    prisma.invoice.findMany({ where: { date: { gte: monthStart }, status: { not: "CANCELLED" } }, select: { total: true } }),
-    prisma.invoice.aggregate({ where: { status: "OVERDUE" }, _sum: { total: true, amountPaid: true }, _count: true }),
-    prisma.customer.count(),
-    prisma.quotation.count({ where: { status: { in: ["DRAFT", "SENT"] } } }),
+    prisma.invoice.findMany({ where: { ...invoice, date: { gte: monthStart }, status: { not: "CANCELLED" } }, select: { total: true } }),
+    prisma.invoice.aggregate({ where: { ...invoice, status: "OVERDUE" }, _sum: { total: true, amountPaid: true }, _count: true }),
+    prisma.customer.count({ where: customer }),
+    prisma.quotation.count({ where: { ...quotation, status: { in: ["DRAFT", "SUBMITTED", "SENT"] } } }),
   ]);
 
   // month revenue & profit from jobs opened this month

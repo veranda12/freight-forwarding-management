@@ -1,8 +1,7 @@
 import Link from "next/link";
 import { Plus, Pencil } from "lucide-react";
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm, hasPerm } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
-import { can } from "@/lib/rbac";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -11,8 +10,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 export const dynamic = "force-dynamic";
 
 export default async function AgentsPage() {
-  const user = await requireCan("agents", "read");
-  const canWrite = can(user.role, "agents", "write");
+  const user = await requirePerm("agents.view");
+  const canWrite = hasPerm(user, "agents.edit");
   const agents = await prisma.overseasAgent.findMany({ orderBy: { country: "asc" } });
   return (
     <div className="space-y-6">

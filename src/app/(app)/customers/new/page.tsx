@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
-import { requireCan } from "@/lib/auth-helpers";
-import { prisma } from "@/lib/prisma";
+import { requirePerm } from "@/lib/auth-helpers";
+import { salesPicOptions } from "../sales-options";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { CustomerForm } from "../customer-form";
@@ -9,8 +9,8 @@ import { CustomerForm } from "../customer-form";
 export const dynamic = "force-dynamic";
 
 export default async function NewCustomerPage() {
-  await requireCan("customers", "write", { redirectTo: "/customers" });
-  const sales = await prisma.user.findMany({ where: { role: { in: ["SALES", "ADMIN"] }, isActive: true }, select: { id: true, name: true }, orderBy: { name: "asc" } });
+  await requirePerm("customers.create", { redirectTo: "/customers" });
+  const sales = await salesPicOptions();
   return (
     <div className="space-y-6">
       <div>

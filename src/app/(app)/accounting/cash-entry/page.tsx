@@ -1,6 +1,5 @@
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm, hasPerm } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
-import { can } from "@/lib/rbac";
 import { cashAccountOptions, cashCoaIds } from "@/lib/cash-accounts";
 import { listCashEntries } from "@/lib/cash-entry";
 import { listTransfers } from "@/lib/bank-transfer";
@@ -18,7 +17,7 @@ export const dynamic = "force-dynamic";
 type SP = { rekening?: string; nominal?: string; tanggal?: string; ket?: string; arah?: string; tab?: string; edit?: string };
 
 export default async function CashEntryPage({ searchParams }: { searchParams: Promise<SP> }) {
-  const user = await requireCan("accounting", "read");
+  const user = await requirePerm("cashEntry.view");
   const sp = await searchParams;
   const today = new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10);
   const [cash, cashIds, coa, entries, transfers] = await Promise.all([
@@ -51,9 +50,13 @@ export default async function CashEntryPage({ searchParams }: { searchParams: Pr
         dateKey: /^\d{4}-\d{2}-\d{2}$/.test(sp.tanggal ?? "") ? sp.tanggal! : today, description: (sp.ket ?? "").slice(0, 200),
       }
     : undefined;
-  const canWrite = can(user.role, "accounting", "write");
+  const canCreate = hasPerm(user, "cashEntry.create");
+  const canCancel = hasPerm(user, "cashEntry.cancel");
+  const canEdit = hasPerm(user, "cashEntry.edit");
+  const canTransfer = hasPerm(user, "cashEntry.transfer");
+  const canTransferCancel = hasPerm(user, "cashEntry.transferCancel");
   const lock = await getLockKey(prisma);
-  const editId = entries.some((e) => e.id === sp.edit) ? sp.edit : undefined;
+  const editId = canEdit && entries.some((e) => e.id === sp.edit) ? sp.edit : undefined;
 
   return (
     <div className="space-y-6">
@@ -72,11 +75,11 @@ export default async function CashEntryPage({ searchParams }: { searchParams: Pr
         <TabsContent value="kas">
           <CashEntryPanel
             cashAccounts={cash.options} defaultCashId={cash.defaultId} prefill={prefill} rates={rates}
-            inAccounts={inAccounts} outAccounts={outAccounts} entries={entries} today={today} canWrite={canWrite} lockKey={lock} editId={editId}
+            inAccounts={inAccounts} outAccounts={outAccounts} entries={entries} today={today} canCreate={canCreate} canCancel={canCancel} canEdit={canEdit} lockKey={lock} editId={editId}
           />
         </TabsContent>
         <TabsContent value="transfer">
-          <TransferPanel cashAccounts={cash.options} transfers={transfers} today={today} canWrite={canWrite} rates={rates} />
+          <TransferPanel cashAccounts={cash.options} transfers={transfers} today={today} canCreate={canTransfer} canCancel={canTransferCancel} rates={rates} />
         </TabsContent>
       </Tabs>
     </div>

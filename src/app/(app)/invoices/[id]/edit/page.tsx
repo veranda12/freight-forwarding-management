@@ -1,5 +1,6 @@
 import { notFound, redirect } from "next/navigation";
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm } from "@/lib/auth-helpers";
+import { invoiceScope } from "@/lib/data-scope";
 import { prisma } from "@/lib/prisma";
 import { jktKey } from "@/lib/accounting-core";
 import { invoiceEditBlock } from "@/lib/receivables";
@@ -11,9 +12,9 @@ export const dynamic = "force-dynamic";
 
 export default async function EditInvoicePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  await requireCan("invoices", "write", { redirectTo: `/invoices/${id}` });
-  const inv = await prisma.invoice.findUnique({
-    where: { id },
+  const user = await requirePerm("invoices.edit", { redirectTo: `/invoices/${id}` });
+  const inv = await prisma.invoice.findFirst({
+    where: { id, ...invoiceScope(user) },
     include: { customer: { select: { name: true } }, costingLines: { include: { chargeCode: { select: { code: true, name: true } } }, orderBy: { sortOrder: "asc" } } },
   });
   if (!inv) notFound();

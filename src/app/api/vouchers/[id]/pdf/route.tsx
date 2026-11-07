@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { renderToBuffer } from "@react-pdf/renderer";
-import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { can } from "@/lib/rbac";
+import { getCurrentUser, hasPerm } from "@/lib/auth-helpers";
+import { voucherScope } from "@/lib/data-scope";
 import { ProofDocument } from "@/lib/pdf/proof-document";
 import { proofCompany, terbilang } from "@/lib/pdf/proof-company";
 
@@ -10,12 +10,12 @@ export const runtime = "nodejs";
 
 /** Cetak voucher pengeluaran. */
 export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  if (!can((session.user as { role?: any }).role, "vouchers", "read")) return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  const user = await getCurrentUser();
+  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  if (!hasPerm(user, "vouchers.print")) return NextResponse.json({ error: "forbidden" }, { status: 403 });
   const { id } = await ctx.params;
-  const v = await prisma.voucher.findUnique({
-    where: { id },
+  const v = await prisma.voucher.findFirst({
+    where: { id, ...voucherScope(user) },
     include: { job: { select: { number: true, hblNo: true, mblNo: true, hawbNo: true, mawbNo: true, customer: { select: { name: true } } } }, lines: { include: { chargeCode: { include: { expenseAccount: true } } } } },
   });
   if (!v) return NextResponse.json({ error: "voucher not found" }, { status: 404 });

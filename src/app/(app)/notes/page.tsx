@@ -1,4 +1,5 @@
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm } from "@/lib/auth-helpers";
+import { noteScope } from "@/lib/data-scope";
 import { prisma } from "@/lib/prisma";
 import { formatIDR, formatMoney, formatDate } from "@/lib/format";
 import { NOTE_STATUS_LABELS } from "@/lib/enums";
@@ -11,8 +12,8 @@ import { EmptyState } from "@/components/empty-state";
 export const dynamic = "force-dynamic";
 
 export default async function NotesPage() {
-  await requireCan("notes", "read");
-  const notes = await prisma.note.findMany({ orderBy: { date: "desc" }, include: { agent: { select: { name: true, country: true } } } });
+  const user = await requirePerm("notes.view");
+  const notes = await prisma.note.findMany({ where: noteScope(user), orderBy: { date: "desc" }, include: { agent: { select: { name: true, country: true } } } });
 
   return (
     <div className="space-y-6">

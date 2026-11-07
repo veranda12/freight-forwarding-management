@@ -1,4 +1,5 @@
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm } from "@/lib/auth-helpers";
+import { jobScope } from "@/lib/data-scope";
 import { prisma } from "@/lib/prisma";
 import { PageHeader } from "@/components/page-header";
 import { Breadcrumbs } from "@/components/breadcrumbs";
@@ -7,11 +8,11 @@ import { BillBuilder, type BillLineOpt } from "./bill-builder";
 export const dynamic = "force-dynamic";
 
 export default async function NewBillPage() {
-  await requireCan("bills", "write", { redirectTo: "/bills" });
+  const user = await requirePerm("bills.create", { redirectTo: "/bills" });
   const today = new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10);
   const [lines, currencies] = await Promise.all([
     prisma.costingLine.findMany({
-      where: { side: "BUYING", billed: false, voucherId: null, recordedAt: null, vendorId: { not: null }, job: { status: { not: "CANCELLED" } } },
+      where: { side: "BUYING", billed: false, voucherId: null, recordedAt: null, vendorId: { not: null }, job: { status: { not: "CANCELLED" }, ...jobScope(user) } },
       include: {
         chargeCode: { select: { code: true, name: true } },
         vendor: { select: { id: true, name: true, isForeign: true } },

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { renderToBuffer } from "@react-pdf/renderer";
-import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { getCurrentUser, hasPerm } from "@/lib/auth-helpers";
+import { jobScope } from "@/lib/data-scope";
 import { JobDocument, type PdfJob, type PdfCompany } from "@/lib/pdf/job-document";
 
 export const runtime = "nodejs";
@@ -9,16 +10,17 @@ export const runtime = "nodejs";
 const VALID = new Set(["hbl", "mbl", "hawb", "mawb", "si", "arrival", "do"]);
 
 export async function GET(_req: NextRequest, ctx: { params: Promise<{ type: string; jobId: string }> }) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const user = await getCurrentUser();
+  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  if (!hasPerm(user, "documents.generate")) return NextResponse.json({ error: "forbidden" }, { status: 403 });
 
   const { type, jobId } = await ctx.params;
   const kind = type.toLowerCase();
   if (!VALID.has(kind)) return NextResponse.json({ error: "invalid document type" }, { status: 400 });
 
   const [job, company] = await Promise.all([
-    prisma.job.findUnique({
-      where: { id: jobId },
+    prisma.job.findFirst({
+      where: { id: jobId, ...jobScope(user) },
       include: {
         pol: true, pod: true, originAirport: true, destAirport: true,
         containers: { include: { containerType: true } },

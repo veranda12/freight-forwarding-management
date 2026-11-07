@@ -253,10 +253,13 @@ export function billWhere(f: BillFilter, today: string): Prisma.VendorBillWhereI
   return and.length ? { AND: and } : {};
 }
 
-/** Bill sesuai filter, dikelompokkan per job. `capped` bila bill yang cocok melebihi MAX_BILLS. */
-export async function loadBillGroups(db: Db, f: BillFilter, today: string) {
+/**
+ * Bill sesuai filter, dikelompokkan per job. `capped` bila bill yang cocok melebihi MAX_BILLS.
+ * `scope` = batas data user (`billScope` dari data-scope.ts); `{}` berarti semua bill.
+ */
+export async function loadBillGroups(db: Db, f: BillFilter, today: string, scope: Prisma.VendorBillWhereInput = {}) {
   const rows = await db.vendorBill.findMany({
-    where: billWhere(f, today),
+    where: { AND: [billWhere(f, today), scope] },
     orderBy: [{ dueDate: "asc" }, { number: "asc" }],
     take: MAX_BILLS + 1,
     select: {

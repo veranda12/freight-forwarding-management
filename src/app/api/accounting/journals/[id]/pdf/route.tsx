@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { renderToBuffer } from "@react-pdf/renderer";
-import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { can } from "@/lib/rbac";
+import { getCurrentUser, hasAnyPerm } from "@/lib/auth-helpers";
+import { JOURNAL_VIEW_PERMS, canViewJournal } from "@/lib/journal-access";
 import { cashCoaIds } from "@/lib/cash-accounts";
 import { ProofDocument } from "@/lib/pdf/proof-document";
 import { proofCompany, terbilang } from "@/lib/pdf/proof-company";
@@ -11,12 +11,12 @@ export const runtime = "nodejs";
 
 /** Cetak bukti kas, bukti bank, atau Jurnal Umum. */
 export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  if (!can((session.user as { role?: any }).role, "accounting", "read")) return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  const user = await getCurrentUser();
+  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  if (!hasAnyPerm(user, JOURNAL_VIEW_PERMS)) return NextResponse.json({ error: "forbidden" }, { status: 403 });
   const { id } = await ctx.params;
   const e = await prisma.journalEntry.findUnique({ where: { id }, include: { lines: { include: { account: true }, orderBy: [{ debit: "desc" }, { id: "asc" }] } } });
-  if (!e) return NextResponse.json({ error: "journal not found" }, { status: 404 });
+  if (!e || !canViewJournal(user, e.source)) return NextResponse.json({ error: "journal not found" }, { status: 404 });
 
   const cashIds = await cashCoaIds(prisma);
   const cashLine = e.lines.find((l) => cashIds.has(l.accountId));

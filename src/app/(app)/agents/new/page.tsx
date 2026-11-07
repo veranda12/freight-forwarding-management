@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm } from "@/lib/auth-helpers";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { EntityForm } from "@/components/crud/entity-form";
@@ -8,7 +8,7 @@ import { AGENT_FIELDS } from "../form-config";
 import { saveAgent } from "../actions";
 
 export default async function NewAgentPage() {
-  await requireCan("agents", "write", { redirectTo: "/agents" });
+  await requirePerm("agents.edit", { redirectTo: "/agents" });
   return (
     <div className="space-y-6">
       <div>

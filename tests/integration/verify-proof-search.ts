@@ -10,6 +10,9 @@ import { createInvoiceCore } from "../../src/lib/receivables";
 import { recalcJobTotals } from "../../src/lib/job-charges";
 import { setLockKey } from "../../src/lib/period-lock";
 import { parseProofQuery, proofKindsFor, searchProofs, type ProofKind, type ProofResult } from "../../src/lib/proof-search";
+import { proofScopes } from "../../src/lib/data-scope";
+import { ALL_PERMISSION_KEYS, normalizePermissions } from "../../src/lib/permissions";
+import type { SessionUser } from "../../src/lib/auth-helpers";
 
 const db = new PrismaClient();
 let failures = 0;
@@ -26,11 +29,21 @@ async function line(jobId: string, side: "SELLING" | "BUYING", chargeCodeId: str
   return l;
 }
 
-const FINANCE = proofKindsFor("FINANCE");
-async function find(text: string, kinds: readonly ProofKind[] = FINANCE): Promise<ProofResult[]> {
+/** User seed sebagai SessionUser (izin dari role di DB, sama seperti getCurrentUser). */
+async function sessionOf(email: string): Promise<SessionUser> {
+  const u = await db.user.findUniqueOrThrow({ where: { email }, include: { appRole: true } });
+  return {
+    id: u.id, name: u.name, email: u.email, roleId: u.appRole.id, roleKey: u.appRole.key, roleName: u.appRole.name,
+    isAdmin: u.appRole.isSystem, permissions: new Set(u.appRole.isSystem ? ALL_PERMISSION_KEYS : normalizePermissions(u.appRole.permissions)),
+  };
+}
+
+let FINANCE: SessionUser;
+/** Cari seperti halaman /proofs: jenis menurut izin user, setiap jenis dibatasi data miliknya. */
+async function find(text: string, user: SessionUser = FINANCE): Promise<ProofResult[]> {
   const q = parseProofQuery(text);
   if (!q) throw new Error(`kata kunci tidak sah: ${text}`);
-  return searchProofs(db, q, kinds, { limit: 20 });
+  return searchProofs(db, q, proofKindsFor(user), { limit: 20, scopes: proofScopes(user) });
 }
 const ids = (r: ProofResult[], kind: ProofKind) => r.find((x) => x.kind === kind)?.hits.map((h) => h.id) ?? [];
 
@@ -39,6 +52,7 @@ async function main() {
   if (dbName === "ffms" || dbName === "ffms_pgcheck") throw new Error(`Jangan jalankan uji ini di database ${dbName}.`);
   console.log(`   database: ${dbName}`);
   await setLockKey(db, null);
+  FINANCE = await sessionOf("finance@demo.com");
 
   const ts = Date.now();
   const customer = await db.customer.findFirstOrThrow({ orderBy: { code: "asc" } });
@@ -97,9 +111,19 @@ async function main() {
   r = await find(inv.number);
   ok(ids(r, "invoice").includes(invId), "no. invoice → invoice");
 
-  const sales = proofKindsFor("SALES");
+  // Batas data: Sales hanya jenis invoice, dan hanya invoice job miliknya (Sales PIC / pembuat).
+  const sales = await sessionOf("sales@demo.com");
   r = await find(jA.number, sales);
-  ok(r.every((x) => x.kind === "invoice") && ids(r, "invoice").includes(invId), "role SALES: hanya invoice yang dicari");
+  ok(r.every((x) => x.kind === "invoice"), "role SALES: hanya jenis invoice yang dicari");
+  ok(!ids(r, "invoice").includes(invId), "batas data: SALES tidak melihat invoice job yang bukan miliknya");
+  r = await find(inv.number, sales);
+  ok(!ids(r, "invoice").includes(invId), "batas data: no. invoice orang lain pun tidak ditemukan SALES");
+  await db.job.update({ where: { id: jA.id }, data: { salesPicId: sales.id } });
+  r = await find(jA.number, sales);
+  ok(ids(r, "invoice").includes(invId), "batas data: setelah SALES jadi Sales PIC job A, invoice-nya terlihat");
+  const ops = await sessionOf("ops@demo.com");
+  r = await find(bill.number, ops);
+  ok(r.length === 0, "role OPERATION: tidak ada jenis bukti yang dicari");
   r = await find("zz-tidak-ada-xx");
   ok(r.every((x) => x.hits.length === 0), "kata acak → kosong");
 

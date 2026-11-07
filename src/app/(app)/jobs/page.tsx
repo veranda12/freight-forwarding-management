@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { Plus } from "lucide-react";
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm, hasPerm } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
-import { can } from "@/lib/rbac";
+import { jobScope } from "@/lib/data-scope";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { JobsTable, type JobRow } from "./jobs-table";
@@ -19,9 +19,10 @@ function routeOf(j: {
 }
 
 export default async function JobsPage() {
-  const user = await requireCan("jobs", "read");
+  const user = await requirePerm("jobs.view");
 
   const jobs = await prisma.job.findMany({
+    where: jobScope(user),
     orderBy: { openedAt: "desc" },
     select: {
       id: true, number: true, mode: true, direction: true, status: true, etd: true, eta: true,
@@ -43,12 +44,13 @@ export default async function JobsPage() {
   }));
 
   // D-11: kolom komersial hanya untuk role yang berhak (Ops/Docs fokus operasional)
-  const showFinancials = ["ADMIN", "FINANCE", "SALES", "MANAGEMENT"].includes(user.role);
+  // Proksi sementara: role yang boleh melihat invoice (dulu ADMIN/FINANCE/SALES/MANAGEMENT) juga melihat kolom uang.
+  const showFinancials = hasPerm(user, "jobs.viewFinancials");
 
   return (
     <div className="space-y-6">
       <PageHeader title="Job / Shipment" description={`${rows.length} job terdaftar`}>
-        {can(user.role, "jobs", "write") && (
+        {hasPerm(user, "jobs.create") && (
           <Button asChild>
             <Link href="/jobs/new"><Plus /> Job Baru</Link>
           </Button>

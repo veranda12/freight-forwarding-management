@@ -1,5 +1,6 @@
 import { FileSpreadsheet } from "lucide-react";
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm, hasPerm } from "@/lib/auth-helpers";
+import { billScope, invoiceScope, jobScope } from "@/lib/data-scope";
 import { prisma } from "@/lib/prisma";
 import { getArAging, getApAging } from "@/lib/accounting";
 import { MODE_LABELS, JOB_STATUS_LABELS, MODE_SHORT } from "@/lib/enums";
@@ -15,13 +16,22 @@ import type { JobStatus, TransportMode } from "@prisma/client";
 export const dynamic = "force-dynamic";
 
 export default async function ReportsPage() {
-  await requireCan("reports", "read");
+  const user = await requirePerm("reports.view");
+  // Tab hanya untuk modul yang boleh dilihat; isi mengikuti batas data user.
+  const seeJobs = hasPerm(user, "jobs.view");
+  const seeAr = hasPerm(user, "invoices.view");
+  const seeAp = hasPerm(user, "bills.view");
+  const canExport = hasPerm(user, "reports.export");
 
-  const jobs = await prisma.job.findMany({
-    where: { status: { not: "CANCELLED" } },
+  const jobs = !seeJobs ? [] : await prisma.job.findMany({
+    where: { ...jobScope(user), status: { not: "CANCELLED" } },
     select: { mode: true, status: true, revenueIdr: true, costIdr: true, profitIdr: true, salesPicId: true, salesPic: { select: { name: true } } },
   });
-  const [arAging, apAging] = await Promise.all([getArAging(), getApAging()]);
+  const [arAging, apAging] = await Promise.all([
+    seeAr ? getArAging(invoiceScope(user)) : null,
+    seeAp ? getApAging(billScope(user)) : null,
+  ]);
+  const firstTab = seeJobs ? "profit" : seeAr ? "ar" : seeAp ? "ap" : "profit";
 
   // profitability per mode
   const perMode = new Map<TransportMode, { count: number; rev: number; cost: number; profit: number }>();
@@ -47,20 +57,20 @@ export default async function ReportsPage() {
     <div className="space-y-6">
       <PageHeader title="Reporting" description="Job profitability, shipment per status, sales performance, dan aging" />
 
-      <Tabs defaultValue="profit">
+      <Tabs defaultValue={firstTab}>
         <TabsList>
-          <TabsTrigger value="profit">Profitability</TabsTrigger>
-          <TabsTrigger value="status">Per Status</TabsTrigger>
-          <TabsTrigger value="sales">Sales Performance</TabsTrigger>
-          <TabsTrigger value="ar">AR Aging</TabsTrigger>
-          <TabsTrigger value="ap">AP Aging</TabsTrigger>
+          {seeJobs && <TabsTrigger value="profit">Profitability</TabsTrigger>}
+          {seeJobs && <TabsTrigger value="status">Per Status</TabsTrigger>}
+          {seeJobs && <TabsTrigger value="sales">Sales Performance</TabsTrigger>}
+          {seeAr && <TabsTrigger value="ar">AR Aging</TabsTrigger>}
+          {seeAp && <TabsTrigger value="ap">AP Aging</TabsTrigger>}
         </TabsList>
 
         <TabsContent value="profit">
           <Card>
             <CardHeader className="flex-row items-center justify-between">
               <CardTitle className="text-base">Profitability per Mode</CardTitle>
-              <Button asChild variant="outline" size="sm"><a href="/api/reports/excel?type=profitability"><FileSpreadsheet /> Export Excel</a></Button>
+              {canExport && <Button asChild variant="outline" size="sm"><a href="/api/reports/excel?type=profitability"><FileSpreadsheet /> Export Excel</a></Button>}
             </CardHeader>
             <CardContent className="p-0">
               <Table>
@@ -127,26 +137,26 @@ export default async function ReportsPage() {
         </TabsContent>
 
         <TabsContent value="ar">
-          <AgingCard title="AR Aging (Piutang)" data={arAging} exportType="ar-aging" entity="Customer" />
+          {arAging && <AgingCard title="AR Aging (Piutang)" data={arAging} exportType="ar-aging" entity="Customer" canExport={canExport} />}
         </TabsContent>
         <TabsContent value="ap">
-          <AgingCard title="AP Aging (Hutang)" data={apAging} exportType="ap-aging" entity="Vendor" />
+          {apAging && <AgingCard title="AP Aging (Hutang)" data={apAging} exportType="ap-aging" entity="Vendor" canExport={canExport} />}
         </TabsContent>
       </Tabs>
     </div>
   );
 }
 
-function AgingCard({ title, data, exportType, entity }: {
+function AgingCard({ title, data, exportType, entity, canExport }: {
   title: string;
   data: { rows: { name: string; buckets: Record<string, number>; total: number }[]; totals: Record<string, number>; grandTotal: number; buckets: readonly string[] };
-  exportType: string; entity: string;
+  exportType: string; entity: string; canExport: boolean;
 }) {
   return (
     <Card>
       <CardHeader className="flex-row items-center justify-between">
         <CardTitle className="text-base">{title} · <span className="font-normal text-muted-foreground">{formatIDR(data.grandTotal)}</span></CardTitle>
-        <Button asChild variant="outline" size="sm"><a href={`/api/reports/excel?type=${exportType}`}><FileSpreadsheet /> Export Excel</a></Button>
+        {canExport && <Button asChild variant="outline" size="sm"><a href={`/api/reports/excel?type=${exportType}`}><FileSpreadsheet /> Export Excel</a></Button>}
       </CardHeader>
       <CardContent className="p-0">
         <Table>

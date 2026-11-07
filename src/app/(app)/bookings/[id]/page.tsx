@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Briefcase } from "lucide-react";
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm } from "@/lib/auth-helpers";
+import { jobScope } from "@/lib/data-scope";
 import { prisma } from "@/lib/prisma";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { PageHeader } from "@/components/page-header";
@@ -13,10 +14,10 @@ export const dynamic = "force-dynamic";
 
 export default async function BookingDetail({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  await requireCan("bookings", "read");
+  const user = await requirePerm("bookings.view");
 
-  const booking = await prisma.booking.findUnique({
-    where: { id },
+  const booking = await prisma.booking.findFirst({
+    where: { id, job: jobScope(user) },
     include: { vendor: { select: { name: true, code: true } }, job: { select: { id: true, number: true } } },
   });
   if (!booking) notFound();

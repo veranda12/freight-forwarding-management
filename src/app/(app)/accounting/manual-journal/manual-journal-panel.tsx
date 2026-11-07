@@ -33,10 +33,12 @@ const dateKeyOf = (iso: string) => new Date(new Date(iso).getTime() + 7 * 3600 *
 const headOf = (e: Entry) => ({ dateKey: dateKeyOf(e.date), description: e.description.replace(/^Jurnal (manual|umum): /i, ""), reference: "" });
 const linesOf = (e: Entry): Line[] => e.lines.map((l) => ({ key: ++seq, accountId: l.accountId, description: l.description ?? "", debit: l.debit ? String(l.debit) : "", credit: l.credit ? String(l.credit) : "" }));
 
-export function ManualJournalPanel({ accounts, entries, today, canWrite, lockKey, editId }: { accounts: Opt[]; entries: Entry[]; today: string; canWrite: boolean; lockKey: string | null; editId?: string }) {
+export function ManualJournalPanel({ accounts, entries, today, canCreate, canCancel, canEdit, lockKey, editId }: {
+  accounts: Opt[]; entries: Entry[]; today: string; canCreate: boolean; canCancel: boolean; canEdit: boolean; lockKey: string | null; editId?: string;
+}) {
   const router = useRouter();
   const [pending, start] = useTransition();
-  const editing0 = (canWrite && entries.find((e) => e.id === editId)) || null;
+  const editing0 = (canEdit && entries.find((e) => e.id === editId)) || null;
   const [editing, setEditing] = useState<Entry | null>(editing0);
   const [open, setOpen] = useState(!!editing0);
   const [head, setHead] = useState(editing0 ? headOf(editing0) : { dateKey: today, description: "", reference: "" });
@@ -79,9 +81,9 @@ export function ManualJournalPanel({ accounts, entries, today, canWrite, lockKey
 
   return (
     <div className="space-y-4">
-      {canWrite && (
+      {(canCreate || canEdit) && (
         <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (v) reset(); else setEditing(null); }}>
-          <DialogTrigger asChild><Button><Plus /> Buat Jurnal Umum</Button></DialogTrigger>
+          {canCreate && <DialogTrigger asChild><Button><Plus /> Buat Jurnal Umum</Button></DialogTrigger>}
           <DialogContent className="max-h-[90vh] max-w-4xl overflow-y-auto">
             <DialogHeader>
               <DialogTitle>{editing ? `Edit ${editing.number}` : "Jurnal Umum"}</DialogTitle>
@@ -149,7 +151,7 @@ export function ManualJournalPanel({ accounts, entries, today, canWrite, lockKey
               <TableHeader><TableRow>
                 <TableHead className="w-8" /><TableHead>Tanggal</TableHead><TableHead>No. Bukti</TableHead><TableHead>Keterangan</TableHead>
                 <TableHead className="text-right">Nilai</TableHead><TableHead>Dibuat oleh</TableHead><TableHead>Status</TableHead>
-                {canWrite && <TableHead className="text-right">Aksi</TableHead>}
+                <TableHead className="text-right">Aksi</TableHead>
               </TableRow></TableHeader>
               <TableBody>
                 {entries.map((e) => (
@@ -170,12 +172,12 @@ export function ManualJournalPanel({ accounts, entries, today, canWrite, lockKey
                           ? <Badge variant="outline">Dibatalkan{e.reversalNumber ? ` (${e.reversalNumber})` : ""}</Badge>
                           : <Badge variant="outline" className="border-success/50 text-success">Berlaku</Badge>}
                       </TableCell>
-                      {canWrite && (
+                      {(
                         <TableCell className="text-right">
                           <span className="inline-flex gap-0.5">
                             <Button asChild size="icon" variant="ghost" className="h-8 w-8"><a href={`/api/accounting/journals/${e.id}/pdf`} target="_blank" rel="noopener" aria-label="Print"><Printer /></a></Button>
-                            {!e.reversed && !e.reconciled && !(lockKey && dateKeyOf(e.date) <= lockKey) && <Button size="icon" variant="ghost" className="h-8 w-8" aria-label="Edit" onClick={() => startEdit(e)}><Pencil /></Button>}
-                            {!e.reversed && <Button size="sm" variant="ghost" className="text-destructive" onClick={() => { setCancel(e); setReason(""); setCancelDate(today); }}><Ban /> Batalkan</Button>}
+                            {canEdit && !e.reversed && !e.reconciled && !(lockKey && dateKeyOf(e.date) <= lockKey) && <Button size="icon" variant="ghost" className="h-8 w-8" aria-label="Edit" onClick={() => startEdit(e)}><Pencil /></Button>}
+                            {canCancel && !e.reversed && <Button size="sm" variant="ghost" className="text-destructive" onClick={() => { setCancel(e); setReason(""); setCancelDate(today); }}><Ban /> Batalkan</Button>}
                           </span>
                         </TableCell>
                       )}
@@ -185,7 +187,7 @@ export function ManualJournalPanel({ accounts, entries, today, canWrite, lockKey
                         <TableCell /><TableCell colSpan={2} className="text-muted-foreground">{l.account}</TableCell>
                         <TableCell className="text-muted-foreground">{l.description}</TableCell>
                         <TableCell className="text-right tabular-nums">{l.debit > 0 ? `D ${formatIDR(l.debit)}` : `K ${formatIDR(l.credit)}`}</TableCell>
-                        <TableCell colSpan={canWrite ? 3 : 2} />
+                        <TableCell colSpan={3} />
                       </TableRow>
                     ))}
                   </Fragment>

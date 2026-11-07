@@ -1,6 +1,5 @@
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm, hasPerm } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
-import { can } from "@/lib/rbac";
 import { PRODUCT } from "@/config/product";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,7 +8,7 @@ import { CompanyForm } from "./company-form";
 export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
-  const user = await requireCan("settings", "read", { redirectTo: "/dashboard" });
+  const user = await requirePerm("settings.view");
   const c = await prisma.companySetting.findFirst();
   const v = (s: string | null | undefined) => s ?? "";
 
@@ -17,7 +16,7 @@ export default async function SettingsPage() {
     <div className="space-y-6">
       <PageHeader title="Setting Perusahaan" description="Identitas perusahaan yang dipakai pada dokumen & invoice" />
       <CompanyForm
-        canWrite={can(user.role, "settings", "write")}
+        canWrite={hasPerm(user, "settings.edit")}
         hasLogo={!!c?.logoPath}
         initial={{
           name: v(c?.name), legalName: v(c?.legalName), npwp: v(c?.npwp), address: v(c?.address), city: v(c?.city),

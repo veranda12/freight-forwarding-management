@@ -3,7 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { Prisma, type JobStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { assertCan } from "@/lib/auth-helpers";
+import { assertPerm, hasPerm } from "@/lib/auth-helpers";
+import { jobScope } from "@/lib/data-scope";
+import { assertJobInScope } from "./job-scope";
 import { writeAudit } from "@/lib/audit";
 import { JOB_STATUS_LABELS, modeDirKey } from "@/lib/enums";
 import { genJobNumber } from "@/lib/sequence";
@@ -17,7 +19,7 @@ const d = (v: unknown) => { const x = s(v); return x ? new Date(x) : null; };
 const num = (v: unknown) => { const n = parseFloat(String(v ?? "")); return Number.isFinite(n) ? n : null; };
 
 export async function createJob(input: JobInput): Promise<{ ok: boolean; error?: string; id?: string }> {
-  const user = await assertCan("jobs", "write");
+  const user = await assertPerm("jobs.create");
   const mode = s(input.mode); const direction = s(input.direction); const customerId = s(input.customerId);
   if (!mode || !direction || !customerId) return { ok: false, error: "Mode, arah, dan customer wajib diisi." };
   if (direction !== "EXPORT" && direction !== "IMPORT") return { ok: false, error: "Arah Ekspor-Impor hanya Export/Import. Kargo antar kota dibuat di menu Domestik." };
@@ -35,7 +37,7 @@ export async function createJob(input: JobInput): Promise<{ ok: boolean; error?:
     const job = await tx.job.create({
       data: {
         number, mode: mode as any, direction: direction as any, status: "DRAFT",
-        customerId, salesPicId: s(input.salesPicId) ?? user.id,
+        customerId, salesPicId: s(input.salesPicId) ?? user.id, createdById: user.id,
         incoterm: s(input.incoterm),
         mblNo: !isAir ? s(input.mblNo) : null, hblNo: !isAir ? s(input.hblNo) : null,
         mawbNo: isAir ? s(input.mblNo) : null, hawbNo: isAir ? s(input.hblNo) : null,
@@ -61,10 +63,12 @@ export async function createJob(input: JobInput): Promise<{ ok: boolean; error?:
 }
 
 export async function updateJobStatus(jobId: string, status: JobStatus) {
-  const user = await assertCan("jobs", "write");
-  const admin = user.role === "ADMIN";
-  if (status === "CLOSED" && !admin) throw new Error("Status Closed terisi otomatis setelah invoice lunas.");
-  if (!admin) await assertJobEditable(prisma, jobId);
+  const user = await assertPerm(status === "CANCELLED" ? "jobs.cancel" : "jobs.status");
+  await assertJobInScope(user, jobId);
+  // job terkunci (Closed, atau Delivered dengan invoice) dan status Closed manual hanya untuk pemegang jobs.close
+  const closer = hasPerm(user, "jobs.close");
+  if (status === "CLOSED" && !closer) throw new Error("Status Closed terisi otomatis setelah invoice lunas.");
+  if (!closer) await assertJobEditable(prisma, jobId);
   const job = await prisma.job.update({
     where: { id: jobId },
     data: {
@@ -87,8 +91,8 @@ export async function updateJobStatus(jobId: string, status: JobStatus) {
 
 /** Simpan nomor B/L atau AWB. Nomornya biasanya baru ada setelah job dibuat. */
 export async function updateJobBlAction(jobId: string, input: { master: string; house: string }): Promise<{ ok: true } | { ok: false; error: string }> {
-  const user = await assertCan("jobs", "write");
-  const job = await prisma.job.findUnique({ where: { id: jobId }, select: { mode: true, number: true } });
+  const user = await assertPerm("jobs.bl");
+  const job = await prisma.job.findFirst({ where: { id: jobId, ...jobScope(user) }, select: { mode: true, number: true } });
   if (!job) return { ok: false, error: "Job tidak ditemukan." };
   const lock = await getJobLock(prisma, jobId);
   if (lock) return { ok: false, error: lock };
@@ -99,13 +103,12 @@ export async function updateJobBlAction(jobId: string, input: { master: string; 
   return { ok: true };
 }
 
-/** Admin membuka job Closed supaya biaya susulan bisa ditambahkan. Alasannya tercatat. */
+/** Pemegang izin jobs.reopen (bawaan: Admin) membuka job Closed supaya biaya susulan bisa ditambahkan. Alasannya tercatat. */
 export async function reopenJob(jobId: string, reason: string): Promise<{ ok: boolean; error?: string }> {
-  const user = await assertCan("jobs", "write");
-  if (user.role !== "ADMIN") return { ok: false, error: "Hanya Admin yang bisa membuka job." };
+  const user = await assertPerm("jobs.reopen");
   const why = reason.trim();
   if (why.length < 3) return { ok: false, error: "Alasan wajib diisi." };
-  const job = await prisma.job.findUnique({ where: { id: jobId }, select: { status: true } });
+  const job = await prisma.job.findFirst({ where: { id: jobId, ...jobScope(user) }, select: { status: true } });
   if (job?.status !== "CLOSED") return { ok: false, error: "Job tidak dalam status Closed." };
   await prisma.job.update({ where: { id: jobId }, data: { status: "DELIVERED", closedAt: null } });
   await writeAudit({ entity: "Job", entityId: jobId, action: "REOPEN", summary: why, userId: user.id });
@@ -115,9 +118,11 @@ export async function reopenJob(jobId: string, reason: string): Promise<{ ok: bo
 }
 
 export async function toggleMilestone(milestoneId: string, done: boolean) {
-  const user = await assertCan("jobs", "write");
-  const current = await prisma.milestone.findUniqueOrThrow({ where: { id: milestoneId }, select: { jobId: true } });
-  await assertJobEditable(prisma, current.jobId);
+  const user = await assertPerm("jobs.milestone");
+  const target = await prisma.milestone.findUnique({ where: { id: milestoneId }, select: { jobId: true } });
+  if (!target) throw new Error("Data tidak ditemukan.");
+  await assertJobInScope(user, target.jobId);
+  await assertJobEditable(prisma, target.jobId);
   const ms = await prisma.milestone.update({
     where: { id: milestoneId },
     data: { isDone: done, actualAt: done ? new Date() : null, userId: user.id },
@@ -127,7 +132,8 @@ export async function toggleMilestone(milestoneId: string, done: boolean) {
 }
 
 export async function addMilestone(jobId: string, title: string, note?: string) {
-  const user = await assertCan("jobs", "write");
+  const user = await assertPerm("jobs.milestone");
+  await assertJobInScope(user, jobId);
   await assertJobEditable(prisma, jobId);
   const count = await prisma.milestone.count({ where: { jobId } });
   await prisma.milestone.create({

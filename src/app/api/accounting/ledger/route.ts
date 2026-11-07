@@ -1,18 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { getCurrentUser, hasPerm } from "@/lib/auth-helpers";
 import { getLedgerDetail } from "@/lib/journal-search";
-import { can } from "@/lib/rbac";
 
 export const runtime = "nodejs";
 
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
 
 export async function GET(req: NextRequest) {
-  const session = await auth();
-  if (!session?.user || !can((session.user as any).role, "accounting", "read")) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  }
+  const user = await getCurrentUser();
+  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  if (!hasPerm(user, "accounting.view")) return NextResponse.json({ error: "forbidden" }, { status: 403 });
   const sp = req.nextUrl.searchParams;
   const code = sp.get("account");
   if (!code) return NextResponse.json({ rows: [] });

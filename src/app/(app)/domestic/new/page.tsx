@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm } from "@/lib/auth-helpers";
+import { customerScope } from "@/lib/data-scope";
 import { prisma } from "@/lib/prisma";
 import { getWeightRules, toRuleOpt } from "@/lib/weight-rules";
 import { PageHeader } from "@/components/page-header";
@@ -11,10 +12,10 @@ import type { PkgRow } from "../calc-ui";
 export const dynamic = "force-dynamic";
 
 export default async function NewSttPage({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
-  await requireCan("domestic", "write", { redirectTo: "/domestic" });
+  const user = await requirePerm("domestic.create", { redirectTo: "/domestic" });
   const sp = await searchParams;
   const [customers, tariffs, rules, vendors] = await Promise.all([
-    prisma.customer.findMany({ where: { isActive: true }, orderBy: { name: "asc" }, select: { id: true, name: true, code: true, address: true, phone: true } }),
+    prisma.customer.findMany({ where: { isActive: true, ...customerScope(user) }, orderBy: { name: "asc" }, select: { id: true, name: true, code: true, address: true, phone: true } }),
     prisma.domesticTariff.findMany({ where: { isActive: true }, orderBy: [{ originCity: "asc" }, { destCity: "asc" }] }),
     getWeightRules("DOMESTIC"),
     prisma.vendor.findMany({ where: { isActive: true, type: { in: ["TRUCKING", "SHIPPING_LINE", "AIRLINE"] } }, orderBy: { name: "asc" }, select: { id: true, name: true, type: true } }),

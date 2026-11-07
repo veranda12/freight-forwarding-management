@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm, hasPerm } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
 import { assetRegister } from "@/lib/fixed-assets";
 import { formatIDR, formatDate } from "@/lib/format";
@@ -13,7 +13,9 @@ import { NewAssetButton, DepreciationForm } from "./asset-panel";
 export const dynamic = "force-dynamic";
 
 export default async function FixedAssetsPage() {
-  await requireCan("accounting", "read");
+  const user = await requirePerm("fixedAssets.view");
+  const canManage = hasPerm(user, "fixedAssets.manage");
+  const canDepreciate = hasPerm(user, "fixedAssets.depreciate");
   const today = new Date().toISOString().slice(0, 10);
   const thisPeriod = today.slice(0, 7);
   const rows = await assetRegister(prisma, thisPeriod);
@@ -25,7 +27,7 @@ export default async function FixedAssetsPage() {
     <div className="space-y-6">
       <PageHeader title="Aset Tetap" description="Daftar aset, akumulasi penyusutan, dan nilai buku">
         <Link href="/accounting" className="text-sm text-primary hover:underline">Kembali ke Accounting</Link>
-        <NewAssetButton />
+        {canManage && <NewAssetButton />}
       </PageHeader>
 
       <StatStrip items={[
@@ -38,7 +40,7 @@ export default async function FixedAssetsPage() {
         <CardHeader><CardTitle className="text-base">Penyusutan bulanan</CardTitle></CardHeader>
         <CardContent className="space-y-3">
           <p className="text-sm text-muted-foreground">Penyusutan garis lurus. Setiap periode hanya bisa diposting sekali; menjalankan ulang tidak menggandakan jurnal.</p>
-          <DepreciationForm defaultPeriod={thisPeriod} />
+          {canDepreciate && <DepreciationForm defaultPeriod={thisPeriod} />}
         </CardContent>
       </Card>
 

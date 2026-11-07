@@ -2,7 +2,9 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
-import { assertCan } from "@/lib/auth-helpers";
+import { assertPerm } from "@/lib/auth-helpers";
+import { billScope } from "@/lib/data-scope";
+import { assertCostingLinesInScope } from "../jobs/job-scope";
 import { writeAudit } from "@/lib/audit";
 import { createBillCore, recordVendorPaymentCore, type BillOpts, type VendorPaymentInput } from "@/lib/payables";
 import { errorMessage } from "@/lib/action-error";
@@ -10,10 +12,11 @@ import { errorMessage } from "@/lib/action-error";
 type Result<T = object> = ({ ok: true } & T) | { ok: false; error: string };
 const fail = (e: unknown): { ok: false; error: string } => ({ ok: false, error: errorMessage(e, "Gagal.") });
 
-/** Membuat vendor bill untuk satu vendor dari biaya yang dicentang, boleh dari beberapa job. */
+/** Membuat vendor bill untuk satu vendor dari biaya yang dicentang, boleh dari beberapa job (semua dalam batas data user). */
 export async function createBillAction(vendorId: string, lineIds: string[], opts: BillOpts = {}): Promise<Result<{ id: string }>> {
-  const user = await assertCan("bills", "write");
+  const user = await assertPerm("bills.create");
   try {
+    await assertCostingLinesInScope(user, lineIds);
     const id = await createBillCore(prisma, vendorId, lineIds, user.id, opts);
     const bill = await prisma.vendorBill.findUnique({ where: { id }, select: { number: true } });
     await writeAudit({ entity: "VendorBill", entityId: id, action: "CREATE", summary: `${bill?.number ?? id}: ${lineIds.length} biaya`, userId: user.id });
@@ -26,10 +29,11 @@ export async function createBillAction(vendorId: string, lineIds: string[], opts
 
 /** Mencatat pembayaran ke vendor (IDR, atau valas dengan kurs pembayaran). */
 export async function recordVendorPaymentAction(billId: string, input: VendorPaymentInput): Promise<Result> {
-  const user = await assertCan("payments", "write");
+  const user = await assertPerm("bills.pay");
   try {
+    const bill = await prisma.vendorBill.findFirst({ where: { id: billId, ...billScope(user) }, select: { number: true, currency: true } });
+    if (!bill) throw new Error("Data tidak ditemukan.");
     await recordVendorPaymentCore(prisma, billId, input, user.id);
-    const bill = await prisma.vendorBill.findUnique({ where: { id: billId }, select: { number: true, currency: true } });
     const summary = bill?.currency && bill.currency !== "IDR"
       ? `${bill.number}: ${bill.currency} ${input.amountForeign ?? 0}`
       : `${bill?.number ?? billId}: Rp ${Number(input.amount ?? 0).toLocaleString("id-ID")}`;

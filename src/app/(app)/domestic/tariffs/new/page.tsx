@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm } from "@/lib/auth-helpers";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { EntityForm } from "@/components/crud/entity-form";
@@ -8,7 +8,7 @@ import { TARIFF_FIELDS } from "../form-config";
 import { saveDomesticTariff } from "../../actions";
 
 export default async function NewTariffPage() {
-  await requireCan("domesticTariffs", "write", { redirectTo: "/domestic/tariffs" });
+  await requirePerm("domesticTariffs.edit", { redirectTo: "/domestic/tariffs" });
   return (
     <div className="space-y-6">
       <div>

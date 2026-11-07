@@ -1,5 +1,5 @@
-import type { Prisma, PrismaClient, Role } from "@prisma/client";
-import { can, type Resource } from "./rbac";
+import type { Prisma, PrismaClient } from "@prisma/client";
+import { holderHasAnyPerm, type PermHolder, type PermissionKey } from "./permissions";
 import { BILL_STATUS_LABELS, INV_STATUS_LABELS, NOTE_STATUS_LABELS } from "./enums";
 import { SOURCE_LABEL } from "./journal-filter";
 
@@ -20,20 +20,32 @@ export const PROOF_KIND_LABEL: Record<ProofKind, string> = {
   tax: "Setoran Pajak",
 };
 
-/** Modul pemilik tiap jenis bukti. Jenis hanya dicari bila user boleh membaca modulnya. */
-export const PROOF_KIND_RESOURCE: Record<ProofKind, Resource> = {
-  journal: "accounting",
-  invoice: "invoices",
-  bill: "bills",
-  payment: "payments",
-  voucher: "vouchers",
-  note: "notes",
-  tax: "accounting",
+/**
+ * Izin lihat tiap jenis bukti (salah satu cukup). Jurnal mengikuti halaman/PDF jurnal: hanya pemegang laporan
+ * akuntansi atau Kasir All yang melihat SEMUA jurnal (lihat journal-access.ts).
+ */
+export const PROOF_KIND_PERMS: Record<ProofKind, PermissionKey[]> = {
+  journal: ["accounting.view", "kasir.view"],
+  invoice: ["invoices.view"],
+  bill: ["bills.view"],
+  payment: ["payments.view"],
+  voucher: ["vouchers.view"],
+  note: ["notes.view"],
+  tax: ["tax.view"],
 };
 
-export function proofKindsFor(role: Role | null | undefined): ProofKind[] {
-  return PROOF_KINDS.filter((k) => can(role, PROOF_KIND_RESOURCE[k], "read"));
+export function proofKindsFor(user: PermHolder | null | undefined): ProofKind[] {
+  return PROOF_KINDS.filter((k) => holderHasAnyPerm(user, PROOF_KIND_PERMS[k]));
 }
+
+/**
+ * Batas data per jenis, diisi `proofScopes()` di data-scope.ts. Jurnal dan setoran pajak adalah data akuntansi tanpa
+ * batas per orang (cukup izin lihatnya).
+ */
+export type ProofScopes = {
+  invoice?: Prisma.InvoiceWhereInput; bill?: Prisma.VendorBillWhereInput; payment?: Prisma.PaymentWhereInput;
+  voucher?: Prisma.VoucherWhereInput; note?: Prisma.NoteWhereInput;
+};
 
 const GROUPED = /^\d{1,3}(?:[.,]\d{3})+$/;
 
@@ -118,10 +130,10 @@ const jobWhere = (t: string): Prisma.JobWhereInput => ({
 });
 
 /** Setiap kata harus cocok di salah satu kolom; atau nominalnya sama persis. */
-function build<W>(q: ProofQuery, fields: (t: string) => W[], amount: (n: number) => W[]): { OR: W[] } | { AND: { OR: W[] }[] } {
-  const text = { AND: q.terms.map((t) => ({ OR: fields(t) })) };
-  if (q.amount === null) return text;
-  return { OR: [text as W, ...amount(q.amount)] };
+function build<W>(q: ProofQuery, scope: W | undefined, fields: (t: string) => W[], amount: (n: number) => W[]): W {
+  const text = { AND: q.terms.map((t) => ({ OR: fields(t) })) } as W;
+  const match = q.amount === null ? text : ({ OR: [text, ...amount(q.amount)] } as W);
+  return scope ? ({ AND: [match, scope] } as W) : match;
 }
 
 function jobsText(refs: JobRef[]) {
@@ -137,12 +149,12 @@ function jobsText(refs: JobRef[]) {
 const VOUCHER_STATUS: Record<string, string> = { ISSUED: "Diterbitkan", PAID: "Dibayar", CANCELLED: "Dibatalkan" };
 const n = (v: unknown) => Number(v ?? 0);
 
-async function searchKind(db: Db, kind: ProofKind, q: ProofQuery, take: number): Promise<ProofHit[]> {
+async function searchKind(db: Db, kind: ProofKind, q: ProofQuery, take: number, scopes: ProofScopes): Promise<ProofHit[]> {
   switch (kind) {
     case "journal": {
       const rows = await db.journalEntry.findMany({
         where: build<Prisma.JournalEntryWhereInput>(
-          q,
+          q, undefined,
           (t) => [{ number: ci(t) }, { description: ci(t) }, { lines: { some: { description: ci(t) } } }],
           (a) => [{ lines: { some: { OR: [{ debit: a }, { credit: a }] } } }],
         ),
@@ -160,7 +172,7 @@ async function searchKind(db: Db, kind: ProofKind, q: ProofQuery, take: number):
     case "invoice": {
       const rows = await db.invoice.findMany({
         where: build<Prisma.InvoiceWhereInput>(
-          q,
+          q, scopes.invoice,
           (t) => [{ number: ci(t) }, { notes: ci(t) }, { customer: { name: ci(t) } }, { job: jobWhere(t) }, { lines: { some: { job: jobWhere(t) } } }],
           (a) => [{ total: a }, { subtotal: a }, { amountForeign: a }],
         ),
@@ -181,7 +193,7 @@ async function searchKind(db: Db, kind: ProofKind, q: ProofQuery, take: number):
     case "bill": {
       const rows = await db.vendorBill.findMany({
         where: build<Prisma.VendorBillWhereInput>(
-          q,
+          q, scopes.bill,
           (t) => [
             { number: ci(t) }, { vendorRef: ci(t) }, { notes: ci(t) }, { vendor: { name: ci(t) } },
             { job: jobWhere(t) }, { lines: { some: { OR: [{ description: ci(t) }, { job: jobWhere(t) }] } } },
@@ -205,7 +217,7 @@ async function searchKind(db: Db, kind: ProofKind, q: ProofQuery, take: number):
     case "payment": {
       const rows = await db.payment.findMany({
         where: build<Prisma.PaymentWhereInput>(
-          q,
+          q, scopes.payment,
           (t) => [
             { number: ci(t) }, { reference: ci(t) }, { notes: ci(t) }, { customer: { name: ci(t) } }, { vendor: { name: ci(t) } },
             { allocations: { some: { OR: [
@@ -237,7 +249,7 @@ async function searchKind(db: Db, kind: ProofKind, q: ProofQuery, take: number):
     case "voucher": {
       const rows = await db.voucher.findMany({
         where: build<Prisma.VoucherWhereInput>(
-          q,
+          q, scopes.voucher,
           (t) => [
             { number: ci(t) }, { proofNumber: ci(t) }, { payee: ci(t) }, { notes: ci(t) }, { reference: ci(t) },
             { vendor: { name: ci(t) } }, { job: jobWhere(t) },
@@ -257,7 +269,7 @@ async function searchKind(db: Db, kind: ProofKind, q: ProofQuery, take: number):
     case "note": {
       const rows = await db.note.findMany({
         where: build<Prisma.NoteWhereInput>(
-          q,
+          q, scopes.note,
           (t) => [{ number: ci(t) }, { description: ci(t) }, { agent: { name: ci(t) } }],
           (a) => [{ amountIdr: a }, { amountForeign: a }],
         ),
@@ -274,7 +286,7 @@ async function searchKind(db: Db, kind: ProofKind, q: ProofQuery, take: number):
     }
     case "tax": {
       const rows = await db.taxRemittance.findMany({
-        where: build<Prisma.TaxRemittanceWhereInput>(q, (t) => [{ ntpn: ci(t) }, { period: ci(t) }], (a) => [{ amount: a }]),
+        where: build<Prisma.TaxRemittanceWhereInput>(q, undefined, (t) => [{ ntpn: ci(t) }, { period: ci(t) }], (a) => [{ amount: a }]),
         orderBy: [{ date: "desc" }],
         take,
         select: { id: true, kind: true, period: true, date: true, amount: true, ntpn: true, status: true, journalEntryId: true },
@@ -290,11 +302,13 @@ async function searchKind(db: Db, kind: ProofKind, q: ProofQuery, take: number):
 }
 
 /** Cari bukti di semua jenis yang diizinkan. Tiap jenis maksimal `limit` hasil, `truncated` bila lebih. */
-export async function searchProofs(db: Db, q: ProofQuery, kinds: readonly ProofKind[], opts: { limit?: number } = {}): Promise<ProofResult[]> {
+export async function searchProofs(
+  db: Db, q: ProofQuery, kinds: readonly ProofKind[], opts: { limit?: number; scopes?: ProofScopes } = {},
+): Promise<ProofResult[]> {
   const limit = opts.limit ?? 20;
   return Promise.all(
     kinds.map(async (kind) => {
-      const hits = await searchKind(db, kind, q, limit + 1);
+      const hits = await searchKind(db, kind, q, limit + 1, opts.scopes ?? {});
       return { kind, hits: hits.slice(0, limit), truncated: hits.length > limit };
     }),
   );

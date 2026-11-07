@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { parseIdAmount, parseProofQuery, proofKindsFor } from "@/lib/proof-search";
+import { ALL_PERMISSION_KEYS, DEFAULT_ROLES, normalizePermissions } from "@/lib/permissions";
 
 describe("parseIdAmount — nominal format Indonesia", () => {
   it.each([
@@ -36,14 +37,26 @@ describe("parseProofQuery", () => {
   });
 });
 
-describe("proofKindsFor — jenis bukti mengikuti izin modul", () => {
+describe("proofKindsFor — jenis bukti mengikuti izin modul (role bawaan katalog)", () => {
+  const userOf = (key: string) => {
+    if (key === "ADMIN") return { id: "u", isAdmin: true, permissions: new Set(ALL_PERMISSION_KEYS) };
+    const role = DEFAULT_ROLES.find((r) => r.key === key)!;
+    return { id: "u", isAdmin: false, permissions: new Set(normalizePermissions(role.permissions)) };
+  };
   it("FINANCE, ADMIN, MANAGEMENT melihat semua jenis", () => {
-    for (const r of ["FINANCE", "ADMIN", "MANAGEMENT"] as const) expect(proofKindsFor(r)).toHaveLength(7);
+    for (const r of ["FINANCE", "ADMIN", "MANAGEMENT"]) expect(proofKindsFor(userOf(r))).toHaveLength(7);
   });
   it("SALES hanya invoice", () => {
-    expect(proofKindsFor("SALES")).toEqual(["invoice"]);
+    expect(proofKindsFor(userOf("SALES"))).toEqual(["invoice"]);
   });
-  it("OPERATION tidak mendapat apa pun", () => {
-    expect(proofKindsFor("OPERATION")).toEqual([]);
+  it("OPERATION dan DOCUMENTATION tidak mendapat apa pun", () => {
+    expect(proofKindsFor(userOf("OPERATION"))).toEqual([]);
+    expect(proofKindsFor(userOf("DOCUMENTATION"))).toEqual([]);
+  });
+  it("tanpa login tidak mendapat apa pun", () => {
+    expect(proofKindsFor(null)).toEqual([]);
+  });
+  it("jurnal cukup dengan Kasir All, tanpa accounting.view", () => {
+    expect(proofKindsFor({ isAdmin: false, permissions: new Set(["kasir.view" as const]) })).toEqual(["journal"]);
   });
 });

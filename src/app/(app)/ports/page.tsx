@@ -1,6 +1,5 @@
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm, hasPerm } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
-import { can } from "@/lib/rbac";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -9,8 +8,8 @@ import { PortForm } from "./port-form";
 export const dynamic = "force-dynamic";
 
 export default async function PortsPage() {
-  const user = await requireCan("ports", "read");
-  const canWrite = can(user.role, "ports", "write");
+  const user = await requirePerm("ports.view");
+  const canWrite = hasPerm(user, "ports.edit");
   const [ports, airports] = await Promise.all([
     prisma.port.findMany({ orderBy: { unlocode: "asc" } }),
     prisma.airport.findMany({ orderBy: { iata: "asc" } }),

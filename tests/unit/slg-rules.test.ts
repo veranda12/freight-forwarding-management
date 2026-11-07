@@ -8,7 +8,7 @@ import { validateCashEntry } from "../../src/lib/cash-entry";
 import { validateVoucher } from "../../src/lib/vouchers";
 import { formatMoneyText, parseMoneyText } from "../../src/components/money-input";
 import { terbilang } from "../../src/lib/pdf/proof-company";
-import { can } from "../../src/lib/rbac";
+import { DEFAULT_ROLES, normalizePermissions } from "../../src/lib/permissions";
 
 describe("nomor bukti", () => {
   it("format bukti SLG/BM/26/11/001", () => {
@@ -104,16 +104,28 @@ describe("input", () => {
   });
 });
 
-describe("hak akses", () => {
-  it("Ops tidak melihat costing, invoice, laporan, dan rate", () => {
-    for (const r of ["costing", "invoices", "bills", "vouchers", "reports", "rates", "quotations"] as const) expect(can("OPERATION", r, "read")).toBe(false);
-    expect(can("OPERATION", "jobs", "write")).toBe(true);
+// Branch MariaDB memakai Role Management (role bawaan di permissions.ts). Keputusan pemilik 2026-11-07: Operation tetap
+// memegang alur quotation & costing (berbeda dari rbac.ts client); voucher & keuangan di Finance.
+const perms = (key: string) => new Set<string>(normalizePermissions(DEFAULT_ROLES.find((r) => r.key === key)!.permissions));
+
+describe("hak akses (role bawaan)", () => {
+  it("Ops tidak melihat invoice, bill, dan voucher; tetap mengelola job, charge, dan alur quotation", () => {
+    const ops = perms("OPERATION");
+    for (const k of ["invoices.view", "bills.view", "vouchers.view", "kasir.view", "invoices.edit"]) expect(ops.has(k), k).toBe(false);
+    for (const k of ["jobs.status", "jobs.charges", "jobs.bl", "quotations.send", "quotations.decide", "quotations.convert"]) expect(ops.has(k), k).toBe(true);
   });
-  it("Finance mengelola costing dan voucher, Sales tetap melihat tagihan dan margin", () => {
-    expect(can("FINANCE", "costing", "write")).toBe(true);
-    expect(can("FINANCE", "vouchers", "write")).toBe(true);
-    expect(can("SALES", "costing", "read")).toBe(true);
-    expect(can("SALES", "invoices", "read")).toBe(true);
-    expect(can("SALES", "costing", "write")).toBe(false);
+  it("Finance mengelola costing, voucher, dan edit bukti; Sales tetap melihat tagihan dan margin", () => {
+    const fin = perms("FINANCE");
+    for (const k of ["jobs.charges", "vouchers.create", "vouchers.pay", "vouchers.cancel", "invoices.edit", "cashEntry.edit", "manualJournal.edit", "kasir.view", "taxes.ppnRate", "coa.create"]) expect(fin.has(k), k).toBe(true);
+    const sales = perms("SALES");
+    for (const k of ["costing.view", "invoices.view", "jobs.viewFinancials"]) expect(sales.has(k), k).toBe(true);
+    for (const k of ["jobs.charges", "vouchers.view", "invoices.edit"]) expect(sales.has(k), k).toBe(false);
+  });
+  it("buka/tutup job manual hanya Admin (tidak ada di role bawaan lain)", () => {
+    for (const r of DEFAULT_ROLES) {
+      const p = perms(r.key);
+      expect(p.has("jobs.reopen"), r.key).toBe(false);
+      expect(p.has("jobs.close"), r.key).toBe(false);
+    }
   });
 });

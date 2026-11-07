@@ -1,7 +1,6 @@
 import Link from "next/link";
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm, hasPerm } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
-import { can } from "@/lib/rbac";
 import { listCashAccounts, cashBalances } from "@/lib/cash-accounts";
 import { formatIDR, formatMoney } from "@/lib/format";
 import { PageHeader } from "@/components/page-header";
@@ -13,8 +12,8 @@ import { BankAccountForm } from "./bank-account-form";
 export const dynamic = "force-dynamic";
 
 export default async function BankAccountsPage() {
-  const user = await requireCan("accounting", "read");
-  const canWrite = can(user.role, "accounting", "write");
+  const user = await requirePerm("bankAccounts.view");
+  const canWrite = hasPerm(user, "bankAccounts.edit");
   const [accounts, currencies] = await Promise.all([
     listCashAccounts(prisma),
     prisma.currency.findMany({ orderBy: { code: "asc" }, select: { code: true } }),

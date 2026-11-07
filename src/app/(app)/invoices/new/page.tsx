@@ -1,4 +1,5 @@
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm } from "@/lib/auth-helpers";
+import { jobScope } from "@/lib/data-scope";
 import { prisma } from "@/lib/prisma";
 import { getPpnRate } from "@/lib/receivables";
 import { PageHeader } from "@/components/page-header";
@@ -9,10 +10,10 @@ import { InvoiceBuilder } from "../invoice-builder";
 export const dynamic = "force-dynamic";
 
 export default async function NewInvoicePage() {
-  await requireCan("invoices", "write", { redirectTo: "/invoices" });
+  const user = await requirePerm("invoices.create", { redirectTo: "/invoices" });
   const today = new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10);
   const [candidates, currencies, ppnRate] = await Promise.all([
-    invoiceCandidates(prisma),
+    invoiceCandidates(prisma, undefined, jobScope(user)),
     prisma.currency.findMany({ where: { isBase: false }, select: { code: true, name: true }, orderBy: { code: "asc" } }),
     getPpnRate(prisma),
   ]);

@@ -1,8 +1,7 @@
 import Link from "next/link";
 import { Plus, Pencil } from "lucide-react";
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm, hasPerm } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
-import { can } from "@/lib/rbac";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -11,8 +10,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 export const dynamic = "force-dynamic";
 
 export default async function CommoditiesPage() {
-  const user = await requireCan("commodities", "read");
-  const canWrite = can(user.role, "commodities", "write");
+  const user = await requirePerm("commodities.view");
+  const canWrite = hasPerm(user, "commodities.edit");
   const items = await prisma.commodity.findMany({ orderBy: { hsCode: "asc" } });
   return (
     <div className="space-y-6">

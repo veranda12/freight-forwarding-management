@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm } from "@/lib/auth-helpers";
+import { paymentScope } from "@/lib/data-scope";
 import { prisma } from "@/lib/prisma";
 import { formatIDR, formatDate, formatNumber } from "@/lib/format";
 import { PageHeader } from "@/components/page-header";
@@ -15,10 +16,10 @@ const METHOD_LABEL: Record<string, string> = { TRANSFER: "Transfer", CASH: "Tuna
 
 export default async function PaymentDetail({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  await requireCan("payments", "read");
+  const user = await requirePerm("payments.view");
 
-  const pay = await prisma.payment.findUnique({
-    where: { id },
+  const pay = await prisma.payment.findFirst({
+    where: { id, ...paymentScope(user) },
     include: {
       customer: { select: { name: true, code: true } },
       vendor: { select: { name: true, code: true } },

@@ -21,18 +21,31 @@ type TabsCtx = {
 
 const TabsContext = createContext<TabsCtx | null>(null);
 
-/** Judul default tab dari menu: menu dengan href paling panjang yang cocok. */
-function labelFor(path: string): string {
-  if (path === "/dashboard") return "Dashboard";
-  const match = NAV.flatMap((g) => g.items)
+/** Item menu dengan href paling panjang yang cocok dengan path. */
+function navItemFor(path: string) {
+  return NAV.flatMap((g) => g.items)
     .filter((i) => path === i.href || path.startsWith(i.href + "/"))
     .sort((a, b) => b.href.length - a.href.length)[0];
-  return match?.label ?? "Halaman";
 }
 
-function readSaved(): AppTab[] {
+/** Judul default tab dari menu. */
+function labelFor(path: string): string {
+  if (path === "/dashboard") return "Dashboard";
+  return navItemFor(path)?.label ?? "Halaman";
+}
+
+/**
+ * Halaman tanpa izin tidak dibuka sebagai tab. Dengan streaming (loading.tsx) path tujuan sempat aktif sebelum server
+ * mengalihkan, sehingga tanpa saringan ini tab menu terlarang ikut tersimpan.
+ */
+function permitted(path: string, allowed: Set<string>): boolean {
+  const item = navItemFor(path);
+  return !item || allowed.has(item.perm);
+}
+
+function readSaved(key: string): AppTab[] {
   try {
-    const raw = sessionStorage.getItem(STORAGE_KEY);
+    const raw = sessionStorage.getItem(key);
     const parsed: unknown = raw ? JSON.parse(raw) : [];
     if (!Array.isArray(parsed)) return [];
     return parsed
@@ -43,15 +56,15 @@ function readSaved(): AppTab[] {
   }
 }
 
-function writeSaved(tabs: AppTab[]) {
+function writeSaved(key: string, tabs: AppTab[]) {
   try {
-    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(tabs));
+    sessionStorage.setItem(key, JSON.stringify(tabs));
   } catch {}
 }
 
 /** Membuka tab untuk halaman aktif bila belum ada. Tab yang sudah ada mempertahankan judulnya. */
-function openTab(tabs: AppTab[], path: string): AppTab[] {
-  if (tabs.some((t) => t.href === path)) return tabs;
+function openTab(tabs: AppTab[], path: string, allowed: Set<string>): AppTab[] {
+  if (tabs.some((t) => t.href === path) || !permitted(path, allowed)) return tabs;
   let next = [...tabs, { href: path, title: labelFor(path) }];
   if (next.length > MAX_TABS) {
     const drop = next.findIndex((t) => t.href !== path);
@@ -60,7 +73,11 @@ function openTab(tabs: AppTab[], path: string): AppTab[] {
   return next;
 }
 
-export function TabsProvider({ children }: { children: React.ReactNode }) {
+/** `owner` memisahkan tab per user: login sebagai user lain di tab browser yang sama tidak mewarisi tab sebelumnya. */
+export function TabsProvider({ children, allowed, owner }: { children: React.ReactNode; allowed: string[]; owner: string }) {
+  const storageKey = `${STORAGE_KEY}:${owner}`;
+  const allowRef = useRef(new Set(allowed));
+  allowRef.current = new Set(allowed);
   const pathname = usePathname();
   const router = useRouter();
   const [tabs, setTabs] = useState<AppTab[]>([]);
@@ -73,17 +90,19 @@ export function TabsProvider({ children }: { children: React.ReactNode }) {
   // Pulihkan tab dari sesi browser ini, lalu buka halaman aktif.
   useEffect(() => {
     hydrated.current = true;
-    setTabs(openTab(readSaved(), pathRef.current));
-  }, []);
+    const allow = allowRef.current;
+    const saved = readSaved(storageKey).filter((t) => permitted(t.href, allow));
+    setTabs(openTab(saved, pathRef.current, allow));
+  }, [storageKey]);
 
   useEffect(() => {
     if (!hydrated.current) return;
-    setTabs((prev) => openTab(prev, pathname));
+    setTabs((prev) => openTab(prev, pathname, allowRef.current));
   }, [pathname]);
 
   useEffect(() => {
-    if (hydrated.current && tabs.length) writeSaved(tabs);
-  }, [tabs]);
+    if (hydrated.current && tabs.length) writeSaved(storageKey, tabs);
+  }, [tabs, storageKey]);
 
   const closeTab = useCallback((href: string) => {
     const list = tabsRef.current;

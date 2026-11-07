@@ -2,7 +2,9 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
-import { assertCan } from "@/lib/auth-helpers";
+import { assertPerm, assertNotOwn } from "@/lib/auth-helpers";
+import { invoiceScope } from "@/lib/data-scope";
+import { assertCostingLinesInScope } from "../jobs/job-scope";
 import { writeAudit } from "@/lib/audit";
 import { cancelInvoiceCore, createInvoiceCore, recordReceiptCore, type InvoiceOpts, type ReceiptInput } from "@/lib/receivables";
 import { errorMessage } from "@/lib/action-error";
@@ -10,10 +12,11 @@ import { editInvoiceCharges, type InvoiceEdit } from "@/lib/job-charges";
 
 type Saved = { ok: true; id: string } | { ok: false; error: string };
 
-/** Buat invoice dari baris selling beberapa job atau B/L. */
+/** Buat invoice dari baris selling yang dicentang. Semua baris harus dari job dalam batas data user. */
 export async function createInvoiceAction(lineIds: string[], opts: InvoiceOpts = {}): Promise<Saved> {
-  const user = await assertCan("invoices", "write");
+  const user = await assertPerm("invoices.create");
   try {
+    await assertCostingLinesInScope(user, lineIds);
     const id = await createInvoiceCore(prisma, lineIds, user.id, opts);
     await writeAudit({ entity: "Invoice", entityId: id, action: "CREATE", summary: `${lineIds.length} baris`, userId: user.id });
     revalidatePath("/invoices");
@@ -25,8 +28,10 @@ export async function createInvoiceAction(lineIds: string[], opts: InvoiceOpts =
 
 /** Edit isi invoice: ubah, hapus, atau tambah baris. Nomor tetap, isi lama tercatat. */
 export async function editInvoiceAction(invoiceId: string, edit: InvoiceEdit): Promise<Saved> {
-  const user = await assertCan("invoices", "write");
+  const user = await assertPerm("invoices.edit");
   try {
+    const own = await prisma.invoice.findFirst({ where: { id: invoiceId, ...invoiceScope(user) }, select: { id: true } });
+    if (!own) throw new Error("Data tidak ditemukan.");
     const changes = await editInvoiceCharges(prisma, invoiceId, edit);
     await writeAudit({ entity: "Invoice", entityId: invoiceId, action: "EDIT", summary: "Edit isi invoice", changes, userId: user.id });
     revalidatePath("/invoices");
@@ -40,8 +45,10 @@ export async function editInvoiceAction(invoiceId: string, edit: InvoiceEdit): P
 
 /** Catat penerimaan. IDR: nominal IDR. Valas: nominal valas + kurs pembayaran. */
 export async function recordReceipt(invoiceId: string, input: ReceiptInput): Promise<{ ok: boolean; error?: string }> {
-  const user = await assertCan("payments", "write");
+  const user = await assertPerm("invoices.receipt");
   try {
+    const own = await prisma.invoice.findFirst({ where: { id: invoiceId, ...invoiceScope(user) }, select: { id: true } });
+    if (!own) throw new Error("Data tidak ditemukan.");
     await recordReceiptCore(prisma, invoiceId, input, user.id);
   } catch (e) {
     return { ok: false, error: errorMessage(e, "Gagal mencatat pembayaran.") };
@@ -59,8 +66,11 @@ export async function recordReceipt(invoiceId: string, input: ReceiptInput): Pro
 }
 
 export async function cancelInvoice(invoiceId: string): Promise<{ ok: boolean; error?: string }> {
-  const user = await assertCan("invoices", "write");
+  const user = await assertPerm("invoices.cancel");
   try {
+    const inv = await prisma.invoice.findFirst({ where: { id: invoiceId, ...invoiceScope(user) }, select: { createdById: true } });
+    if (!inv) throw new Error("Data tidak ditemukan.");
+    assertNotOwn(user, "invoices.cancelOwn", [inv.createdById], "membatalkan");
     const r = await cancelInvoiceCore(prisma, invoiceId, user.id);
     await writeAudit({ entity: "Invoice", entityId: invoiceId, action: "CANCEL", summary: `Reversal ${r.number}, ${r.reopened} baris selling dibuka kembali`, userId: user.id });
   } catch (e) {

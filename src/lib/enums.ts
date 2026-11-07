@@ -94,6 +94,7 @@ export const JOB_STATUS_FLOW: JobStatus[] = [
 
 export const QUO_STATUS_LABELS: Record<QuotationStatus, string> = {
   DRAFT: "Draft",
+  SUBMITTED: "Diajukan",
   SENT: "Sent",
   ACCEPTED: "Accepted",
   REJECTED: "Rejected",
@@ -102,6 +103,7 @@ export const QUO_STATUS_LABELS: Record<QuotationStatus, string> = {
 
 export const QUO_STATUS_VARIANT: Record<QuotationStatus, BadgeVariant> = {
   DRAFT: "muted",
+  SUBMITTED: "warning",
   SENT: "default",
   ACCEPTED: "success",
   REJECTED: "destructive",

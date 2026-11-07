@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Briefcase } from "lucide-react";
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm, hasPerm } from "@/lib/auth-helpers";
+import { jobScope } from "@/lib/data-scope";
 import { prisma } from "@/lib/prisma";
-import { can } from "@/lib/rbac";
 import { LANE_LABELS } from "@/lib/enums";
 import { formatIDR, formatMoney, formatNumber, formatPercent } from "@/lib/format";
 import { chargeLockReason } from "@/lib/job-charges";
@@ -24,9 +24,9 @@ export const dynamic = "force-dynamic";
 
 export default async function JobCostingPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const user = await requireCan("costing", "read");
-  const job = await prisma.job.findUnique({
-    where: { id },
+  const user = await requirePerm("costing.view");
+  const job = await prisma.job.findFirst({
+    where: { id, ...jobScope(user) },
     include: {
       customer: true,
       containers: { include: { containerType: true } },
@@ -41,8 +41,10 @@ export default async function JobCostingPage({ params }: { params: Promise<{ id:
   const isAir = job.mode === "AIR";
   const selling = job.costings.filter((c) => c.side === "SELLING");
   const buying = job.costings.filter((c) => c.side === "BUYING");
-  const canBill = can(user.role, "bills", "write");
-  const canCosting = can(user.role, "costing", "write") && job.status !== "CANCELLED" && job.status !== "CLOSED";
+  // charge: jobs.charges; beban armada: jobs.fleetCost; rate card: jobs.clearance (sama dengan halaman job)
+  const canFleetCost = hasPerm(user, "jobs.fleetCost");
+  const canClearance = hasPerm(user, "jobs.clearance") && job.status !== "CANCELLED" && job.status !== "CLOSED";
+  const canCosting = hasPerm(user, "jobs.charges") && job.status !== "CANCELLED" && job.status !== "CLOSED";
   let chargeOptions: ChargeFormOptions | null = null;
   if (canCosting) {
     const [charges, allCurrencies, vendors, vehicles] = await Promise.all([
@@ -85,7 +87,7 @@ export default async function JobCostingPage({ params }: { params: Promise<{ id:
             Job ini belum punya charge. Tambahkan selling untuk invoice, dan buying untuk voucher atau vendor bill.
           </p>
         )}
-        {canCosting && !isAir && (
+        {canClearance && !isAir && (
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/30 px-4 py-3 text-sm">
             <p className="text-muted-foreground">
               Selling charge bisa dihitung otomatis dari rate card: {job.containers.length ? summarizeContainers(job.containers) : "belum ada container"}
@@ -95,7 +97,7 @@ export default async function JobCostingPage({ params }: { params: Promise<{ id:
           </div>
         )}
         <CostTable title="Selling (Revenue)" side="SELLING" jobId={job.id} rows={selling} totalIdr={sumAll(selling)} tone="success" chargeOptions={chargeOptions} />
-        <CostTable title="Buying (Cost)" side="BUYING" jobId={job.id} rows={buying} totalIdr={sumAll(buying)} tone="destructive" recordable={canBill} chargeOptions={chargeOptions} />
+        <CostTable title="Buying (Cost)" side="BUYING" jobId={job.id} rows={buying} totalIdr={sumAll(buying)} tone="destructive" recordable={canFleetCost} chargeOptions={chargeOptions} />
         <Card>
           <CardContent className="flex flex-wrap items-center justify-between gap-4 p-5">
             <div><p className="text-sm text-muted-foreground">Pendapatan</p><p className="text-lg font-semibold tabular-nums">{formatIDR(revenue)}</p></div>

@@ -3,14 +3,14 @@
 import { revalidatePath } from "next/cache";
 import type { AccountType } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { assertCan } from "@/lib/auth-helpers";
+import { assertPerm } from "@/lib/auth-helpers";
 import { writeAudit } from "@/lib/audit";
 
 const TYPES: AccountType[] = ["ASSET", "LIABILITY", "EQUITY", "REVENUE", "EXPENSE"];
 
 /** Tambah akun COA. Saldo normal mengikuti tipe akun. */
 export async function createCoaAction(input: { code: string; name: string; type: string; parentId: string }): Promise<{ ok: true } | { ok: false; error: string }> {
-  const user = await assertCan("coa", "write");
+  const user = await assertPerm("coa.create");
   const code = input.code.trim();
   const name = input.name.trim();
   if (!/^\d{3,6}$/.test(code)) return { ok: false, error: "Kode akun harus 3 sampai 6 angka." };

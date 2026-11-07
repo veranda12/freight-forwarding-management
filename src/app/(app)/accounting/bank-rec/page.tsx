@@ -1,10 +1,9 @@
 import Link from "next/link";
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm, hasPerm } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
 import { getBankRecon } from "@/lib/bank-rec";
 import { listCashAccounts } from "@/lib/cash-accounts";
 import { formatDate, formatMoney } from "@/lib/format";
-import { can } from "@/lib/rbac";
 import { getStatementView } from "@/lib/bank-statement";
 import { PageHeader } from "@/components/page-header";
 import { StatStrip } from "@/components/stat-strip";
@@ -19,7 +18,8 @@ export const dynamic = "force-dynamic";
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
 
 export default async function BankRecPage({ searchParams }: { searchParams: Promise<{ account?: string; asof?: string; statement?: string }> }) {
-  const user = await requireCan("accounting", "read");
+  const user = await requirePerm("bankRec.view");
+  const canManage = hasPerm(user, "bankRec.manage");
   const sp = await searchParams;
   const today = new Date().toISOString().slice(0, 10);
   const accounts = (await listCashAccounts(prisma)).map((a) => ({ code: a.coaCode, name: `${a.label}${a.isActive ? "" : " (nonaktif)"}` }));
@@ -75,14 +75,14 @@ export default async function BankRecPage({ searchParams }: { searchParams: Prom
           : s.matched
             ? <Badge variant="outline" className="border-success/40 text-success">Cocok (selisih 0)</Badge>
             : <Badge variant="outline" className="border-destructive/40 text-destructive">Selisih {money(s.difference)}</Badge>}
-        <SaveRecon accountCode={code} asOf={asOf} statementBalance={statement} difference={s.difference} />
-        <ReconBulk ids={unreconciledIds} allChecked={allChecked} />
+        {canManage && <SaveRecon accountCode={code} asOf={asOf} statementBalance={statement} difference={s.difference} />}
+        {canManage && <ReconBulk ids={unreconciledIds} allChecked={allChecked} />}
       </div>
 
       {stmt && rec.bankAccountId && (
         <StatementPanel
           bankAccountId={rec.bankAccountId} currency={cur} lines={stmt.lines} candidates={stmt.candidates}
-          canWrite={can(user.role, "accounting", "write")} statementBalance={stmt.statementBalance} applyHref={applyHref}
+          canWrite={canManage} statementBalance={stmt.statementBalance} applyHref={applyHref}
         />
       )}
 
@@ -100,7 +100,7 @@ export default async function BankRecPage({ searchParams }: { searchParams: Prom
               <TableBody>
                 {rec.rows.map((r) => (
                   <TableRow key={r.id} className={r.reconciled ? "" : "bg-warning/5"}>
-                    <TableCell><ReconCheckbox id={r.id} checked={r.reconciled} /></TableCell>
+                    <TableCell>{canManage ? <ReconCheckbox id={r.id} checked={r.reconciled} /> : r.reconciled ? "✓" : ""}</TableCell>
                     <TableCell>{formatDate(r.date)}</TableCell>
                     <TableCell className="text-muted-foreground">{r.number}</TableCell>
                     <TableCell className="max-w-[28rem] truncate">{r.description}{r.matchedBy && <Badge variant="outline" className="ml-2 text-[10px]">dari koran</Badge>}</TableCell>

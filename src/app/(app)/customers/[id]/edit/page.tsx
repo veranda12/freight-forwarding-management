@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm } from "@/lib/auth-helpers";
+import { customerScope } from "@/lib/data-scope";
+import { salesPicOptions } from "../../sales-options";
 import { prisma } from "@/lib/prisma";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
@@ -11,10 +13,10 @@ export const dynamic = "force-dynamic";
 
 export default async function EditCustomerPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  await requireCan("customers", "write", { redirectTo: `/customers/${id}` });
+  const user = await requirePerm("customers.edit", { redirectTo: `/customers/${id}` });
   const [c, sales] = await Promise.all([
-    prisma.customer.findUnique({ where: { id } }),
-    prisma.user.findMany({ where: { role: { in: ["SALES", "ADMIN"] }, isActive: true }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
+    prisma.customer.findFirst({ where: { id, ...customerScope(user) } }),
+    salesPicOptions(),
   ]);
   if (!c) notFound();
 

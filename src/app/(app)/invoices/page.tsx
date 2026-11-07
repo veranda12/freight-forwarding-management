@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Plus } from "lucide-react";
-import { requireCan } from "@/lib/auth-helpers";
-import { can } from "@/lib/rbac";
+import { requirePerm, hasPerm } from "@/lib/auth-helpers";
+import { invoiceScope } from "@/lib/data-scope";
 import { Button } from "@/components/ui/button";
 import { prisma } from "@/lib/prisma";
 import { formatIDR } from "@/lib/format";
@@ -14,8 +14,9 @@ export const dynamic = "force-dynamic";
 const JOB_REF = { number: true, hblNo: true, mblNo: true, hawbNo: true, mawbNo: true } as const;
 
 export default async function InvoicesPage() {
-  const user = await requireCan("invoices", "read");
+  const user = await requirePerm("invoices.view");
   const invoices = await prisma.invoice.findMany({
+    where: invoiceScope(user),
     orderBy: { date: "desc" },
     include: {
       customer: { select: { name: true } }, domesticShipment: { select: { number: true } },
@@ -42,7 +43,7 @@ export default async function InvoicesPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="Invoice (AR)" description={`${rows.length} invoice`}>
-        {can(user.role, "invoices", "write") && <Button asChild><Link href="/invoices/new"><Plus /> Buat Invoice</Link></Button>}
+        {hasPerm(user, "invoices.create") && <Button asChild><Link href="/invoices/new"><Plus /> Buat Invoice</Link></Button>}
       </PageHeader>
       <StatStrip items={[
         { label: "Total invoice", value: rows.length },
@@ -50,7 +51,7 @@ export default async function InvoicesPage() {
         { label: "Overdue", value: formatIDR(overdue), tone: "destructive" },
         { label: "Lunas", value: formatIDR(paid), tone: "success" },
       ]} />
-      <InvoicesTable data={rows} />
+      <InvoicesTable data={rows} canReceipt={hasPerm(user, "invoices.receipt")} />
     </div>
   );
 }

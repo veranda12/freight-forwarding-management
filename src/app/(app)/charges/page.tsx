@@ -1,4 +1,4 @@
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm, hasPerm } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
@@ -12,7 +12,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 export const dynamic = "force-dynamic";
 
 export default async function ChargesPage() {
-  await requireCan("charges", "read");
+  const user = await requirePerm("charges.view");
+  const canCreate = hasPerm(user, "charges.create");
+  const canEdit = hasPerm(user, "charges.edit");
   const charges = await prisma.chargeCode.findMany({
     orderBy: { code: "asc" },
     include: { revenueAccount: true, expenseAccount: true },
@@ -27,7 +29,7 @@ export default async function ChargesPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="Charge Code" description={`${charges.length} kode biaya dengan mapping akun pendapatan & biaya`}>
-        <ChargeNew revenueAccounts={revenueAccounts} expenseAccounts={expenseAccounts} />
+        {canCreate && <ChargeNew revenueAccounts={revenueAccounts} expenseAccounts={expenseAccounts} />}
       </PageHeader>
       <Card>
         <CardContent className="p-0">
@@ -44,7 +46,7 @@ export default async function ChargesPage() {
                   <TableCell className="text-muted-foreground text-xs">{c.revenueAccount ? `${c.revenueAccount.code} ${c.revenueAccount.name}` : "-"}</TableCell>
                   <TableCell className="text-muted-foreground text-xs">{c.expenseAccount ? `${c.expenseAccount.code} ${c.expenseAccount.name}` : "-"}</TableCell>
                   <TableCell className="text-xs text-muted-foreground">{c.invoiceSection ? SECTION_LABELS[c.invoiceSection] : "-"}{c.asReceipt && <Badge variant="outline" className="ml-1.5 text-[10px]">Reimburse</Badge>}</TableCell>
-                  <TableCell className="text-right whitespace-nowrap"><ChargeMapEdit id={c.id} code={c.code} name={c.name} revenueAccountId={c.revenueAccountId} expenseAccountId={c.expenseAccountId} revenueAccounts={revenueAccounts} expenseAccounts={expenseAccounts} /><ChargePrintEdit id={c.id} code={c.code} name={c.name} invoiceSection={c.invoiceSection} asReceipt={c.asReceipt} /></TableCell>
+                  <TableCell className="text-right whitespace-nowrap">{canEdit && <><ChargeMapEdit id={c.id} code={c.code} name={c.name} revenueAccountId={c.revenueAccountId} expenseAccountId={c.expenseAccountId} revenueAccounts={revenueAccounts} expenseAccounts={expenseAccounts} /><ChargePrintEdit id={c.id} code={c.code} name={c.name} invoiceSection={c.invoiceSection} asReceipt={c.asReceipt} /></>}</TableCell>
                 </TableRow>
               ))}
             </TableBody>

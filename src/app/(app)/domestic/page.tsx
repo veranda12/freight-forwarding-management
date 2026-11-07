@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { Calculator, Plus } from "lucide-react";
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm, hasPerm } from "@/lib/auth-helpers";
+import { domesticScope } from "@/lib/data-scope";
 import { prisma } from "@/lib/prisma";
-import { can } from "@/lib/rbac";
 import { formatIDR } from "@/lib/format";
 import { PageHeader } from "@/components/page-header";
 import { StatStrip } from "@/components/stat-strip";
@@ -12,12 +12,13 @@ import { DomesticTable, type SttRow } from "./domestic-table";
 export const dynamic = "force-dynamic";
 
 export default async function DomesticPage() {
-  const user = await requireCan("domestic", "read");
-  const canWrite = can(user.role, "domestic", "write");
-  const canTariff = can(user.role, "domesticTariffs", "read");
-  const canMoney = can(user.role, "costing", "read");
+  const user = await requirePerm("domestic.view");
+  const canWrite = hasPerm(user, "domestic.create");
+  const canTariff = hasPerm(user, "domesticCheck.view");
+  const canMoney = hasPerm(user, "costing.view");
 
   const list = await prisma.domesticShipment.findMany({
+    where: domesticScope(user),
     orderBy: { createdAt: "desc" },
     include: { customer: { select: { name: true } } },
   });

@@ -3,9 +3,9 @@ import { notFound } from "next/navigation";
 import {
   Ship, Plane, Truck, FileCheck, Package, Download, ExternalLink, Calculator,
 } from "lucide-react";
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm, hasPerm } from "@/lib/auth-helpers";
+import { jobScope } from "@/lib/data-scope";
 import { prisma } from "@/lib/prisma";
-import { can } from "@/lib/rbac";
 import { MODE_LABELS, DIRECTION_LABELS, LANE_LABELS } from "@/lib/enums";
 import { formatIDR, formatMoney, formatDate, formatNumber, formatPercent } from "@/lib/format";
 import { PageHeader } from "@/components/page-header";
@@ -58,15 +58,22 @@ const DOC_TYPES = [
 
 export default async function JobDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const user = await requireCan("jobs", "read");
+  const user = await requirePerm("jobs.view");
   const lock = await getJobLock(prisma, id).catch(() => null);
-  const canWrite = can(user.role, "jobs", "write") && !lock;
-  const canDocs = can(user.role, "documents", "read");
-  const canCostingRead = can(user.role, "costing", "read");
-  const canFin = ["ADMIN", "FINANCE", "SALES", "MANAGEMENT"].includes(user.role);
+  // Job terkunci (Closed, atau Delivered dengan invoice): tombol ubah data disembunyikan; server tetap menolak.
+  const canStatus = hasPerm(user, "jobs.status");
+  const canCancel = hasPerm(user, "jobs.cancel");
+  const canClose = hasPerm(user, "jobs.close");
+  const canReopen = hasPerm(user, "jobs.reopen");
+  const canMilestone = hasPerm(user, "jobs.milestone") && !lock;
+  const canClearance = hasPerm(user, "jobs.clearance") && !lock;
+  const canBl = hasPerm(user, "jobs.bl") && !lock;
+  const canGenerateDocs = hasPerm(user, "documents.generate");
+  const canCostingRead = hasPerm(user, "costing.view");
+  const canFin = hasPerm(user, "jobs.viewFinancials");
 
-  const job = await prisma.job.findUnique({
-    where: { id },
+  const job = await prisma.job.findFirst({
+    where: { id, ...jobScope(user) },
     include: {
       customer: true,
       warehouse: true,
@@ -87,9 +94,9 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
   const originCode = job.pol?.unlocode ?? job.originAirport?.iata ?? "-";
   const destCode = job.pod?.unlocode ?? job.destAirport?.iata ?? "-";
 
-  const canContainers = can(user.role, "containers", "write") && !lock;
+  const canContainers = hasPerm(user, "jobs.containers") && !lock;
   const containerTypes = await prisma.containerType.findMany({ where: { isActive: true }, orderBy: { code: "asc" }, select: { id: true, code: true, name: true } });
-  const warehouses = canWrite || canContainers
+  const warehouses = canClearance || canContainers
     ? (await prisma.warehouse.findMany({ where: { customerId: job.customerId, isActive: true }, orderBy: { name: "asc" } }))
         .map((w) => ({ id: w.id, name: w.name, address: w.address, city: w.city, distanceKm: w.distanceKm == null ? null : Number(w.distanceKm) }))
     : [];
@@ -123,7 +130,12 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
         >
           <JobStatusBadge status={job.status} />
           {canCostingRead && <Button asChild variant="outline"><Link href={`/costing/${job.id}`}><Calculator /> Buka Costing</Link></Button>}
-          {(canWrite || user.role === "ADMIN") && <StatusControl jobId={job.id} current={job.status} isAdmin={user.role === "ADMIN"} locked={!!lock} />}
+          {((canStatus && (!lock || canClose)) || canCancel || canReopen) && (
+            <StatusControl
+              jobId={job.id} current={job.status} locked={!!lock}
+              canStatus={canStatus && (!lock || canClose)} canCancel={canCancel && !lock} canClose={canClose} canReopen={canReopen}
+            />
+          )}
         </PageHeader>
       </div>
 
@@ -186,7 +198,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
             <Card>
               <CardHeader className="flex-row items-center justify-between">
                 <CardTitle className="text-base">Jadwal & Dokumen</CardTitle>
-                {canWrite && <BlForm jobId={job.id} isAir={isAir} master={isAir ? job.mawbNo : job.mblNo} house={isAir ? job.hawbNo : job.hblNo} />}
+                {canBl && <BlForm jobId={job.id} isAir={isAir} master={isAir ? job.mawbNo : job.mblNo} house={isAir ? job.hawbNo : job.hblNo} />}
               </CardHeader>
               <CardContent>
                 <dl className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3">
@@ -219,7 +231,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
             <Card className="lg:col-span-2">
               <CardHeader className="flex-row items-center justify-between">
                 <CardTitle className="text-base">Clearance & Delivery</CardTitle>
-                {canWrite && (
+                {canClearance && (
                   <ClearanceForm jobId={job.id} warehouses={warehouses} initial={{
                     customsLane: job.customsLane, warehouseId: job.warehouseId, deliveryAddress: job.deliveryAddress,
                     distanceKm: job.distanceKm == null ? null : Number(job.distanceKm),
@@ -318,7 +330,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
           <Card>
             <CardHeader><CardTitle className="text-base">Timeline Milestone</CardTitle></CardHeader>
             <CardContent>
-              <MilestoneTimeline jobId={job.id} items={milestoneItems} canWrite={canWrite} />
+              <MilestoneTimeline jobId={job.id} items={milestoneItems} canWrite={canMilestone} />
             </CardContent>
           </Card>
         </TabsContent>
@@ -329,7 +341,8 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
             <Card>
               <CardHeader><CardTitle className="text-base">Generate Dokumen PDF</CardTitle></CardHeader>
               <CardContent className="space-y-2">
-                {DOC_TYPES.map((d) => (
+                {!canGenerateDocs && <p className="text-sm text-muted-foreground">Anda tidak punya izin mencetak dokumen.</p>}
+                {canGenerateDocs && DOC_TYPES.map((d) => (
                   <a key={d.kind} href={`/api/documents/${d.kind.toLowerCase()}/${job.id}`} target="_blank" rel="noopener"
                      className="flex items-center justify-between rounded-md border px-3 py-2 text-sm hover:bg-accent">
                     <span className="flex items-center gap-2"><FileCheck className="h-4 w-4 text-muted-foreground" />{d.label}</span>
@@ -357,7 +370,6 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
           </div>
         </TabsContent>
       </Tabs>
-      {!canDocs && null}
     </div>
   );
 }

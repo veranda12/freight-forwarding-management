@@ -14,15 +14,6 @@ datasource db {
 // ENUMS
 // ============================================================
 
-enum Role {
-  ADMIN
-  SALES
-  OPERATION
-  DOCUMENTATION
-  FINANCE
-  MANAGEMENT
-}
-
 enum TransportMode {
   SEA_FCL
   SEA_LCL
@@ -74,6 +65,7 @@ enum JobStatus {
 
 enum QuotationStatus {
   DRAFT
+  SUBMITTED
   SENT
   ACCEPTED
   REJECTED
@@ -245,12 +237,27 @@ enum TariffCondition {
 // AUTH (Auth.js v5 + credentials)
 // ============================================================
 
+/// Role kustom. Role sistem (isSystem) izinnya dihitung dari kode (src/lib/permissions.ts), bukan dari kolom permissions.
+model AppRole {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  name        String
+  description String?  @db.Text
+  isSystem    Boolean  @default(false)
+  permissions Json
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users User[]
+}
+
 model User {
   id            String    @id @default(cuid())
   name          String
   email         String    @unique
   passwordHash  String
-  role          Role      @default(OPERATION)
+  roleId        String
+  appRole       AppRole   @relation(fields: [roleId], references: [id])
   phone         String?
   isActive      Boolean   @default(true)
   image         String?
@@ -386,8 +393,10 @@ model Customer {
   invoices          Invoice[]
   payments          Payment[]
   warehouses        Warehouse[]
+  createdById   String? // pembuat (untuk batas data & maker-checker); data lama null
 
   @@index([name])
+  @@index([createdById])
 }
 
 model CustomerContact {
@@ -679,8 +688,15 @@ model Quotation {
 
   lines QuotationLine[]
   job   Job?
+  submittedById String?
+  submittedAt   DateTime?
+  sentById      String?
+  decidedById   String?
+  returnNote    String?         @db.Text
+  createdById   String? // pembuat (untuk batas data & maker-checker); data lama null
 
   @@index([status])
+  @@index([createdById])
 }
 
 model QuotationLine {
@@ -795,11 +811,13 @@ model Job {
   bills      VendorBill[]
   billLines  BillLine[]
   vouchers   Voucher[]
+  createdById   String? // pembuat (untuk batas data & maker-checker); data lama null
 
   @@index([status])
   @@index([mode])
   @@index([openedAt])
   @@index([customerId])
+  @@index([createdById])
 }
 
 model JobContainer {
@@ -946,6 +964,7 @@ model Voucher {
 
   @@index([jobId])
   @@index([status])
+  @@index([createdById])
 }
 
 // ============================================================
@@ -983,10 +1002,12 @@ model Invoice {
   lines       InvoiceLine[]
   allocations PaymentAllocation[]
   costingLines CostingLine[] @relation("InvoiceCostings")
+  createdById   String? // pembuat (untuk batas data & maker-checker); data lama null
 
   @@index([status])
   @@index([customerId])
   @@index([dueDate])
+  @@index([createdById])
 }
 
 model InvoiceLine {
@@ -1043,10 +1064,12 @@ model VendorBill {
 
   lines       BillLine[]
   allocations PaymentAllocation[]
+  createdById   String? // pembuat (untuk batas data & maker-checker); data lama null
 
   @@index([status])
   @@index([vendorId])
   @@index([dueDate])
+  @@index([createdById])
 }
 
 model BillLine {
@@ -1082,6 +1105,9 @@ model Note {
   status         NoteStatus     @default(ISSUED)
   journalEntryId String?
   createdAt      DateTime       @default(now())
+  createdById   String? // pembuat (untuk batas data & maker-checker); data lama null
+
+  @@index([createdById])
 }
 
 model Payment {
@@ -1106,9 +1132,11 @@ model Payment {
   bankAccount    BankAccount?     @relation(fields: [bankAccountId], references: [id])
 
   allocations PaymentAllocation[]
+  createdById   String? // pembuat (untuk batas data & maker-checker); data lama null
 
   @@index([direction])
   @@index([date])
+  @@index([createdById])
 }
 
 model PaymentAllocation {

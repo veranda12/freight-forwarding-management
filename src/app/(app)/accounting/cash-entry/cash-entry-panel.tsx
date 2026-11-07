@@ -35,9 +35,9 @@ const newRow = (amount = ""): Row => ({ key: ++seq, counterAccountId: "", amount
 const LABEL = { IN: "Jurnal Penerimaan", OUT: "Jurnal Pengeluaran" } as const;
 const dateKeyOf = (iso: string) => new Date(new Date(iso).getTime() + 7 * 3600 * 1000).toISOString().slice(0, 10);
 
-export function CashEntryPanel({ cashAccounts, defaultCashId, inAccounts, outAccounts, entries, today, canWrite, prefill, rates, lockKey, editId }: {
+export function CashEntryPanel({ cashAccounts, defaultCashId, inAccounts, outAccounts, entries, today, canCreate, canCancel, canEdit, prefill, rates, lockKey, editId }: {
   cashAccounts: CashOpt[]; defaultCashId: string | null; inAccounts: Opt[]; outAccounts: Opt[]; entries: Entry[];
-  today: string; canWrite: boolean; prefill?: CashPrefill; rates: Record<string, number>; lockKey: string | null; editId?: string;
+  today: string; canCreate: boolean; canCancel: boolean; canEdit: boolean; prefill?: CashPrefill; rates: Record<string, number>; lockKey: string | null; editId?: string;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -45,8 +45,8 @@ export function CashEntryPanel({ cashAccounts, defaultCashId, inAccounts, outAcc
   const editing0 = entries.find((e) => e.id === editId) ?? null;
   const fromEntry = (e: Entry) => ({ direction: e.direction, bankAccountId: e.bankAccountId, rate: e.rate ? String(e.rate) : "", dateKey: dateKeyOf(e.date), description: e.note, reference: e.reference });
   const rowsOf = (e: Entry): Row[] => e.rows.map((r) => ({ key: ++seq, counterAccountId: r.counterAccountId, amount: String(r.amount), description: r.description }));
-  const [editing, setEditing] = useState<Entry | null>(canWrite ? editing0 : null);
-  const [open, setOpen] = useState((!!prefill || !!editing0) && canWrite);
+  const [editing, setEditing] = useState<Entry | null>(canEdit ? editing0 : null);
+  const [open, setOpen] = useState((!!prefill && canCreate) || (!!editing0 && canEdit));
   const [f, setF] = useState(editing0 ? fromEntry(editing0) : prefill ? { ...blank, direction: prefill.direction, bankAccountId: prefill.bankAccountId, dateKey: prefill.dateKey, description: prefill.description } : blank);
   const [rows, setRows] = useState<Row[]>(() => (editing0 ? rowsOf(editing0) : [newRow(prefill?.amount ?? "")]));
   const set = (p: Partial<typeof f>) => setF((x) => ({ ...x, ...p }));
@@ -99,9 +99,9 @@ export function CashEntryPanel({ cashAccounts, defaultCashId, inAccounts, outAcc
 
   return (
     <div className="space-y-4">
-      {canWrite && (
+      {(canCreate || canEdit) && (
         <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (v && !prefill) startNew(); if (!v) setEditing(null); }}>
-          <DialogTrigger asChild><Button><Plus /> Catat transaksi</Button></DialogTrigger>
+          {canCreate && <DialogTrigger asChild><Button><Plus /> Catat transaksi</Button></DialogTrigger>}
           <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
             <DialogHeader>
               <DialogTitle>{editing ? `Edit ${editing.number}` : LABEL[f.direction]}</DialogTitle>
@@ -170,7 +170,7 @@ export function CashEntryPanel({ cashAccounts, defaultCashId, inAccounts, outAcc
                 <TableHead>Tanggal</TableHead><TableHead>No. Bukti</TableHead><TableHead>Kas / Rekening</TableHead>
                 <TableHead>Akun lawan</TableHead><TableHead>Keterangan</TableHead>
                 <TableHead className="text-right">Masuk</TableHead><TableHead className="text-right">Keluar</TableHead>
-                <TableHead>Status</TableHead>{canWrite && <TableHead className="text-right">Aksi</TableHead>}
+                <TableHead>Status</TableHead><TableHead className="text-right">Aksi</TableHead>
               </TableRow></TableHeader>
               <TableBody>
                 {entries.map((e) => {
@@ -190,12 +190,12 @@ export function CashEntryPanel({ cashAccounts, defaultCashId, inAccounts, outAcc
                       <TableCell className="text-right tabular-nums">{e.direction === "IN" ? money : "-"}</TableCell>
                       <TableCell className="text-right tabular-nums">{e.direction === "OUT" ? money : "-"}</TableCell>
                       <TableCell>{e.reversed ? <Badge variant="outline">Dibatalkan</Badge> : <Badge variant="outline" className="border-success/50 text-success">Berlaku</Badge>}</TableCell>
-                      {canWrite && (
+                      {(
                         <TableCell className="text-right">
                           <span className="inline-flex gap-0.5">
                             <Button asChild size="icon" variant="ghost" className="h-8 w-8"><a href={`/api/accounting/journals/${e.id}/pdf`} target="_blank" rel="noopener" aria-label="Print"><Printer /></a></Button>
-                            {!e.reversed && !e.reconciled && !isLocked(e) && <Button size="icon" variant="ghost" className="h-8 w-8" aria-label="Edit" onClick={() => startEdit(e)}><Pencil /></Button>}
-                            {!e.reversed && <Button size="sm" variant="ghost" className="text-destructive" onClick={() => { setCancel(e); setReason(""); }}><Ban /> Batalkan</Button>}
+                            {canEdit && !e.reversed && !e.reconciled && !isLocked(e) && <Button size="icon" variant="ghost" className="h-8 w-8" aria-label="Edit" onClick={() => startEdit(e)}><Pencil /></Button>}
+                            {canCancel && !e.reversed && <Button size="sm" variant="ghost" className="text-destructive" onClick={() => { setCancel(e); setReason(""); }}><Ban /> Batalkan</Button>}
                           </span>
                         </TableCell>
                       )}

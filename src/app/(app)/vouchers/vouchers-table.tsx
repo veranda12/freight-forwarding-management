@@ -24,8 +24,8 @@ export type VoucherRow = {
 
 const STATUS: Record<VoucherStatus, string> = { ISSUED: "Belum dibayar", PAID: "Dibayar", CANCELLED: "Batal" };
 
-export function VouchersTable({ data, canWrite, cashAccounts, defaultCashId, today }: {
-  data: VoucherRow[]; canWrite: boolean; cashAccounts: { id: string; label: string }[]; defaultCashId: string | null; today: string;
+export function VouchersTable({ data, canPay, canCancel, canPrint, cashAccounts, defaultCashId, today }: {
+  data: VoucherRow[]; canPay: boolean; canCancel: boolean; canPrint: boolean; cashAccounts: { id: string; label: string }[]; defaultCashId: string | null; today: string;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -79,9 +79,9 @@ export function VouchersTable({ data, canWrite, cashAccounts, defaultCashId, tod
         const r = row.original;
         return (
           <div className="flex justify-end gap-1">
-            <Button asChild size="sm" variant="ghost"><a href={`/api/vouchers/${r.id}/pdf`} target="_blank" rel="noopener"><Printer /> Print</a></Button>
-            {canWrite && r.status === "ISSUED" && <Button size="sm" variant="outline" onClick={() => setPay(r)}><Wallet /> Bayar</Button>}
-            {canWrite && r.status === "ISSUED" && <Button size="sm" variant="ghost" className="text-destructive" onClick={() => { setCancel(r); setReason(""); }}><Ban /> Batalkan</Button>}
+            {canPrint && <Button asChild size="sm" variant="ghost"><a href={`/api/vouchers/${r.id}/pdf`} target="_blank" rel="noopener"><Printer /> Print</a></Button>}
+            {canPay && r.status === "ISSUED" && <Button size="sm" variant="outline" onClick={() => setPay(r)}><Wallet /> Bayar</Button>}
+            {canCancel && r.status === "ISSUED" && <Button size="sm" variant="ghost" className="text-destructive" onClick={() => { setCancel(r); setReason(""); }}><Ban /> Batalkan</Button>}
           </div>
         );
       },

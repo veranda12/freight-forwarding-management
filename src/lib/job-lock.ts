@@ -63,6 +63,7 @@ export async function closeJobsOfInvoice(db: Db, invoiceId: string): Promise<voi
 /** Pencarian job berdasarkan nomor job atau nomor B/L dan AWB. */
 export function jobSearchWhere(q: string): Prisma.JobWhereInput {
   const contains = q.trim();
-  const m = { contains, mode: "insensitive" as const };
+  // Tanpa `mode: "insensitive"`: collation MariaDB (utf8mb4_unicode_ci) sudah tidak membedakan huruf besar/kecil.
+  const m = { contains };
   return { OR: [{ number: m }, { mblNo: m }, { hblNo: m }, { mawbNo: m }, { hawbNo: m }] };
 }

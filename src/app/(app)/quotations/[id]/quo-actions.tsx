@@ -1,23 +1,27 @@
 "use client";
 
-import { useTransition } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Send, Check, X, Loader2, ArrowRightLeft } from "lucide-react";
-import type { QuotationStatus } from "@prisma/client";
+import { Send, Check, X, Loader2, ArrowRightLeft, Undo2, FileUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { setQuotationStatus, convertQuotationToJob } from "../actions";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
+import { submitQuotation, returnQuotation, sendQuotation, decideQuotation, convertQuotationToJob } from "../actions";
 
-export function QuoActions({ id, status, hasJob, canWrite, canConvert }: {
-  id: string; status: QuotationStatus; hasJob: boolean; canWrite: boolean; canConvert: boolean;
-}) {
+export type QuoAllowed = { submit: boolean; return: boolean; send: boolean; decide: boolean; convert: boolean };
+
+export function QuoActions({ id, allowed, hint }: { id: string; allowed: QuoAllowed; hint?: string | null }) {
   const [pending, start] = useTransition();
+  const [returning, setReturning] = useState(false);
+  const [note, setNote] = useState("");
   const router = useRouter();
 
-  const change = (s: QuotationStatus, msg: string) =>
+  const run = (fn: () => Promise<{ ok: boolean; error?: string }>, msg: string) =>
     start(async () => {
-      try { await setQuotationStatus(id, s); toast.success(msg); router.refresh(); }
-      catch { toast.error("Gagal."); }
+      const res = await fn();
+      if (res.ok) { toast.success(msg); setReturning(false); setNote(""); router.refresh(); }
+      else toast.error(res.error ?? "Gagal.");
     });
 
   const convert = () =>
@@ -34,17 +38,27 @@ export function QuoActions({ id, status, hasJob, canWrite, canConvert }: {
   return (
     <div className="flex flex-wrap items-center gap-2">
       {pending && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
-      {canWrite && status === "DRAFT" && <Button variant="outline" onClick={() => change("SENT", "Quotation dikirim.")}><Send /> Kirim</Button>}
-      {canWrite && status === "SENT" && <>
-        <Button variant="outline" className="text-success" onClick={() => change("ACCEPTED", "Quotation diterima.")}><Check /> Terima</Button>
-        <Button variant="outline" className="text-destructive" onClick={() => change("REJECTED", "Quotation ditolak.")}><X /> Tolak</Button>
+      {allowed.submit && <Button variant="outline" disabled={pending} onClick={() => run(() => submitQuotation(id), "Quotation diajukan.")}><FileUp /> Ajukan</Button>}
+      {allowed.return && <Button variant="outline" disabled={pending} onClick={() => setReturning(true)}><Undo2 /> Kembalikan</Button>}
+      {allowed.send && <Button variant="outline" disabled={pending} onClick={() => run(() => sendQuotation(id), "Quotation dikirim ke customer.")}><Send /> Kirim</Button>}
+      {allowed.decide && <>
+        <Button variant="outline" className="text-success" disabled={pending} onClick={() => run(() => decideQuotation(id, "ACCEPTED"), "Quotation diterima.")}><Check /> Terima</Button>
+        <Button variant="outline" className="text-destructive" disabled={pending} onClick={() => run(() => decideQuotation(id, "REJECTED"), "Quotation ditolak.")}><X /> Tolak</Button>
       </>}
-      {canConvert && status === "ACCEPTED" && !hasJob && (
-        <Button onClick={convert} disabled={pending}><ArrowRightLeft /> Convert ke Job</Button>
-      )}
-      {status === "SENT" && !hasJob && (
-        <span className="text-sm text-muted-foreground">Terima quotation dulu untuk mengonversi ke job.</span>
-      )}
+      {allowed.convert && <Button onClick={convert} disabled={pending}><ArrowRightLeft /> Convert ke Job</Button>}
+      {hint && <span className="text-sm text-muted-foreground">{hint}</span>}
+
+      <Dialog open={returning} onOpenChange={setReturning}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Kembalikan quotation ke Draft</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">Tuliskan apa yang perlu direvisi. Catatan ini tampil untuk pembuat quotation.</p>
+          <Textarea aria-label="Catatan revisi" value={note} onChange={(e) => setNote(e.target.value)} rows={4} placeholder="Mis. harga ocean freight perlu dicek ulang ke shipping line." />
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setReturning(false)}>Batal</Button>
+            <Button disabled={pending || note.trim().length < 3} onClick={() => run(() => returnQuotation(id, note), "Quotation dikembalikan ke Draft.")}>Kembalikan</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

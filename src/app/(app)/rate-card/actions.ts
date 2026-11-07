@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { assertCan } from "@/lib/auth-helpers";
+import { assertPerm } from "@/lib/auth-helpers";
 import { writeAudit } from "@/lib/audit";
 import { errorMessage } from "@/lib/action-error";
 
@@ -28,7 +28,7 @@ function parse(input: RateCardInput) {
 }
 
 export async function createRateCardItemAction(input: RateCardInput): Promise<Result> {
-  const user = await assertCan("charges", "write");
+  const user = await assertPerm("rateCard.edit");
   try {
     const r = await prisma.rateCardItem.create({ data: parse(input), include: { chargeCode: true } });
     await writeAudit({ entity: "RateCardItem", entityId: r.id, action: "CREATE", summary: `${r.chargeCode.code} ${r.price}`, userId: user.id });
@@ -40,7 +40,7 @@ export async function createRateCardItemAction(input: RateCardInput): Promise<Re
 }
 
 export async function updateRateCardItemAction(id: string, input: RateCardInput): Promise<Result> {
-  const user = await assertCan("charges", "write");
+  const user = await assertPerm("rateCard.edit");
   try {
     const r = await prisma.rateCardItem.update({ where: { id }, data: parse(input), include: { chargeCode: true } });
     await writeAudit({ entity: "RateCardItem", entityId: id, action: "UPDATE", summary: `${r.chargeCode.code} ${r.price}`, userId: user.id });

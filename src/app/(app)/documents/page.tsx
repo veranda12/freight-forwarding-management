@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { FileText, Download } from "lucide-react";
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm, hasPerm } from "@/lib/auth-helpers";
+import { jobScope } from "@/lib/data-scope";
 import { prisma } from "@/lib/prisma";
 import { MODE_SHORT } from "@/lib/enums";
 import { formatDate } from "@/lib/format";
@@ -15,9 +16,10 @@ const DOCS_SEA = [["hbl", "HBL"], ["mbl", "MBL"], ["si", "SI"], ["arrival", "Arr
 const DOCS_AIR = [["hawb", "HAWB"], ["mawb", "MAWB"], ["arrival", "Arrival"]];
 
 export default async function DocumentsPage() {
-  await requireCan("documents", "read");
+  const user = await requirePerm("documents.view");
+  const canGenerate = hasPerm(user, "documents.generate");
   const jobs = await prisma.job.findMany({
-    where: { status: { notIn: ["DRAFT", "CANCELLED"] } },
+    where: { status: { notIn: ["DRAFT", "CANCELLED"] }, ...jobScope(user) },
     orderBy: { openedAt: "desc" }, take: 60,
     include: { customer: { select: { name: true } } },
   });
@@ -42,7 +44,8 @@ export default async function DocumentsPage() {
                     <TableCell>{formatDate(j.openedAt)}</TableCell>
                     <TableCell>
                       <div className="flex flex-wrap gap-1.5">
-                        {docs.map(([kind, label]) => (
+                        {!canGenerate && <span className="text-xs text-muted-foreground">-</span>}
+                        {canGenerate && docs.map(([kind, label]) => (
                           <a key={kind} href={`/api/documents/${kind}/${j.id}`} target="_blank" rel="noopener"
                              className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs hover:bg-accent">
                             <FileText className="h-3 w-3" />{label}

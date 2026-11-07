@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { can } from "@/lib/rbac";
+import { getCurrentUser, hasPerm } from "@/lib/auth-helpers";
 import { parseJournalFilter, SOURCE_LABEL } from "@/lib/journal-filter";
 import { searchJournals } from "@/lib/journal-search";
 
@@ -13,10 +12,9 @@ const csvCell = (v: string | number | null) => {
 };
 
 export async function GET(req: NextRequest) {
-  const session = await auth();
-  if (!session?.user || !can((session.user as any).role, "accounting", "read")) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  }
+  const user = await getCurrentUser();
+  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  if (!hasPerm(user, "accounting.view")) return NextResponse.json({ error: "forbidden" }, { status: 403 });
   const filter = parseJournalFilter(req.nextUrl.searchParams);
   const asCsv = req.nextUrl.searchParams.get("format") === "csv";
   const result = await searchJournals(prisma, filter, { all: asCsv });

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm, hasPerm } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
 import { computeRevaluation, latestRate } from "@/lib/fx";
 import { formatIDR, formatDate } from "@/lib/format";
@@ -15,7 +15,8 @@ export const dynamic = "force-dynamic";
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
 
 export default async function FxPage({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
-  await requireCan("accounting", "read");
+  const user = await requirePerm("fx.view");
+  const canRevalue = hasPerm(user, "fx.revalue");
   const sp = await searchParams;
   const today = new Date().toISOString().slice(0, 10);
   const asOf = ISO.test(sp.asof ?? "") ? sp.asof! : today;
@@ -51,7 +52,7 @@ export default async function FxPage({ searchParams }: { searchParams: Promise<R
             <button type="submit" className="h-9 rounded-md border px-3 text-sm hover:bg-muted">Hitung ulang</button>
           </form>
           <div className="flex items-center gap-3">
-            <RevalueButton asOf={asOf} rates={rates} disabled={items.length === 0} />
+            {canRevalue && <RevalueButton asOf={asOf} rates={rates} disabled={items.length === 0} />}
             <span className="text-xs text-muted-foreground">Setiap posting hanya membukukan selisih terhadap nilai tercatat terakhir, jadi aman diulang.</span>
           </div>
         </CardContent>

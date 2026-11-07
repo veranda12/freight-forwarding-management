@@ -1,8 +1,7 @@
 import Link from "next/link";
 import { Plus, Pencil } from "lucide-react";
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm, hasPerm } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
-import { can } from "@/lib/rbac";
 import { VENDOR_TYPE_LABELS } from "@/lib/enums";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
@@ -13,8 +12,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 export const dynamic = "force-dynamic";
 
 export default async function VendorsPage() {
-  const user = await requireCan("vendors", "read");
-  const canWrite = can(user.role, "vendors", "write");
+  const user = await requirePerm("vendors.view");
+  const canWrite = hasPerm(user, "vendors.edit");
   const vendors = await prisma.vendor.findMany({ orderBy: [{ type: "asc" }, { name: "asc" }] });
   return (
     <div className="space-y-6">

@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Pencil, Printer } from "lucide-react";
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm } from "@/lib/auth-helpers";
+import { JOURNAL_VIEW_PERMS, canEditJournal, canViewJournal } from "@/lib/journal-access";
 import { prisma } from "@/lib/prisma";
-import { can } from "@/lib/rbac";
 import { formatDate, formatDateTime, formatIDR } from "@/lib/format";
 import { journalEditBlock } from "@/lib/journal";
 import { getLockKey } from "@/lib/period-lock";
@@ -21,7 +21,7 @@ export const dynamic = "force-dynamic";
 
 export default async function JournalDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const user = await requireCan("accounting", "read");
+  const user = await requirePerm(JOURNAL_VIEW_PERMS);
   const e = await prisma.journalEntry.findUnique({
     where: { id },
     include: {
@@ -29,13 +29,13 @@ export default async function JournalDetailPage({ params }: { params: Promise<{ 
       createdBy: { select: { name: true } },
     },
   });
-  if (!e) notFound();
+  if (!e || !canViewJournal(user, e.source)) notFound();
   const [history, lock] = await Promise.all([
     prisma.auditLog.findMany({ where: { entity: "JournalEntry", entityId: id }, include: { user: { select: { name: true } } }, orderBy: { createdAt: "desc" } }),
     getLockKey(prisma),
   ]);
   const manual = e.source === "MANUAL" && e.sourceId === MANUAL_JOURNAL_TAG;
-  const editable = (e.source === "CASH_ENTRY" || manual) && can(user.role, "accounting", "write");
+  const editable = canEditJournal(user, e.source, manual);
   const block = journalEditBlock(e) ?? (lock && jktKey(e.date) <= lock ? `Periode sudah dikunci sampai ${lock}. Koreksi lewat Jurnal Umum.` : null);
   const editHref = e.source === "CASH_ENTRY" ? `/accounting/cash-entry?edit=${e.id}` : `/accounting/manual-journal?edit=${e.id}`;
   const total = e.lines.reduce((s, l) => s + Number(l.debit), 0);

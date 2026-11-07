@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
-import { assertCan } from "@/lib/auth-helpers";
+import { assertPerm } from "@/lib/auth-helpers";
 import { writeAudit } from "@/lib/audit";
 import { createBankAccount, updateBankAccount, type BankAccountInput } from "@/lib/cash-accounts";
 import { errorMessage } from "@/lib/action-error";
@@ -10,7 +10,7 @@ import { errorMessage } from "@/lib/action-error";
 type Result = { ok: true } | { ok: false; error: string };
 
 export async function saveBankAccountAction(id: string | null, input: BankAccountInput): Promise<Result> {
-  const user = await assertCan("accounting", "write");
+  const user = await assertPerm("bankAccounts.edit");
   try {
     if (id) {
       const r = await updateBankAccount(prisma, id, input);

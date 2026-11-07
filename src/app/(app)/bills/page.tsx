@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { Plus } from "lucide-react";
-import { requireCan } from "@/lib/auth-helpers";
+import { hasPerm, requirePerm } from "@/lib/auth-helpers";
+import { billScope, customerScope } from "@/lib/data-scope";
 import { Button } from "@/components/ui/button";
 import { prisma } from "@/lib/prisma";
-import { can } from "@/lib/rbac";
 import { formatIDR } from "@/lib/format";
 import { latestRate } from "@/lib/fx";
 import { jktKey } from "@/lib/accounting-core";
@@ -33,14 +33,14 @@ function filterQuery(f: BillFilter, page: number): string {
 }
 
 export default async function BillsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
-  const user = await requireCan("bills", "read");
+  const user = await requirePerm("bills.view");
   const f = parseBillFilter(await searchParams);
   const today = jktKey(new Date());
   const [data, cash, vendors, customers, currencies] = await Promise.all([
-    loadBillGroups(prisma, f, today),
+    loadBillGroups(prisma, f, today, billScope(user)),
     cashAccountOptions(prisma, "payment"),
     prisma.vendor.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
-    prisma.customer.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
+    prisma.customer.findMany({ where: customerScope(user), orderBy: { name: "asc" }, select: { id: true, name: true } }),
     prisma.vendorBill.findMany({ distinct: ["currency"], select: { currency: true }, orderBy: { currency: "asc" } }),
   ]);
   const { groups, totals, capped } = data;
@@ -56,7 +56,7 @@ export default async function BillsPage({ searchParams }: { searchParams: Promis
   return (
     <div className="space-y-6">
       <PageHeader title="Vendor Bill (AP)" description="Tagihan vendor per job: yang perlu dibayar perusahaan">
-        {can(user.role, "bills", "write") && <Button asChild><Link href="/bills/new"><Plus /> Buat Bill</Link></Button>}
+        {hasPerm(user, "bills.create") && <Button asChild><Link href="/bills/new"><Plus /> Buat Bill</Link></Button>}
       </PageHeader>
 
       <StatStrip items={[
@@ -123,7 +123,7 @@ export default async function BillsPage({ searchParams }: { searchParams: Promis
 
       <BillGroupsTable
         groups={shown} today={today} rates={rates}
-        canPay={can(user.role, "payments", "write")} cashAccounts={cash.options} defaultCashId={cash.defaultId}
+        canPay={hasPerm(user, "bills.pay")} cashAccounts={cash.options} defaultCashId={cash.defaultId}
       />
 
       {pages > 1 && (

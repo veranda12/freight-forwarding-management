@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
@@ -19,7 +19,7 @@ const FIELDS: FieldConfig[] = [
 
 export default async function EditTaxPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  await requireCan("taxes", "write", { redirectTo: "/taxes" });
+  await requirePerm("taxes.edit", { redirectTo: "/taxes" });
   const t = await prisma.taxRate.findUnique({ where: { id } });
   if (!t) notFound();
   return (

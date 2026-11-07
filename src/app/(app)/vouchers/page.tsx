@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { Plus } from "lucide-react";
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm, hasPerm } from "@/lib/auth-helpers";
+import { voucherScope } from "@/lib/data-scope";
 import { prisma } from "@/lib/prisma";
-import { can } from "@/lib/rbac";
 import { formatIDR } from "@/lib/format";
 import { cashAccountOptions } from "@/lib/cash-accounts";
 import { PageHeader } from "@/components/page-header";
@@ -13,10 +13,11 @@ import { VouchersTable, type VoucherRow } from "./vouchers-table";
 export const dynamic = "force-dynamic";
 
 export default async function VouchersPage() {
-  const user = await requireCan("vouchers", "read");
+  const user = await requirePerm("vouchers.view");
   const today = new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10);
   const [vouchers, cash] = await Promise.all([
     prisma.voucher.findMany({
+      where: voucherScope(user),
       orderBy: [{ date: "desc" }, { number: "desc" }],
       include: { job: { select: { number: true, hblNo: true, mblNo: true, hawbNo: true, mawbNo: true } } },
     }),
@@ -28,18 +29,18 @@ export default async function VouchersPage() {
     payee: v.payee, total: Number(v.total), status: v.status, proofNumber: v.proofNumber, journalEntryId: v.journalEntryId,
   }));
   const unpaid = rows.filter((r) => r.status === "ISSUED");
-  const canWrite = can(user.role, "vouchers", "write");
+  const canCreate = hasPerm(user, "vouchers.create");
   return (
     <div className="space-y-6">
       <PageHeader title="Voucher" description="Pengeluaran biaya harian job. Biaya terkunci sejak voucher dibuat">
-        {canWrite && <Button asChild><Link href="/vouchers/new"><Plus /> Buat Voucher</Link></Button>}
+        {canCreate && <Button asChild><Link href="/vouchers/new"><Plus /> Buat Voucher</Link></Button>}
       </PageHeader>
       <StatStrip items={[
         { label: "Total voucher", value: rows.length },
         { label: "Belum dibayar", value: unpaid.length, tone: unpaid.length ? "warning" : undefined },
         { label: "Nilai belum dibayar", value: formatIDR(unpaid.reduce((s, r) => s + r.total, 0)), tone: "warning" },
       ]} />
-      <VouchersTable data={rows} canWrite={canWrite} cashAccounts={cash.options} defaultCashId={cash.defaultId} today={today} />
+      <VouchersTable data={rows} canPay={hasPerm(user, "vouchers.pay")} canCancel={hasPerm(user, "vouchers.cancel")} canPrint={hasPerm(user, "vouchers.print")} cashAccounts={cash.options} defaultCashId={cash.defaultId} today={today} />
     </div>
   );
 }

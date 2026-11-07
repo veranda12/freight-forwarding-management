@@ -3,13 +3,13 @@
 import { revalidatePath } from "next/cache";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { assertCan } from "@/lib/auth-helpers";
+import { assertPerm } from "@/lib/auth-helpers";
 import { writeAudit } from "@/lib/audit";
 import { clean } from "@/lib/crud";
 import { weightRuleSchema } from "@/lib/validators";
 
 export async function saveWeightRule(values: Record<string, unknown>): Promise<{ ok: boolean; error?: string }> {
-  const user = await assertCan("weightRules", "write");
+  const user = await assertPerm("weightRules.edit");
   const parsed = weightRuleSchema.safeParse(values);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message };
   const d = parsed.data;

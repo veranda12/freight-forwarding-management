@@ -100,7 +100,7 @@ export async function createInvoiceCore(db: PrismaClient, lineIds: string[], use
 
     const inv = await tx.invoice.create({
       data: {
-        number, jobId: job.id, customerId: job.customerId, date, dueDate, notes: opts.notes ?? null,
+        number, jobId: job.id, customerId: job.customerId, date, dueDate, notes: opts.notes ?? null, createdById: userId ?? null,
         ...foreignFields(totals.total, cur, rate), amountPaidForeign: new Prisma.Decimal(0),
         subtotal: new Prisma.Decimal(totals.subtotal), taxableBase: new Prisma.Decimal(totals.revenue), ppnRate: new Prisma.Decimal(ppnRate),
         ppnAmount: new Prisma.Decimal(totals.ppn), total: new Prisma.Decimal(totals.total), status: "UNPAID", postedAt: date,
@@ -235,7 +235,7 @@ export async function recordReceiptCore(db: PrismaClient, invoiceId: string, inp
       if (ded.other > 0 && !acc[ACC.EXP_OPS_OTHER]) throw new Error(`Akun beban operasional lain (${ACC.EXP_OPS_OTHER}) belum ada di COA.`);
       const pay = await tx.payment.create({
         data: {
-          number, direction: "RECEIPT", date, customerId: inv.customerId,
+          number, direction: "RECEIPT", date, customerId: inv.customerId, createdById: userId ?? null,
           method: (input.method as any) ?? "TRANSFER", reference: input.reference, currency: IDR, bankAccountId: cash.bankAccountId,
           amount: new Prisma.Decimal(amount),
           allocations: { create: [{ invoiceId: inv.id, amount: new Prisma.Decimal(applied) }] },
@@ -277,7 +277,7 @@ export async function recordReceiptCore(db: PrismaClient, invoiceId: string, inp
 
     const pay = await tx.payment.create({
       data: {
-        number, direction: "RECEIPT", date, customerId: inv.customerId,
+        number, direction: "RECEIPT", date, customerId: inv.customerId, createdById: userId ?? null,
         method: (input.method as any) ?? "TRANSFER", reference: input.reference, bankAccountId: cash.bankAccountId,
         currency: inv.currency, exchangeRate: new Prisma.Decimal(payRate.toFixed(6)),
         amount: new Prisma.Decimal(cashIdr),

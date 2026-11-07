@@ -1,4 +1,4 @@
-import { requireCan } from "@/lib/auth-helpers";
+import { requirePerm } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
 import { jktKey } from "@/lib/accounting-core";
 import { formatIDR } from "@/lib/format";
@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
 
 export default async function KasirPage({ searchParams }: { searchParams: Promise<{ from?: string; to?: string }> }) {
-  await requireCan("accounting", "read");
+  await requirePerm("kasir.view");
   const sp = await searchParams;
   const today = jktKey(new Date());
   const from = ISO.test(sp.from ?? "") ? sp.from! : `${today.slice(0, 7)}-01`;

@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import type { InvoiceSection } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { assertCan } from "@/lib/auth-helpers";
+import { assertPerm } from "@/lib/auth-helpers";
 import { writeAudit } from "@/lib/audit";
 import { createChargeCode, updateChargeMapping } from "@/lib/charge-mapping";
 import { errorMessage } from "@/lib/action-error";
@@ -18,7 +18,7 @@ export type ChargeTaxInput = {
 
 /** Mengatur pemotongan pajak per charge code: PPN, PPh 23, dan PPh 26 beserta tarifnya. */
 export async function saveChargeTaxAction(input: ChargeTaxInput): Promise<{ ok: true } | { ok: false; error: string }> {
-  const user = await assertCan("charges", "write");
+  const user = await assertPerm("charges.edit");
   const rate = Number(input.pph26Rate);
   if (!(rate >= 0 && rate <= 100)) return { ok: false, error: "Tarif PPh 26 harus antara 0 dan 100." };
   const c = await prisma.chargeCode.findUnique({ where: { id: input.id }, select: { code: true, name: true } });
@@ -38,7 +38,7 @@ export async function saveChargeTaxAction(input: ChargeTaxInput): Promise<{ ok: 
 
 /** Mengatur kelompok cetak invoice dan penanda biaya as receipt sebuah charge code. */
 export async function saveChargePrintAction(input: { id: string; invoiceSection: InvoiceSection | null; asReceipt: boolean }): Promise<{ ok: true } | { ok: false; error: string }> {
-  const user = await assertCan("charges", "write");
+  const user = await assertPerm("charges.edit");
   const c = await prisma.chargeCode.update({ where: { id: input.id }, data: { invoiceSection: input.invoiceSection, asReceipt: !!input.asReceipt } });
   await writeAudit({ entity: "ChargeCode", entityId: input.id, action: "UPDATE_PRINT", summary: `${c.code}: seksi ${input.invoiceSection ?? "-"}, as receipt ${input.asReceipt ? "ya" : "tidak"}`, userId: user.id });
   revalidatePath("/charges");
@@ -48,7 +48,7 @@ export async function saveChargePrintAction(input: { id: string; invoiceSection:
 
 /** Mengubah nama dan pemetaan akun pendapatan/biaya sebuah charge code. */
 export async function saveChargeMappingAction(input: { id: string; name: string; revenueAccountId: string; expenseAccountId: string }): Promise<{ ok: true } | { ok: false; error: string }> {
-  const user = await assertCan("charges", "write");
+  const user = await assertPerm("charges.edit");
   try {
     const c = await updateChargeMapping(prisma, input);
     await writeAudit({ entity: "ChargeCode", entityId: input.id, action: "UPDATE_MAPPING", summary: `${c.code} ${c.name}`, userId: user.id });
@@ -64,7 +64,7 @@ export async function createChargeCodeAction(input: {
   code: string; name: string; revenueAccountId: string; expenseAccountId: string;
   defaultTaxable: boolean; isPph23: boolean; isPph26: boolean; pph26Rate: number;
 }): Promise<{ ok: true } | { ok: false; error: string }> {
-  const user = await assertCan("charges", "write");
+  const user = await assertPerm("charges.create");
   try {
     const c = await createChargeCode(prisma, input);
     await writeAudit({ entity: "ChargeCode", entityId: c.id, action: "CREATE", summary: `${c.code} ${c.name}`, userId: user.id });

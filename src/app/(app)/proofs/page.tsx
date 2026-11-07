@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { ExternalLink, Printer, SearchX } from "lucide-react";
-import { requireCan } from "@/lib/auth-helpers";
+import { hasAnyPerm, hasPerm, requirePerm } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
-import { can } from "@/lib/rbac";
 import { formatDate, formatIDR } from "@/lib/format";
+import { proofScopes } from "@/lib/data-scope";
 import {
   PROOF_KIND_LABEL, PROOF_MIN_QUERY, parseProofQuery, proofKindsFor, searchProofs, type ProofHit,
 } from "@/lib/proof-search";
@@ -31,20 +31,31 @@ function openHref(h: ProofHit): string {
   }
 }
 
-/** PDF yang sudah ada. Jenis tanpa PDF sendiri dicetak lewat PDF jurnalnya (perlu izin accounting). */
-function printHref(h: ProofHit, canJournal: boolean): string | null {
-  if (h.kind === "invoice") return `/api/invoices/${h.id}/pdf`;
-  if (h.kind === "voucher") return `/api/vouchers/${h.id}/pdf`;
-  return h.journalEntryId && canJournal ? `/api/accounting/journals/${h.journalEntryId}/pdf` : null;
+type PrintPerms = { invoice: boolean; voucher: boolean; journal: boolean };
+
+/**
+ * PDF yang sudah ada, hanya bila user boleh mencetaknya (izin yang sama dengan route PDF-nya). Jenis tanpa PDF
+ * sendiri dicetak lewat PDF jurnalnya, yang butuh izin lihat semua jurnal (journal-access.ts).
+ */
+function printHref(h: ProofHit, can: PrintPerms): string | null {
+  if (h.kind === "invoice") return can.invoice ? `/api/invoices/${h.id}/pdf` : null;
+  if (h.kind === "voucher") return can.voucher ? `/api/vouchers/${h.id}/pdf` : null;
+  return h.journalEntryId && can.journal ? `/api/accounting/journals/${h.journalEntryId}/pdf` : null;
 }
 
 export default async function ProofsPage({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
-  const user = await requireCan("proofs", "read");
+  const user = await requirePerm("proofs.view");
   const sp = await searchParams;
   const query = parseProofQuery(sp.q);
-  const kinds = proofKindsFor(user.role);
-  const canJournal = can(user.role, "accounting", "read");
-  const results = query ? (await searchProofs(prisma, query, kinds, { limit: LIMIT })).filter((r) => r.hits.length > 0) : [];
+  const kinds = proofKindsFor(user);
+  const canPrint: PrintPerms = {
+    invoice: hasPerm(user, "invoices.print"),
+    voucher: hasPerm(user, "vouchers.print"),
+    journal: hasAnyPerm(user, ["accounting.view", "kasir.view"]),
+  };
+  const results = query
+    ? (await searchProofs(prisma, query, kinds, { limit: LIMIT, scopes: proofScopes(user) })).filter((r) => r.hits.length > 0)
+    : [];
   const total = results.reduce((s, r) => s + r.hits.length, 0);
 
   return (
@@ -88,7 +99,7 @@ export default async function ProofsPage({ searchParams }: { searchParams: Promi
                   </TableHeader>
                   <TableBody>
                     {r.hits.map((h) => {
-                      const print = printHref(h, canJournal);
+                      const print = printHref(h, canPrint);
                       return (
                         <TableRow key={h.id}>
                           <TableCell>

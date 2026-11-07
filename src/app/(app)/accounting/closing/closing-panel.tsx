@@ -61,8 +61,8 @@ export function LockForm({ current }: { current: string | null }) {
   return (
     <div className="flex flex-wrap items-end gap-3">
       <div className="space-y-1.5">
-        <Label>Kunci jurnal sampai tanggal</Label>
-        <Input type="date" value={key} onChange={(e) => setKey(e.target.value)} className="w-[12rem]" />
+        <Label htmlFor="lock-key">Kunci jurnal sampai tanggal</Label>
+        <Input id="lock-key" type="date" value={key} onChange={(e) => setKey(e.target.value)} className="w-[12rem]" />
       </div>
       <Button onClick={() => apply(key || null)} disabled={pending || !key}>{pending ? <Loader2 className="animate-spin" /> : <Lock />} Kunci periode</Button>
       <Button variant="outline" onClick={() => { setKey(""); apply(null); }} disabled={pending || !current}><Unlock /> Buka kunci</Button>

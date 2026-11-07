@@ -15,7 +15,9 @@ import {
 import { JOB_STATUS_FLOW, JOB_STATUS_LABELS } from "@/lib/enums";
 import { reopenJob, updateJobStatus } from "../actions";
 
-export function StatusControl({ jobId, current, isAdmin, locked }: { jobId: string; current: JobStatus; isAdmin: boolean; locked: boolean }) {
+export function StatusControl({ jobId, current, canStatus = true, canCancel = true, canClose = false, canReopen = false, locked = false }: {
+  jobId: string; current: JobStatus; canStatus?: boolean; canCancel?: boolean; canClose?: boolean; canReopen?: boolean; locked?: boolean;
+}) {
   const [pending, start] = useTransition();
   const router = useRouter();
   const [reason, setReason] = useState("");
@@ -42,6 +44,7 @@ export function StatusControl({ jobId, current, isAdmin, locked }: { jobId: stri
   }
 
   if (current === "CLOSED") {
+    if (!canReopen) return null;
     return (
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogTrigger asChild><Button variant="outline"><LockOpen /> Buka Job</Button></DialogTrigger>
@@ -71,15 +74,17 @@ export function StatusControl({ jobId, current, isAdmin, locked }: { jobId: stri
       <DropdownMenuContent align="end" className="w-56">
         <DropdownMenuLabel>Pindahkan status ke</DropdownMenuLabel>
         <DropdownMenuSeparator />
-        {JOB_STATUS_FLOW.filter((s) => s !== "CLOSED" || (isAdmin && locked)).map((s) => (
+        {canStatus && JOB_STATUS_FLOW.filter((s) => s !== "CLOSED" || (canClose && locked)).map((s) => (
           <DropdownMenuItem key={s} disabled={s === current} onSelect={() => set(s)}>
             {JOB_STATUS_LABELS[s]}
           </DropdownMenuItem>
         ))}
-        <DropdownMenuSeparator />
-        <DropdownMenuItem className="text-destructive" onSelect={() => set("CANCELLED")}>
-          Batalkan Job
-        </DropdownMenuItem>
+        {canStatus && canCancel && <DropdownMenuSeparator />}
+        {canCancel && (
+          <DropdownMenuItem className="text-destructive" onSelect={() => set("CANCELLED")}>
+            Batalkan Job
+          </DropdownMenuItem>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );

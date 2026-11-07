@@ -3,7 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { assertCan } from "@/lib/auth-helpers";
+import { assertPerm } from "@/lib/auth-helpers";
+import { jobScope } from "@/lib/data-scope";
+import { assertJobInScope } from "../job-scope";
 import { writeAudit } from "@/lib/audit";
 import { applyRateCard } from "@/lib/rate-card";
 import { getJobLock } from "@/lib/job-lock";
@@ -20,8 +22,8 @@ export type ClearanceInput = {
 
 /** Simpan jalur bea cukai, gudang tujuan, alamat kirim, dan jarak job. */
 export async function updateJobClearanceAction(jobId: string, input: ClearanceInput): Promise<Result> {
-  const user = await assertCan("jobs", "write");
-  const job = await prisma.job.findUnique({ where: { id: jobId }, select: { customerId: true, number: true } });
+  const user = await assertPerm("jobs.clearance");
+  const job = await prisma.job.findFirst({ where: { id: jobId, ...jobScope(user) }, select: { customerId: true, number: true } });
   if (!job) return { ok: false, error: "Job tidak ditemukan." };
   const lock = await getJobLock(prisma, jobId);
   if (lock) return { ok: false, error: lock };
@@ -46,8 +48,9 @@ export async function updateJobClearanceAction(jobId: string, input: ClearanceIn
 
 /** Buat ulang selling charge dari rate card berdasarkan container, jalur, dan jarak job. */
 export async function applyRateCardAction(jobId: string): Promise<Result> {
-  const user = await assertCan("costing", "write");
+  const user = await assertPerm("jobs.clearance");
   try {
+    await assertJobInScope(user, jobId);
     const n = await applyRateCard(prisma, jobId);
     await writeAudit({ entity: "Job", entityId: jobId, action: "APPLY_RATE_CARD", summary: `${n} baris selling dari rate card`, userId: user.id });
     revalidatePath(`/costing/${jobId}`);
