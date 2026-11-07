@@ -416,3 +416,35 @@ QA-07 (baru): voucher dibuat → biaya terkunci → dibayar (`SLG/BK/…`, jurna
 membuka biaya; maker-checker `vouchers.cancelOwn`; edit bukti pengeluaran nomor tetap + Audit Log; job terkunci tidak
 bisa diubah Operation (UI & kiriman paksa server action), Admin menutup lalu membuka kembali; builder invoice role
 terbatas hanya menampilkan job miliknya dan menolak `lineIds` job lain walau dikirim paksa.
+
+### 16.5 Merge part2: Cari Bukti, Vendor Bill per job, kunci periode voucher (2026-11-08)
+
+`feat/slg-penyesuaian-client-part2` (`00cc215`, `f6b1719`, `b6e74eb`; dibangun sesi PostgreSQL atas brief
+`docs/brief-slg-part2-cari-bukti-vendor-bill.md`) di-merge ke `feat/mariadb-slg`. Konflik: `nav.ts`, `bills/page.tsx`,
+`rbac.ts` + `tests/unit/rbac.test.ts` (tetap dihapus).
+
+| Porting | Isi |
+|---|---|
+| Izin | `proofs.view` (bawaan Finance & Sales seperti client; Management lewat izin view); migrasi data `20261108090000_proof_search_permission` |
+| Jenis bukti | per izin modul (`PROOF_KIND_PERMS`): jurnal = akuntansi/Kasir All, setoran pajak = `tax.view`, dokumen lain = `*.view` modulnya |
+| Batas data | hasil invoice/bill/payment/voucher/note memakai `*Scope` modulnya; `loadBillGroups` memakai `billScope`; filter customer memakai `customerScope` |
+| Cetak | tautan PDF invoice/voucher hanya bila `invoices.print`/`vouchers.print`; PDF jurnal bila akuntansi/Kasir All |
+| MariaDB | `ci()` tanpa `mode: "insensitive"`; uji integrasi `DATABASE()` + READ COMMITTED |
+| Kemurnian modul | `proof-search.ts` tidak mengimpor next-auth (izin dibaca dari objek user, scope dikirim halaman) supaya unit test jalan |
+
+Uji tambahan: unit `proof-search`/`bill-groups` (client), integrasi `verify-proof-search` (+2 asersi batas data Sales),
+`verify-bill-groups`, `verify-voucher-lock`; E2E QA-08 (Finance cari nomor & nominal `1.234.567,89`, Buka/Cetak PDF;
+Sales hanya invoice miliknya; Operation/Documentation tanpa menu; bill per job: filter No. Bill, expand detail, tombol
+Bayar, bawaan belum lunas); QA-06 memasukkan `/proofs`.
+
+Catatan uji: halaman streaming sempat merender konten dua kali (template tersembunyi sebelum ditukar dengan fallback
+`loading.tsx`), sehingga locator Playwright bisa menemukan 2 elemen sesaat. Bukan bug tampilan (snapshot
+aksesibilitas hanya 1 elemen); langkah uji menunggu `networkidle` dan memilih elemen yang terlihat.
+
+| Uji | MariaDB 12.3 | MariaDB 10.11 |
+|---|---|---|
+| Migrasi DB berisi data → `migrate diff` | kosong | kosong |
+| Unit | 237/237 | — |
+| Typecheck / lint / build | lulus | — |
+| Integrasi (30 skrip) | 30/30, 481 PASS, 0 FAIL | 30/30, 481 PASS, 0 FAIL |
+| E2E penuh | 80/80 | 80/80 |

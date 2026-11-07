@@ -90,7 +90,8 @@ kirimannya sendiri.
 7. **Login sebagai Finance** (`finance@demo.com`):
    - **Costing**: profitability per job (margin diberi warna; merah bila <10%).
    - **Invoice (AR)**: **Buat Invoice** (pilih job) → subtotal, reimburse tanpa PPN, **PPN 1,1%** (tarif diatur di menu Pajak), nomor `INV/yy/mm/nnn`, jurnal otomatis; invoice belum dibayar bisa **Edit** (nomor tetap).
-   - **Vendor Bill (AP)**: **Buat Bill** (pilih vendor, centang biaya dari satu atau beberapa job), PPN/PPh 23/PPh 26 diisi sesuai tagihan vendor.
+   - **Vendor Bill (AP)**: daftar **per job** (klik baris untuk detail bill, filter job/B/L/no. bill/tanggal/vendor/status/jatuh tempo; bawaan yang belum lunas) → **Buat Bill** (pilih vendor, centang biaya dari satu atau beberapa job), PPN/PPh 23/PPh 26 diisi sesuai tagihan vendor.
+   - **Cari Bukti**: satu kotak cari untuk nomor bukti, invoice, job/B/L, customer/vendor, keterangan, atau nominal (`1.250.000,50`) → Buka/Cetak.
    - **Voucher**: biaya harian job → **Bayar** (nomor bukti `SLG/BK/…` atau `SLG/KK/…`) → **Print**.
    - **Jurnal Penerimaan & Pengeluaran / Jurnal Umum / Kasir All**: bukti bernomor `SLG/BM|BK|KM|KK|JU/…`, bisa diedit dengan nomor tetap dan dicetak.
    - **Receipt & Payment**: penerimaan/pembayaran dengan alokasi.
@@ -99,7 +100,7 @@ kirimannya sendiri.
 
 ## 5. Modul
 
-Master Data (Customer, Vendor, Overseas Agent, Port & Airport, Currency & Kurs, Charge Code, Aturan Berat, Container Type, Commodity, Pajak, COA) · **Ekspor-Impor** (Rate, Quotation, Job, Booking, Dokumentasi PDF, Tracking publik) · **Domestik** (STT antar kota, Cek Tarif, Tarif Domestik) · Finance (Costing per job, AR Invoice, AP Bill, Voucher, Debit/Credit Note, Payment, Jurnal Penerimaan & Pengeluaran, Jurnal Umum, Kasir All, Accounting, Pajak & tarif PPN, Laporan) · Dashboard · Sistem (User, Audit Log, Setting).
+Master Data (Customer, Vendor, Overseas Agent, Port & Airport, Currency & Kurs, Charge Code, Aturan Berat, Container Type, Commodity, Pajak, COA) · **Ekspor-Impor** (Rate, Quotation, Job, Booking, Dokumentasi PDF, Tracking publik) · **Domestik** (STT antar kota, Cek Tarif, Tarif Domestik) · Finance (Cari Bukti lintas modul, Costing per job, AR Invoice, AP Bill per job, Voucher, Debit/Credit Note, Payment, Jurnal Penerimaan & Pengeluaran, Jurnal Umum, Kasir All, Accounting, Pajak & tarif PPN, Laporan) · Dashboard · Sistem (User, Audit Log, Setting).
 
 ## 6. Prinsip Teknis
 
@@ -133,7 +134,7 @@ npm run test:e2e     # end-to-end test (Playwright)
   `ffms_test`), bukan database demo: `DATABASE_URL=mysql://ffms:ffms123@127.0.0.1:3306/ffms_test node node_modules/tsx/dist/cli.mjs tests/integration/verify-mariadb.ts`.
   `verify-mariadb.ts` menguji risiko khusus MariaDB (teks panjang, pencarian, penomoran & setor pajak paralel, zona
   waktu, presisi Decimal, utf8mb4). Laporan uji perpindahan database: `docs/qa/mariadb-migration-report.md`.
-- **E2E (Playwright)** — `npm run test:e2e` (sekali pasang browser: `npx playwright install chromium`): 76 skenario, termasuk alur Domestik & Aturan Berat (`e2e/domestic.spec.ts`), quotation & maker-checker (`e2e/quotation-flow.spec.ts`), Role Management (`e2e/role-management.spec.ts`), dan suite QA `e2e/qa/` (alur per role, keamanan & replay server action, anomali, matriks izin, fitur client SLG: voucher, edit bukti, kunci job, builder invoice/bill; butuh `DATABASE_URL` database uji yang sama dengan server) menelusuri UI nyata (dashboard, RBAC, Job+PDF, Accounting balance, buat Invoice→bayar, tracking publik, CRUD Vendor/Commodity, form Quotation & Job). Detail & flow demo ada di `DEMO.md`.
+- **E2E (Playwright)** — `npm run test:e2e` (sekali pasang browser: `npx playwright install chromium`): 80 skenario, termasuk alur Domestik & Aturan Berat (`e2e/domestic.spec.ts`), quotation & maker-checker (`e2e/quotation-flow.spec.ts`), Role Management (`e2e/role-management.spec.ts`), dan suite QA `e2e/qa/` (alur per role, keamanan & replay server action, anomali, matriks izin, fitur client SLG: voucher, edit bukti, kunci job, builder invoice/bill, Cari Bukti, Vendor Bill per job; butuh `DATABASE_URL` database uji yang sama dengan server) menelusuri UI nyata (dashboard, RBAC, Job+PDF, Accounting balance, buat Invoice→bayar, tracking publik, CRUD Vendor/Commodity, form Quotation & Job). Detail & flow demo ada di `DEMO.md`.
 
 ## 9. CRUD & Form Manual
 

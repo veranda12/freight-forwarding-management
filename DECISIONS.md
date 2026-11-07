@@ -69,6 +69,14 @@ lalu di-**merge** ke branch MariaDB (bukan cherry-pick, supaya commit `part2` be
   C-6 invoice/bill tanpa `createdById`. Temuan yang **tidak** diubah (perlu keputusan client): invoice dibatasi satu
   job, voucher dibayar tanpa jalur pembalik, `editInvoiceCharges` tanpa `assertJobEditable`, tutup job otomatis tanpa
   `userId`.
+- **Part2** (`feat/slg-penyesuaian-client-part2`, di-merge 2026-11-08): menu **Cari Bukti** (`/proofs`, satu kotak cari
+  lintas jurnal/invoice/bill/payment/voucher/note/setoran pajak; nomor, job/B/L, pihak, keterangan, nominal format
+  Indonesia), **Vendor Bill per job** (kelompok per job, bill lintas job dibagi proporsional, filter job/B/L/no. bill/
+  tanggal/vendor/customer/status/jatuh tempo/mata uang, bawaan belum lunas), dan kunci periode saat membuat voucher.
+  Porting: izin `proofs.view` (bawaan Finance & Sales, sama dengan client; Management lewat izin view), jenis bukti
+  mengikuti izin modulnya (`PROOF_KIND_PERMS`), hasil mengikuti batas data modulnya (dikirim halaman sebagai `scopes`,
+  sehingga `proof-search.ts` tetap murni dan ber-unit-test), tombol Cetak mengikuti izin cetak; `loadBillGroups` menerima
+  `billScope`. Migrasi data `20261108090000_proof_search_permission`.
 
 ## Master & Seed
 
