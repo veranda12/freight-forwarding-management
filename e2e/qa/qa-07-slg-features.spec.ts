@@ -26,7 +26,9 @@ async function freeBuyingLine(exclude: string[] = []) {
 
 async function createVoucherUi(page: Page, jobNumber: string) {
   await page.goto("/vouchers/new");
-  await page.getByPlaceholder("Cari no. job, no. B/L, atau customer…").fill(jobNumber);
+  // halaman streaming: tunggu tenang dan ambil elemen yang terlihat (template tersembunyi sempat ganda)
+  await page.waitForLoadState("networkidle");
+  await page.getByPlaceholder("Cari no. job, no. B/L, atau customer…").filter({ visible: true }).fill(jobNumber);
   const block = page.locator("div.rounded-md.border", { hasText: jobNumber }).first();
   await block.locator('input[type="checkbox"]').first().check();
   await page.locator("main").getByRole("button", { name: "Buat Voucher", exact: true }).last().click();

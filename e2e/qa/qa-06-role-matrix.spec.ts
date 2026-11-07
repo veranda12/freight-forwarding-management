@@ -27,6 +27,7 @@ const PAGES: { path: string; view: string; button: string; action: string }[] = 
   { path: "/invoices", view: "invoices.view", button: "Buat Invoice", action: "invoices.create" },
   { path: "/bills", view: "bills.view", button: "Buat Bill", action: "bills.create" },
   { path: "/accounting/kasir", view: "kasir.view", button: "", action: "" },
+  { path: "/proofs", view: "proofs.view", button: "", action: "" },
 ];
 
 const USERS = ["admin@demo.com", "sales@demo.com", "ops@demo.com", "docs@demo.com", "finance@demo.com", "manager@demo.com"];

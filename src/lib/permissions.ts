@@ -100,6 +100,11 @@ const GROUPS = [
   {
     label: "Finance",
     modules: [
+      {
+        key: "proofs", label: "Cari Bukti", perms: [
+          { key: "proofs.view", label: "Cari bukti lintas modul (hanya jenis bukti yang modulnya boleh dilihat)", kind: "view" },
+        ],
+      },
       { key: "costing", label: "Costing", perms: [{ key: "costing.view", label: "Lihat costing & profitabilitas", kind: "view" }] },
       {
         key: "invoices", label: "Invoice (AR)", perms: [
@@ -338,6 +343,7 @@ export const DEFAULT_ROLES: { key: string; name: string; description: string; pe
       "rates.view", "rates.create", "rates.edit",
       "jobs.viewFinancials",
       "quotations.view", "quotations.create", "quotations.submit",
+      "proofs.view",
       "customers.view", "customers.create", "customers.edit",
       "commodities.edit", "weightRules.edit", "domesticTariffs.edit",
       "domestic.view", "domestic.create", "domestic.status", "domestic.print",
@@ -375,7 +381,7 @@ export const DEFAULT_ROLES: { key: string; name: string; description: string; pe
     description: "Costing, invoice, bill, pembayaran, akuntansi, pajak, dan laporan.",
     permissions: [
       ...views("dashboard", "tracking", "ports", "vehicles", "containers", "commodities", "weightRules", "coa",
-        "domesticCheck", "domesticTariffs", "costing", "accounting", "cashFlow", "documents", "kasir"),
+        "domesticCheck", "domesticTariffs", "costing", "accounting", "cashFlow", "documents", "kasir", "proofs"),
       "coa.create",
       "documents.generate",
       "customers.view", "customers.viewAll",

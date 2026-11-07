@@ -4,7 +4,7 @@ import {
   Package, Percent, BookOpen, FileText, Briefcase, CalendarCheck, FileSignature,
   Calculator, Receipt, FileInput, StickyNote, Wallet, BookMarked, BarChart3,
   UserCog, Settings, History, MapPin, Truck, PackageCheck, Scale, Calculator as CalcIcon,
-  ArrowLeftRight, BookCheck, Landmark, GitCompare, RefreshCw, Banknote, ArrowDownUp, NotebookPen, ListChecks, Bug, ShieldCheck, Ticket,
+  ArrowLeftRight, BookCheck, Landmark, GitCompare, RefreshCw, Banknote, ArrowDownUp, NotebookPen, ListChecks, Bug, ShieldCheck, Ticket, FileSearch,
 } from "lucide-react";
 
 export type NavItem = {
@@ -51,6 +51,7 @@ export const NAV: NavGroup[] = [
   {
     label: "Finance",
     items: [
+      { label: "Cari Bukti", href: "/proofs", icon: FileSearch, perm: "proofs.view" },
       { label: "Costing", href: "/costing", icon: Calculator, perm: "costing.view" },
       { label: "Invoice (AR)", href: "/invoices", icon: Receipt, perm: "invoices.view" },
       { label: "Vendor Bill (AP)", href: "/bills", icon: FileInput, perm: "bills.view" },

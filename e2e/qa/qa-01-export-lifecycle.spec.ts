@@ -173,7 +173,9 @@ test.describe.serial("QA-01 Alur Ekspor-Impor lintas role", () => {
     const arBefore = await accountBalance("1300");
     await login(page, "finance@demo.com");
     await page.goto("/invoices/new");
-    await page.getByPlaceholder("Cari no. job, no. B/L, atau customer…").fill(S.jobNumber!);
+    // halaman streaming: konten sempat ada dua kali (template tersembunyi) sebelum ditukar → tunggu tenang, ambil yang terlihat
+    await page.waitForLoadState("networkidle");
+    await page.getByPlaceholder("Cari no. job, no. B/L, atau customer…").filter({ visible: true }).fill(S.jobNumber!);
     await page.getByRole("radio", { name: `Pilih ${S.jobNumber}` }).check();
     await page.locator("main").getByRole("button", { name: "Buat Invoice", exact: true }).click();
     await page.waitForURL(/\/invoices\/(?!new)[^/]+$/);

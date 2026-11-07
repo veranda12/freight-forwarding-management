@@ -1,6 +1,7 @@
 import { requirePerm } from "@/lib/auth-helpers";
 import { jobScope } from "@/lib/data-scope";
 import { prisma } from "@/lib/prisma";
+import { getLockKey } from "@/lib/period-lock";
 import { PageHeader } from "@/components/page-header";
 import { Breadcrumbs } from "@/components/breadcrumbs";
 import { VoucherBuilder, type VoucherJob } from "./voucher-builder";
@@ -31,7 +32,7 @@ export default async function NewVoucherPage() {
         <Breadcrumbs items={[{ label: "Voucher", href: "/vouchers" }, { label: "Buat Voucher" }]} />
         <PageHeader title="Buat Voucher" description="Cari job atau B/L, lalu centang biaya yang dibayar. Biayanya diinput dulu di menu Costing" />
       </div>
-      <VoucherBuilder jobs={[...jobs.values()]} today={today} />
+      <VoucherBuilder jobs={[...jobs.values()]} today={today} lockKey={await getLockKey(prisma)} />
     </div>
   );
 }
