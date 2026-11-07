@@ -2,6 +2,8 @@
  * Uji penyesuaian PT Sentra Logistik Global: nomor bukti, PPN dan reimburse, invoice beberapa job,
  * edit invoice, voucher, bill manual, edit bukti kas, kunci job, dan Close otomatis.
  * Hanya untuk database UJI (menolak berjalan di "ffms"). Data uji tidak dihapus.
+ *
+ *   DATABASE_URL=mysql://ffms:ffms123@127.0.0.1:3307/ffms_test node node_modules/tsx/dist/cli.mjs tests/integration/verify-slg-flow.ts
  */
 import { PrismaClient, Prisma } from "@prisma/client";
 import { createInvoiceCore, updateInvoiceCore, recordReceiptCore, cancelInvoiceCore } from "../../src/lib/receivables";
@@ -13,8 +15,9 @@ import { assertJobEditable, closeJobIfSettled } from "../../src/lib/job-lock";
 import { addJobCharge, updateJobCharge, recalcJobTotals, editInvoiceCharges } from "../../src/lib/job-charges";
 import { setLockKey } from "../../src/lib/period-lock";
 import { ACC } from "../../src/lib/coa";
+import { PRISMA_CLIENT_OPTIONS } from "../../src/lib/prisma-options";
 
-const db = new PrismaClient();
+const db = new PrismaClient(PRISMA_CLIENT_OPTIONS);
 let failures = 0;
 const ok = (c: boolean, msg: string) => { console.log((c ? "PASS " : "FAIL ") + msg); if (!c) failures++; };
 const throws = async (fn: () => Promise<unknown>, re: RegExp, msg: string) => {
@@ -38,7 +41,7 @@ async function line(jobId: string, side: "SELLING" | "BUYING", chargeCodeId: str
 }
 
 async function main() {
-  const dbName = (await db.$queryRaw<{ d: string }[]>`SELECT current_database() AS d`)[0].d;
+  const dbName = (await db.$queryRaw<{ d: string }[]>`SELECT DATABASE() AS d`)[0].d;
   if (dbName === "ffms") throw new Error("Jangan jalankan uji ini di database demo ffms.");
   console.log(`   database: ${dbName}`);
   await setLockKey(db, null);

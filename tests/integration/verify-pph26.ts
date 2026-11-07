@@ -1,5 +1,7 @@
 /**
  * Uji PPh 26 end-to-end terhadap database uji (JANGAN dijalankan di database demo).
+ * Sejak penyesuaian client SLG (3330c48) PPN/PPh bill diisi MANUAL sesuai tagihan vendor (tidak lagi dihitung otomatis
+ * dari charge code), jadi uji ini mengisi PPh 26 = 20% x dasar biaya non-reimburse lalu memeriksa jurnal & setoran.
  *   node tests/integration/with-verify-db ... (lihat catatan di README uji) atau set DATABASE_URL ke ffms_verify.
  */
 import { PrismaClient } from "@prisma/client";
@@ -27,20 +29,19 @@ async function main() {
   });
   if (!line || !line.vendorId) throw new Error("Tidak ada biaya beli dari vendor luar negeri.");
 
-  // Aktifkan PPh 26 untuk charge code ini (pengaturan user, di database uji saja).
-  await db.chargeCode.update({ where: { id: line.chargeCodeId }, data: { isPph26: true, pph26Rate: 20 } });
-  // Pastikan baris ini belum di-bill pada database uji.
+  // Pastikan baris vendor ini belum di-bill pada database uji.
   await db.costingLine.updateMany({ where: { jobId: line.jobId, vendorId: line.vendorId, side: "BUYING" }, data: { billed: false } });
+  const toBill = await db.costingLine.findMany({ where: { jobId: line.jobId, vendorId: line.vendorId, side: "BUYING", billed: false, voucherId: null, recordedAt: null } });
+  const base = toBill.filter((l) => !l.asReceipt).reduce((s, l) => s + Number(l.actualIdr), 0);
+  const pph26Expected = pph26Of(base, 20);
 
   const before = await getTaxRecap(db, "2026-01-01", "2026-12-31");
-  const billId = await createBillFromJobCore(db, line.jobId, line.vendorId, undefined, {});
+  const billId = await createBillFromJobCore(db, line.jobId, line.vendorId, undefined, { pph26: pph26Expected });
   const bill = await db.vendorBill.findUniqueOrThrow({ where: { id: billId }, include: { lines: true } });
 
-  const expectedBase = bill.lines.filter((l) => l.pph23 === false).reduce((s, l) => s + Number(l.amount), 0);
-  void expectedBase;
-  const pph26Expected = pph26Of(Number(line.actualIdr), 20);
-  ok(Number(bill.pph26Amount) > 0, `PPh 26 dihitung pada bill: ${Math.round(Number(bill.pph26Amount)).toLocaleString("id-ID")}`);
-  ok(Math.abs(Number(bill.pph26Amount) - pph26Expected) < 1, "PPh 26 = baris biaya x 20%");
+  ok(Number(bill.pph26Amount) > 0, `PPh 26 (diisi manual) tercatat pada bill: ${Math.round(Number(bill.pph26Amount)).toLocaleString("id-ID")}`);
+  ok(Math.abs(Number(bill.pph26Amount) - pph26Expected) < 1, "PPh 26 = dasar biaya non-reimburse x 20%");
+  ok(Math.abs(Number(bill.pph26Base) - base) < 0.01, "dasar PPh 26 = biaya non-reimburse");
   ok(Number(bill.pph23Amount) === 0, "vendor luar negeri tidak dikenai PPh 23");
   ok(Math.abs(Number(bill.total) - (Number(bill.subtotal) + Number(bill.ppnAmount) - Number(bill.pph23Amount) - Number(bill.pph26Amount))) < 0.01,
     "net payable = subtotal + PPN - PPh 23 - PPh 26");

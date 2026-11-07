@@ -7,7 +7,7 @@
 import { Prisma, PrismaClient } from "@prisma/client";
 import { PRISMA_CLIENT_OPTIONS } from "../../src/lib/prisma-options";
 import { getBalanceSheet, getTrialBalance } from "../../src/lib/accounting";
-import { createInvoiceFromJobCore, recordReceiptCore } from "../../src/lib/receivables";
+import { createInvoiceFromJobCore, getPpnRate, recordReceiptCore } from "../../src/lib/receivables";
 import { createBillFromJobCore, recordVendorPaymentCore } from "../../src/lib/payables";
 import { getTaxPeriods, remitTaxPeriod } from "../../src/lib/tax";
 import { STATUS_LABEL } from "../../src/lib/tax-period";
@@ -109,14 +109,19 @@ async function main() {
   // Langkah 4. Invoice IDR dari job
   const invId = await createInvoiceFromJobCore(db, jobId, undefined, { currency: "IDR" });
   const inv = await db.invoice.findUniqueOrThrow({ where: { id: invId } });
-  ok(Number(inv.subtotal) === 25_500_000 && Number(inv.taxableBase) === 7_500_000 && Number(inv.ppnAmount) === 825_000 && Number(inv.total) === 26_325_000,
+  // Aturan PPN sejak penyesuaian client SLG (3330c48): PPN = semua pendapatan non-reimburse x tarif setting (bawaan 1,1%),
+  // bukan lagi baris "taxable" x 11%. Job simulasi tidak punya reimburse, jadi DPP = subtotal.
+  const ppnRate = await getPpnRate(db);
+  const ppnExpected = Math.round(25_500_000 * ppnRate * 100) / 100;
+  ok(Number(inv.subtotal) === 25_500_000 && Number(inv.taxableBase) === 25_500_000 && Number(inv.ppnAmount) === ppnExpected && Number(inv.total) === 25_500_000 + ppnExpected,
     `invoice ${inv.number}: subtotal ${f(Number(inv.subtotal))}, DPP ${f(Number(inv.taxableBase))}, PPN ${f(Number(inv.ppnAmount))}, total ${f(Number(inv.total))}`);
   let again = "";
   try { await createInvoiceFromJobCore(db, jobId); } catch (e: any) { again = e.message; }
   ok(again.startsWith("Semua selling charge job ini sudah ditagih"), "invoice kedua dari job yang sama ditolak");
 
   // Langkah 5. Pembayaran dengan potongan
-  await recordReceiptCore(db, invId, { amount: 26_238_500, reference: "TRF-0001", method: "TRANSFER", deductions: { pph23: 80_000, admin: 6_500, other: 0 } }, undefined);
+  // customer membayar total dikurangi PPh 23 yang dipotong dan biaya admin bank
+  await recordReceiptCore(db, invId, { amount: Number(inv.total) - 80_000 - 6_500, reference: "TRF-0001", method: "TRANSFER", deductions: { pph23: 80_000, admin: 6_500, other: 0 } }, undefined);
   const paid = await db.invoice.findUniqueOrThrow({ where: { id: invId } });
   ok(paid.status === "PAID", `invoice lunas (dibayar ${f(Number(paid.amountPaid))})`);
   const pay = await db.payment.findFirstOrThrow({ where: { reference: "TRF-0001", customerId: cust.id } });
@@ -124,8 +129,11 @@ async function main() {
   console.log("   jurnal penerimaan:", pl.map((l) => `${l.account.code} ${Number(l.debit) ? "Dr" : "Cr"} ${f(Number(l.debit) || Number(l.credit))}`).join(", "));
 
   // Langkah 6-7. Bill vendor dan pembayarannya
+  // Sejak penyesuaian client SLG PPN/PPh bill diisi manual sesuai tagihan vendor: vendor jasa lokal dipotong PPh 23 2%.
   for (const v of [maersk, angkut]) {
-    const billId = await createBillFromJobCore(db, jobId, v.id, undefined, {});
+    const jasa = (await db.costingLine.findMany({ where: { jobId, vendorId: v.id, side: "BUYING", asReceipt: false } })).reduce((s, l) => s + Number(l.actualIdr), 0);
+    const opts = v.isForeign ? {} : { pph23: Math.round(jasa * 0.02 * 100) / 100 };
+    const billId = await createBillFromJobCore(db, jobId, v.id, undefined, opts);
     const b = await db.vendorBill.findUniqueOrThrow({ where: { id: billId } });
     console.log(`   bill ${v.name}: subtotal ${f(Number(b.subtotal))}, PPN ${f(Number(b.ppnAmount))}, PPh 23 ${f(Number(b.pph23Amount))}, total ${f(Number(b.total))}`);
     await recordVendorPaymentCore(db, billId, { amount: Number(b.total), method: "TRANSFER" }, undefined);

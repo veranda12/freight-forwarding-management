@@ -22,6 +22,11 @@ const PAGES: { path: string; view: string; button: string; action: string }[] = 
   { path: "/taxes", view: "taxes.view", button: "Pajak Baru", action: "taxes.edit" },
   { path: "/users", view: "users.view", button: "User Baru", action: "users.manage" },
   { path: "/roles", view: "roles.view", button: "Role Baru", action: "roles.manage" },
+  // penyesuaian client SLG
+  { path: "/vouchers", view: "vouchers.view", button: "Buat Voucher", action: "vouchers.create" },
+  { path: "/invoices", view: "invoices.view", button: "Buat Invoice", action: "invoices.create" },
+  { path: "/bills", view: "bills.view", button: "Buat Bill", action: "bills.create" },
+  { path: "/accounting/kasir", view: "kasir.view", button: "", action: "" },
 ];
 
 const USERS = ["admin@demo.com", "sales@demo.com", "ops@demo.com", "docs@demo.com", "finance@demo.com", "manager@demo.com"];
@@ -41,7 +46,7 @@ for (const email of USERS) {
       const landed = new URL(page.url()).pathname;
       const canView = has(p.view);
       if (canView !== (landed === p.path)) mismatches.push(`${p.path}: view=${canView} tetapi mendarat di ${landed}`);
-      if (!canView) continue;
+      if (!canView || !p.button) continue;
       const shown = (await page.locator("main").getByText(p.button, { exact: true }).count()) > 0;
       if (shown !== has(p.action)) mismatches.push(`${p.path}: tombol "${p.button}" tampil=${shown}, izin ${p.action}=${has(p.action)}`);
     }

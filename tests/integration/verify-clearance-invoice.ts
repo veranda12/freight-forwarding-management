@@ -28,7 +28,13 @@ async function main() {
 
   const job = await db.job.findFirstOrThrow({ where: { mblNo: "MEDUY1234567" }, include: { invoices: { include: { lines: { include: { chargeCode: true } } } } } });
   const inv = job.invoices[0];
-  ok(n(inv.total) === 49_847_370 && n(inv.ppnAmount) === 0, `invoice demo ${inv.number} total ${inv.total}, PPN ${inv.ppnAmount}`);
+  // Sejak penyesuaian client SLG (3330c48): PPN = pendapatan non-reimburse (taxableBase) x tarif setting; reimburse tanpa
+  // PPN dan tidak masuk revenue job. Subtotal invoice demo tetap 49.847.370 (pendapatan + reimburse).
+  // Ekspektasi lama (PPN 0, revenue 49.847.370) juga gagal di PostgreSQL atas seed baru (uji pembanding 2026-11-08).
+  const rate = n((await db.accountingSetting.findUnique({ where: { id: "default" } }))?.ppnRate ?? 0.011);
+  const ppnDemo = Math.round(n(inv.taxableBase) * rate * 100) / 100;
+  ok(n(inv.subtotal) === 49_847_370 && n(inv.ppnAmount) === ppnDemo && n(inv.total) === 49_847_370 + ppnDemo,
+    `invoice demo ${inv.number} subtotal ${inv.subtotal}, PPN ${inv.ppnAmount} (= ${inv.taxableBase} x ${rate}), total ${inv.total}`);
   const sec = (s: string) => inv.lines.filter((l) => l.section === s).reduce((t, l) => t + n(l.amount), 0);
   ok(sec("LOCAL") === 30_786_023, `seksi A Local & Port ${sec("LOCAL")}`);
   ok(sec("DOCUMENTATION") === 18_129_347, `seksi B Documentation ${sec("DOCUMENTATION")}`);
@@ -40,8 +46,8 @@ async function main() {
   ok(line("EXTTRUCK").note === "Container CAIU1234561", "extended trucking membawa nomor container");
   const je = await db.journalEntry.findUniqueOrThrow({ where: { id: inv.journalEntryId! }, include: { lines: true } });
   const d = je.lines.reduce((t, l) => t + n(l.debit), 0), k = je.lines.reduce((t, l) => t + n(l.credit), 0);
-  ok(Math.abs(d - k) < 0.01 && d === 49_847_370, `jurnal invoice seimbang D ${d} = K ${k}`);
-  ok(n(job.revenueIdr) === 49_847_370, `revenue job ${job.revenueIdr}`);
+  ok(Math.abs(d - k) < 0.01 && Math.abs(d - n(inv.total)) < 0.01, `jurnal invoice seimbang D ${d} = K ${k} = total invoice`);
+  ok(n(job.revenueIdr) === n(inv.taxableBase), `revenue job tanpa reimburse ${job.revenueIdr} = ${inv.taxableBase}`);
   ok(Math.round((inv.dueDate.getTime() - inv.date.getTime()) / 86400000) === 5, "jatuh tempo 5 hari (TOP customer)");
   ok((await err(() => applyRateCard(db, job.id))).includes("sudah ditagih"), "rate card tidak bisa dihitung ulang setelah ditagih");
 

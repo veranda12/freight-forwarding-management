@@ -71,6 +71,10 @@ test.describe.serial("QA-02 Alur Domestik lintas role", () => {
     const inv = await db.invoice.findUniqueOrThrow({ where: { id: S.invoiceId } });
     expect(inv.domesticShipmentId).toBe(S.sttId);
     expect(inv.createdById).toBe(await userId("finance@demo.com"));
+    // C-5: aturan PPN sama dengan invoice job (semua baris non-reimburse x tarif setting yang disimpan di invoice)
+    expect(Number(inv.taxableBase)).toBeCloseTo(Number(inv.subtotal), 2);
+    expect(Number(inv.ppnAmount)).toBeCloseTo(Math.round(Number(inv.taxableBase) * Number(inv.ppnRate) * 100) / 100, 2);
+    expect(inv.number).toMatch(/^INV\/\d{2}\/\d{2}\/\d{3,}$/);
     const rev = await db.journalLine.findFirst({ where: { entryId: inv.journalEntryId!, account: { code: "4500" } } });
     expect(Number(rev?.credit ?? 0)).toBeGreaterThan(0);
 

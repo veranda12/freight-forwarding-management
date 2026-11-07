@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 
-/** E2E Jurnal Manual: posting jurnal seimbang, pembatalan dengan jurnal pembalik, dan batas per peran. */
+/** E2E Jurnal Umum (dulu "Jurnal Manual"; nama & nomor bukti SLG/JU/... dari penyesuaian client SLG): posting jurnal seimbang, pembatalan dengan jurnal pembalik, dan batas per peran. */
 
 async function login(page: Page, email: string) {
   await page.goto("/login");
@@ -19,9 +19,9 @@ test.describe("Jurnal Manual", () => {
   test("Finance memposting jurnal seimbang lalu membatalkannya", async ({ page }) => {
     await login(page, "finance@demo.com");
     await page.goto("/accounting/manual-journal");
-    await expect(page.getByRole("heading", { name: "Jurnal Manual" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Jurnal Umum" })).toBeVisible();
 
-    await page.getByRole("button", { name: /Buat jurnal manual/ }).click();
+    await page.getByRole("button", { name: /Buat Jurnal Umum/ }).click();
     const dialog = page.getByRole("dialog");
     const desc = `E2E reklasifikasi ${Date.now()}`;
     await dialog.getByPlaceholder("Koreksi salah akun beban Oktober").fill(desc);
@@ -36,7 +36,7 @@ test.describe("Jurnal Manual", () => {
     await dialog.getByLabel("Kredit").nth(1).fill("75000");
     await expect(dialog.getByText("Seimbang", { exact: true })).toBeVisible();
     await dialog.getByRole("button", { name: "Posting jurnal" }).click();
-    await expect(page.getByText(/Jurnal manual JE\/.+ diposting/)).toBeVisible();
+    await expect(page.getByText("Jurnal Umum diposting.")).toBeVisible();
 
     const row = page.locator("tr", { hasText: desc }).first();
     await expect(row).toContainText("Berlaku");
@@ -53,8 +53,8 @@ test.describe("Jurnal Manual", () => {
   test("Management hanya melihat", async ({ page }) => {
     await login(page, "manager@demo.com");
     await page.goto("/accounting/manual-journal");
-    await expect(page.getByRole("heading", { name: "Jurnal Manual" })).toBeVisible();
-    await expect(page.getByRole("button", { name: /Buat jurnal manual/ })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "Jurnal Umum" })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Buat Jurnal Umum/ })).toHaveCount(0);
   });
 
   test("Operation tidak punya akses", async ({ page }) => {

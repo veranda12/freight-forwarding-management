@@ -169,20 +169,23 @@ test.describe.serial("QA-01 Alur Ekspor-Impor lintas role", () => {
     }
   });
 
-  test("07 Finance: invoice dari job (PPN hanya baris kena pajak) + receipt penuh; jurnal seimbang", async ({ page }) => {
+  test("07 Finance: invoice lewat builder (PPN dari pendapatan non-reimburse) + receipt penuh; jurnal seimbang", async ({ page }) => {
     const arBefore = await accountBalance("1300");
     await login(page, "finance@demo.com");
-    await page.goto(`/jobs/${S.jobId}`);
-    await page.getByRole("tab", { name: /Invoices/ }).click();
-    await page.getByRole("button", { name: /Buat Invoice dari Job/ }).click();
-    await page.getByRole("dialog").getByRole("button", { name: "Buat Invoice", exact: true }).click();
-    await page.waitForURL(/\/invoices\/[^/]+$/);
+    await page.goto("/invoices/new");
+    await page.getByPlaceholder("Cari no. job, no. B/L, atau customer…").fill(S.jobNumber!);
+    await page.getByRole("radio", { name: `Pilih ${S.jobNumber}` }).check();
+    await page.locator("main").getByRole("button", { name: "Buat Invoice", exact: true }).click();
+    await page.waitForURL(/\/invoices\/(?!new)[^/]+$/);
     S.invoiceId = page.url().split("/").pop()!;
     const inv = await db.invoice.findUniqueOrThrow({ where: { id: S.invoiceId }, include: { lines: true } });
+    // aturan client SLG: baris non-reimburse kena PPN dengan tarif yang disimpan di invoice (bawaan 1,1%)
     const taxable = inv.lines.filter((l) => l.taxable).reduce((s, l) => s + Number(l.amount), 0);
     expect(inv.jobId).toBe(S.jobId);
+    expect(inv.lines.every((l) => l.jobId === S.jobId)).toBe(true);
     expect(inv.createdById).toBe(await userId("finance@demo.com"));
-    expect(Number(inv.ppnAmount)).toBeCloseTo(Math.round(taxable * 0.11), 0);
+    expect(Number(inv.taxableBase)).toBeCloseTo(taxable, 1);
+    expect(Number(inv.ppnAmount)).toBeCloseTo(Math.round(taxable * Number(inv.ppnRate) * 100) / 100, 1);
     expect(Number(inv.total)).toBeCloseTo(Number(inv.subtotal) + Number(inv.ppnAmount), 1);
     expect(inv.journalEntryId).not.toBeNull();
     expect(await accountBalance("1300")).toBeCloseTo(arBefore + Number(inv.total), 1);
@@ -199,15 +202,21 @@ test.describe.serial("QA-01 Alur Ekspor-Impor lintas role", () => {
     await expectLedgerBalanced();
   });
 
-  test("08 Finance: vendor bill dari biaya beli + pembayaran vendor; hutang kembali", async ({ page }) => {
+  test("08 Finance: vendor bill lewat builder (biaya beli job ini) + pembayaran vendor; hutang kembali", async ({ page }) => {
     await login(page, "finance@demo.com");
-    await page.goto(`/jobs/${S.jobId}`);
-    await page.getByRole("tab", { name: /Invoices/ }).click();
+    const cost = await db.costingLine.findFirstOrThrow({ where: { jobId: S.jobId, side: "BUYING", billed: false, vendorId: { not: null } }, include: { vendor: true } });
+    const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const before = await db.vendorBill.count({ where: { jobId: S.jobId } });
-    await page.getByRole("button", { name: /Buat Bill/ }).first().click();
-    await page.getByRole("dialog").getByRole("button", { name: "Buat Bill" }).click();
+    await page.goto("/bills/new");
+    await pickOption(page, page.getByRole("combobox", { name: "Vendor" }), new RegExp(`^${esc(cost.vendor!.name)} \\(`));
+    await pickOption(page, page.getByRole("combobox", { name: "Filter job atau B/L" }), new RegExp(`^${esc(S.jobNumber!)}`));
+    await page.getByRole("checkbox", { name: "Pilih semua yang tampil" }).check();
+    await page.locator("main").getByRole("button", { name: "Buat Bill", exact: true }).click();
     await expect(page.getByText("Vendor bill dibuat.")).toBeVisible();
-    const bill = await db.vendorBill.findFirstOrThrow({ where: { jobId: S.jobId }, orderBy: { createdAt: "desc" } });
+    await page.waitForURL(/\/bills\/(?!new)[^/]+$/);
+    const bill = await db.vendorBill.findFirstOrThrow({ where: { jobId: S.jobId }, orderBy: { createdAt: "desc" }, include: { lines: true } });
+    expect(bill.vendorId).toBe(cost.vendorId);
+    expect(bill.lines.every((l) => l.jobId === S.jobId)).toBe(true);
     expect(await db.vendorBill.count({ where: { jobId: S.jobId } })).toBe(before + 1);
     expect(bill.createdById).toBe(await userId("finance@demo.com"));
     expect(bill.journalEntryId).not.toBeNull();

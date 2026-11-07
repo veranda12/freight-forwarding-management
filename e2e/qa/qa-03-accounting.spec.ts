@@ -11,14 +11,14 @@ const today = () => new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Jak
 
 async function cashOut(page: Page, desc: string, amount: string, dateKey?: string) {
   await page.goto("/accounting/cash-entry");
-  await page.getByRole("button", { name: /Catat transaksi kas/ }).click();
+  // form "Jurnal Penerimaan & Pengeluaran" (penyesuaian client SLG): satu bukti BK/KK bisa berisi beberapa baris
+  await page.getByRole("button", { name: /Catat transaksi/ }).click();
   const dlg = page.getByRole("dialog");
-  await dlg.getByRole("button", { name: /Kas keluar/ }).click();
+  await dlg.getByRole("button", { name: /Jurnal Pengeluaran/ }).click();
   await pickOption(page, dlg.getByRole("combobox").nth(0), /BCA/);
-  await pickOption(page, dlg.getByRole("combobox").nth(1), /6310/);
+  await pickOption(page, dlg.getByRole("combobox", { name: "Akun lawan" }).first(), /^6310/);
   if (dateKey) await dlg.locator('input[type="date"]').fill(dateKey);
-  // label form ini belum terhubung ke input (temuan aksesibilitas) → pakai tipe/placeholder
-  await dlg.locator('input[type="number"]').first().fill(amount);
+  await dlg.getByRole("textbox", { name: /^Nominal/ }).first().fill(amount);
   await dlg.getByPlaceholder("Biaya admin bank Oktober").fill(desc);
   await dlg.getByRole("button", { name: "Simpan", exact: true }).click();
 }
@@ -28,9 +28,10 @@ test.describe.serial("QA-03 Akuntansi", () => {
     await login(page, "finance@demo.com");
     const desc = `QA kas keluar ${Date.now()}`;
     await cashOut(page, desc, "125000");
-    await expect(page.getByText("Kas keluar dicatat.")).toBeVisible();
+    await expect(page.getByText("Jurnal Pengeluaran dicatat.")).toBeVisible();
     const je = await db.journalEntry.findFirstOrThrow({ where: { description: { contains: desc } }, include: { lines: true } });
     expect(je.createdById).toBe(await userId("finance@demo.com"));
+    expect(je.number).toMatch(/^SLG\/BK\/\d{2}\/\d{2}\/\d{3,}$/); // nomor bukti bank keluar (client SLG)
     expect(je.lines.reduce((s, l) => s + Number(l.debit), 0)).toBeCloseTo(125000, 2);
 
     const row = page.locator("tr", { hasText: desc }).first();
@@ -116,7 +117,7 @@ test.describe.serial("QA-03 Akuntansi", () => {
 
       await login(fin, "finance@demo.com");
       await fin.goto("/accounting/manual-journal");
-      await fin.getByRole("button", { name: /Buat jurnal manual/ }).click();
+      await fin.getByRole("button", { name: /Buat Jurnal Umum/ }).click();
       const dlg = fin.getByRole("dialog");
       const desc = `QA maker-checker ${Date.now()}`;
       await dlg.getByPlaceholder("Koreksi salah akun beban Oktober").fill(desc);
@@ -126,7 +127,7 @@ test.describe.serial("QA-03 Akuntansi", () => {
       await pickAcc(1, /^6300 · /);
       await dlg.getByLabel("Kredit").nth(1).fill("50000");
       await dlg.getByRole("button", { name: "Posting jurnal" }).click();
-      await expect(fin.getByText(/Jurnal manual JE\/.+ diposting/)).toBeVisible();
+      await expect(fin.getByText("Jurnal Umum diposting.")).toBeVisible();
 
       const row = fin.locator("tr", { hasText: desc }).first();
       await row.getByRole("button", { name: /Batalkan/ }).click();
@@ -187,7 +188,7 @@ test.describe.serial("QA-03 Akuntansi", () => {
     await page.getByRole("button", { name: /Buka kunci/ }).click();
     await expect.poll(async () => (await db.accountingSetting.findUnique({ where: { id: "default" } }))?.lockedUntil ?? null).toBeNull();
     await cashOut(page, `${desc} (dibuka)`, "10000", today());
-    await expect(page.getByText("Kas keluar dicatat.")).toBeVisible();
+    await expect(page.getByText("Jurnal Pengeluaran dicatat.")).toBeVisible();
     await expectLedgerBalanced();
   });
 });
