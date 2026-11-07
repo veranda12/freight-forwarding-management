@@ -92,7 +92,7 @@ export async function getLedgerDetail(db: PrismaClient, accountId: string, from?
       .filter((o) => o.id !== l.id && (debit > 0 ? Number(o.credit) > 0 : Number(o.debit) > 0))
       .map((o) => `${o.account.code} ${o.account.name}`);
     return {
-      date: l.entry.date.toISOString(), number: l.entry.number, source: l.entry.source,
+      entryId: l.entry.id, date: l.entry.date.toISOString(), number: l.entry.number, source: l.entry.source,
       description: l.description ?? l.entry.description, debit, credit, balance: running,
       counter: [...new Set(counter)].join(", "),
     };

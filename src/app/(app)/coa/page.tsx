@@ -1,5 +1,7 @@
 import { requireCan } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
+import { can } from "@/lib/rbac";
+import { CoaNew } from "./coa-new";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -13,11 +15,13 @@ const TYPE_LABEL: Record<string, string> = {
 };
 
 export default async function CoaPage() {
-  await requireCan("coa", "read");
+  const user = await requireCan("coa", "read");
   const accounts = await prisma.coaAccount.findMany({ orderBy: { code: "asc" } });
   return (
     <div className="space-y-6">
-      <PageHeader title="Chart of Accounts" description={`${accounts.length} akun standar perusahaan jasa logistik`} />
+      <PageHeader title="Chart of Accounts" description={`${accounts.length} akun`}>
+        {can(user.role, "coa", "write") && <CoaNew parents={accounts.filter((a) => !a.isPostable).map((a) => ({ id: a.id, label: `${a.code} · ${a.name}` }))} />}
+      </PageHeader>
       <Card>
         <CardContent className="p-0">
           <Table>

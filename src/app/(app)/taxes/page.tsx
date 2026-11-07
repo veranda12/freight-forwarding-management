@@ -3,6 +3,8 @@ import { Plus, Pencil } from "lucide-react";
 import { requireCan } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
 import { can } from "@/lib/rbac";
+import { getPpnRate } from "@/lib/receivables";
+import { PpnRateForm } from "./ppn-rate-form";
 import { formatNumber } from "@/lib/format";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
@@ -16,11 +18,13 @@ export default async function TaxesPage() {
   const user = await requireCan("taxes", "read");
   const canWrite = can(user.role, "taxes", "write");
   const taxes = await prisma.taxRate.findMany({ orderBy: { code: "asc" } });
+  const ppnRate = await getPpnRate(prisma);
   return (
     <div className="space-y-6">
       <PageHeader title="Pajak" description="Konfigurasi PPN dan PPh 23">
         {canWrite && <Button asChild><Link href="/taxes/new"><Plus /> Pajak Baru </Link></Button>}
       </PageHeader>
+      <PpnRateForm percent={Math.round(ppnRate * 10000) / 100} canWrite={canWrite} />
       <Card>
         <CardContent className="p-0">
           <Table>

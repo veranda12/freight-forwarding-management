@@ -3,6 +3,7 @@
  * Dipakai oleh lib/fiscal, fixed-assets, fx, cashflow, tax, bank-rec.
  */
 
+/** Tarif PPN masukan standar, hanya untuk memperkirakan DPP di rekap pajak. Tarif invoice ada di AccountingSetting. */
 export const PPN_RATE = 0.11;
 export const PPH23_RATE = 0.02;
 export const RETAINED_EARNINGS = "3100";

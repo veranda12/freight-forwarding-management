@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Briefcase, Printer } from "lucide-react";
+import { Briefcase, Pencil, Printer } from "lucide-react";
 import { requireCan } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
 import { can } from "@/lib/rbac";
 import { formatIDR, formatDate, formatNumber } from "@/lib/format";
 import { InvoiceActions } from "./invoice-actions";
 import { latestRate } from "@/lib/fx";
+import { invoiceEditBlock } from "@/lib/receivables";
 import { suggestPph23 } from "@/lib/receipt-deductions";
 import { cashAccountOptions } from "@/lib/cash-accounts";
 import { PageHeader } from "@/components/page-header";
@@ -26,7 +27,8 @@ export default async function InvoiceDetail({ params }: { params: Promise<{ id: 
     where: { id },
     include: {
       customer: true, job: { select: { id: true, number: true } }, domesticShipment: { select: { id: true, number: true } },
-      lines: { include: { chargeCode: true }, orderBy: { sortOrder: "asc" } },
+      lines: { include: { chargeCode: true, job: { select: { id: true, number: true, hblNo: true, mblNo: true, hawbNo: true, mawbNo: true } } }, orderBy: { sortOrder: "asc" } },
+      costingLines: { select: { id: true } },
       allocations: { include: { payment: true } },
     },
   });
@@ -40,7 +42,11 @@ export default async function InvoiceDetail({ params }: { params: Promise<{ id: 
   const outstandingForeign = Number(inv.amountForeign) - Number(inv.amountPaidForeign);
   const defaultPaymentRate = inv.currency !== "IDR" ? await latestRate(prisma, inv.currency, new Date().toISOString().slice(0, 10)) : null;
   const cash = await cashAccountOptions(prisma, "receipt");
-  const pph23Suggest = suggestPph23(inv.lines.filter((l) => l.chargeCode.isPph23).reduce((s, l) => s + Number(l.amount), 0));
+  const pph23Suggest = suggestPph23(inv.lines.filter((l) => !l.asReceipt).reduce((s, l) => s + Number(l.amount), 0));
+  const jobs = [...new Map(inv.lines.flatMap((l) => (l.job ? [[l.job.id, l.job] as const] : []))).values()];
+  const ppnLabel = `${(Number(inv.ppnRate) * 100).toLocaleString("id-ID", { maximumFractionDigits: 2 })}%`;
+  const reimburse = inv.lines.filter((l) => l.asReceipt).reduce((s, l) => s + Number(l.amount), 0);
+  const canEdit = can(user.role, "invoices", "write") && !invoiceEditBlock(inv) && inv.costingLines.length > 0;
 
   return (
     <div className="space-y-6">
@@ -51,6 +57,7 @@ export default async function InvoiceDetail({ params }: { params: Promise<{ id: 
           <Button asChild variant="outline">
             <a href={`/api/invoices/${inv.id}/pdf`} target="_blank" rel="noopener"><Printer /> Cetak Invoice</a>
           </Button>
+          {canEdit && <Button asChild variant="outline"><Link href={`/invoices/${inv.id}/edit`}><Pencil /> Edit</Link></Button>}
           <InvoiceActions
             invoiceId={inv.id}
             currency={inv.currency}
@@ -63,9 +70,18 @@ export default async function InvoiceDetail({ params }: { params: Promise<{ id: 
             defaultCashId={cash.defaultId}
             canWrite={can(user.role, "payments", "write") || can(user.role, "invoices", "write")}
             cancellable={can(user.role, "invoices", "write") && Number(inv.amountPaid) === 0 && inv.status !== "CANCELLED"}
+            payable={inv.status !== "CANCELLED"}
           />
         </PageHeader>
-        {inv.job && <Link href={`/jobs/${inv.job.id}`} className="mt-2 inline-flex items-center gap-1.5 text-sm text-primary hover:underline"><Briefcase className="h-4 w-4" /> Job {inv.job.number}</Link>}
+        {jobs.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+            {jobs.map((j) => (
+              <Link key={j.id} href={`/costing/${j.id}`} className="inline-flex items-center gap-1.5 text-sm text-primary hover:underline">
+                <Briefcase className="h-4 w-4" /> {j.number}{(j.hblNo ?? j.mblNo ?? j.hawbNo ?? j.mawbNo) ? ` · B/L ${j.hblNo ?? j.mblNo ?? j.hawbNo ?? j.mawbNo}` : ""}
+              </Link>
+            ))}
+          </div>
+        )}
         {inv.domesticShipment && <Link href={`/domestic/${inv.domesticShipment.id}`} className="mt-2 inline-flex items-center gap-1.5 text-sm text-primary hover:underline"><Briefcase className="h-4 w-4" /> STT {inv.domesticShipment.number}</Link>}
       </div>
 
@@ -83,12 +99,13 @@ export default async function InvoiceDetail({ params }: { params: Promise<{ id: 
                   <TableRow key={l.id}>
                     <TableCell>
                       <span className="font-medium">{l.chargeCode.code}</span> <span className="text-muted-foreground">{l.chargeCode.name}</span>
-                      {l.asReceipt && <Badge variant="outline" className="ml-1.5 text-[10px]">As receipt</Badge>}
+                      {l.asReceipt && <Badge variant="outline" className="ml-1.5 text-[10px]">Reimburse</Badge>}
+                      {jobs.length > 1 && l.job && <p className="text-xs text-muted-foreground">{l.job.number}</p>}
                       {l.note && <p className="text-xs text-muted-foreground">{l.note}</p>}
                     </TableCell>
                     <TableCell className="whitespace-nowrap">{formatNumber(Number(l.qty), 0)}{l.unitLabel && <span className="text-muted-foreground"> × {l.unitLabel}</span>}</TableCell>
                     <TableCell>{formatIDR(Number(l.unitPrice))}</TableCell>
-                    <TableCell>{l.taxable ? <Badge variant="outline">11%</Badge> : "-"}</TableCell>
+                    <TableCell>{l.taxable ? <Badge variant="outline">{ppnLabel}</Badge> : "-"}</TableCell>
                     <TableCell className="text-right tabular-nums">{formatIDR(Number(l.amount))}</TableCell>
                   </TableRow>
                 ))}
@@ -97,8 +114,9 @@ export default async function InvoiceDetail({ params }: { params: Promise<{ id: 
           </CardContent>
           <div className="space-y-1 border-t px-5 py-3 text-sm">
             <Row label="Subtotal" value={formatIDR(Number(inv.subtotal))} />
-            <Row label="DPP (taxable)" value={formatIDR(Number(inv.taxableBase))} muted />
-            <Row label="PPN 11%" value={formatIDR(Number(inv.ppnAmount))} />
+            <Row label="Pendapatan (DPP)" value={formatIDR(Number(inv.taxableBase))} muted />
+            {reimburse > 0 && <Row label="Reimburse" value={formatIDR(reimburse)} muted />}
+            <Row label={`PPN ${ppnLabel}`} value={formatIDR(Number(inv.ppnAmount))} />
             <Row label="Total" value={formatIDR(Number(inv.total))} strong />
             <Row label="Dibayar" value={formatIDR(Number(inv.amountPaid))} muted />
             <Row label="Sisa" value={formatIDR(outstanding)} strong />

@@ -13,27 +13,27 @@ import { formatIDR } from "@/lib/format";
 import { addJobChargeAction, deleteJobChargeAction, updateJobChargeAction } from "./charge-actions";
 
 type Opt = { id: string; label: string };
-export type ChargeOpt = { id: string; code: string; name: string; taxable: boolean };
+export type ChargeOpt = { id: string; code: string; name: string; asReceipt: boolean };
 export type ChargeFormOptions = { charges: ChargeOpt[]; currencies: string[]; rates: Record<string, number>; vendors: Opt[]; vehicles: Opt[] };
 export type ChargeInitial = {
   id: string; chargeCodeId: string; description: string | null; qty: number; unitPrice: number; currency: string;
-  rate: number; taxable: boolean; vendorId: string | null; vehicleId: string | null;
+  rate: number; asReceipt: boolean; vendorId: string | null; vehicleId: string | null;
 };
 
 const NONE = "__none__";
 
-/** Dialog tambah atau ubah satu baris charge di tab Costing job. */
+/** Dialog tambah atau ubah satu baris charge di halaman Costing job. */
 export function ChargeForm({ jobId, side, options, initial }: { jobId: string; side: "SELLING" | "BUYING"; options: ChargeFormOptions; initial?: ChargeInitial }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [open, setOpen] = useState(false);
   const blank = {
-    chargeCodeId: "", description: "", qty: "1", unitPrice: "", currency: "IDR", rate: "", taxable: false,
+    chargeCodeId: "", description: "", qty: "1", unitPrice: "", currency: "IDR", rate: "", asReceipt: false,
     source: "VENDOR" as "VENDOR" | "OWN_FLEET", vendorId: NONE, vehicleId: NONE,
   };
   const fromInitial = (i: ChargeInitial) => ({
     chargeCodeId: i.chargeCodeId, description: i.description ?? "", qty: String(i.qty), unitPrice: String(i.unitPrice),
-    currency: i.currency, rate: i.currency === "IDR" ? "" : String(i.rate), taxable: i.taxable,
+    currency: i.currency, rate: i.currency === "IDR" ? "" : String(i.rate), asReceipt: i.asReceipt,
     source: (i.vehicleId ? "OWN_FLEET" : "VENDOR") as "VENDOR" | "OWN_FLEET", vendorId: i.vendorId ?? NONE, vehicleId: i.vehicleId ?? NONE,
   });
   const [f, setF] = useState(initial ? fromInitial(initial) : blank);
@@ -47,7 +47,7 @@ export function ChargeForm({ jobId, side, options, initial }: { jobId: string; s
     start(async () => {
       const input = {
         side, chargeCodeId: f.chargeCodeId, description: f.description, qty: f.qty, unitPrice: f.unitPrice || "0",
-        currency: f.currency, rate: f.currency === "IDR" ? null : f.rate || null, taxable: f.taxable,
+        currency: f.currency, rate: f.currency === "IDR" ? null : f.rate || null, taxable: !f.asReceipt, asReceipt: f.asReceipt,
         vendorId: side === "BUYING" && f.source === "VENDOR" && f.vendorId !== NONE ? f.vendorId : null,
         vehicleId: side === "BUYING" && f.source === "OWN_FLEET" && f.vehicleId !== NONE ? f.vehicleId : null,
       };
@@ -72,13 +72,13 @@ export function ChargeForm({ jobId, side, options, initial }: { jobId: string; s
         <DialogHeader>
           <DialogTitle>{initial ? `Ubah charge ${label}` : `Tambah charge ${label}`}</DialogTitle>
           <DialogDescription>
-            {side === "SELLING" ? "Baris selling ditagih ke customer lewat Buat Invoice dari Job." : "Baris buying ditagihkan vendor lewat Buat Bill, atau dicatat sebagai beban armada sendiri."}
+            {side === "SELLING" ? "Baris selling ditagih ke customer lewat menu Invoice." : "Baris buying dibayar lewat Voucher atau Vendor Bill, atau dicatat sebagai beban armada sendiri."}
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="space-y-1.5 sm:col-span-2">
             <Label>Charge</Label>
-            <Select value={f.chargeCodeId} onValueChange={(v) => { const c = options.charges.find((x) => x.id === v); set({ chargeCodeId: v, taxable: c?.taxable ?? false }); }}>
+            <Select value={f.chargeCodeId} onValueChange={(v) => { const c = options.charges.find((x) => x.id === v); set({ chargeCodeId: v, asReceipt: c?.asReceipt ?? false }); }}>
               <SelectTrigger aria-label="Charge"><SelectValue placeholder="Pilih charge…" /></SelectTrigger>
               <SelectContent>{options.charges.map((c) => <SelectItem key={c.id} value={c.id}>{c.code} · {c.name}</SelectItem>)}</SelectContent>
             </Select>
@@ -124,7 +124,7 @@ export function ChargeForm({ jobId, side, options, initial }: { jobId: string; s
           )}
           <div className="space-y-1.5 sm:col-span-2"><Label htmlFor="cf-desc">Keterangan (opsional)</Label><Input id="cf-desc" value={f.description} onChange={(e) => set({ description: e.target.value })} placeholder="contoh: biaya lift on/off tambahan" /></div>
           <label className="flex items-center gap-2 text-sm sm:col-span-2">
-            <input type="checkbox" checked={f.taxable} onChange={(e) => set({ taxable: e.target.checked })} className="h-4 w-4" /> Kena PPN
+            <input type="checkbox" checked={f.asReceipt} onChange={(e) => set({ asReceipt: e.target.checked })} className="h-4 w-4" /> Reimburse (as receipt), tidak masuk pendapatan dan margin
           </label>
         </div>
         <p className="rounded-md bg-muted/50 px-3 py-2 text-sm">Nilai IDR: <span className="font-semibold tabular-nums">{formatIDR(idr)}</span></p>

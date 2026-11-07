@@ -4,7 +4,7 @@ import {
   Package, Percent, BookOpen, FileText, Briefcase, CalendarCheck, FileSignature,
   Calculator, Receipt, FileInput, StickyNote, Wallet, BookMarked, BarChart3,
   UserCog, Settings, History, MapPin, Truck, PackageCheck, Scale, Calculator as CalcIcon,
-  ArrowLeftRight, BookCheck, Landmark, GitCompare, RefreshCw, Banknote, ArrowDownUp, NotebookPen, ListChecks, Bug,
+  ArrowLeftRight, BookCheck, Landmark, GitCompare, RefreshCw, Banknote, ArrowDownUp, NotebookPen, ListChecks, Bug, Ticket,
 } from "lucide-react";
 
 export type NavItem = {
@@ -53,11 +53,13 @@ export const NAV: NavGroup[] = [
       { label: "Costing", href: "/costing", icon: Calculator, resource: "costing" },
       { label: "Invoice (AR)", href: "/invoices", icon: Receipt, resource: "invoices" },
       { label: "Vendor Bill (AP)", href: "/bills", icon: FileInput, resource: "bills" },
+      { label: "Voucher", href: "/vouchers", icon: Ticket, resource: "vouchers" },
       { label: "Debit/Credit Note", href: "/notes", icon: StickyNote, resource: "notes" },
       { label: "Receipt & Payment", href: "/payments", icon: Wallet, resource: "payments" },
       { label: "Accounting", href: "/accounting", icon: BookMarked, resource: "accounting" },
-      { label: "Kas Masuk / Keluar", href: "/accounting/cash-entry", icon: ArrowDownUp, resource: "accounting" },
-      { label: "Jurnal Manual", href: "/accounting/manual-journal", icon: NotebookPen, resource: "accounting" },
+      { label: "Jurnal Penerimaan & Pengeluaran", href: "/accounting/cash-entry", icon: ArrowDownUp, resource: "accounting" },
+      { label: "Jurnal Umum", href: "/accounting/manual-journal", icon: NotebookPen, resource: "accounting" },
+      { label: "Kasir All", href: "/accounting/kasir", icon: ListChecks, resource: "accounting" },
       { label: "Arus Kas", href: "/accounting/cash-flow", icon: ArrowLeftRight, resource: "accounting" },
       { label: "Tutup Buku", href: "/accounting/closing", icon: BookCheck, resource: "accounting" },
       { label: "Aset Tetap", href: "/accounting/fixed-assets", icon: Building2, resource: "accounting" },

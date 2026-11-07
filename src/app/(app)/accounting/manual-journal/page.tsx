@@ -3,13 +3,15 @@ import { prisma } from "@/lib/prisma";
 import { can } from "@/lib/rbac";
 import { listManualJournals, manualAccountInfo } from "@/lib/manual-journal";
 import { formatIDR } from "@/lib/format";
+import { getLockKey } from "@/lib/period-lock";
 import { PageHeader } from "@/components/page-header";
 import { StatStrip } from "@/components/stat-strip";
 import { ManualJournalPanel } from "./manual-journal-panel";
 
 export const dynamic = "force-dynamic";
 
-export default async function ManualJournalPage() {
+export default async function ManualJournalPage({ searchParams }: { searchParams: Promise<{ edit?: string }> }) {
+  const sp = await searchParams;
   const user = await requireCan("accounting", "read");
   const today = new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10);
   const [info, entries] = await Promise.all([manualAccountInfo(prisma), listManualJournals(prisma)]);
@@ -24,14 +26,14 @@ export default async function ManualJournalPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Jurnal Manual" description="Jurnal koreksi multi baris. Harus seimbang, dan pembatalan dilakukan dengan jurnal pembalik" />
+      <PageHeader title="Jurnal Umum" description="Jurnal koreksi multi baris. Harus seimbang, dan bisa diedit selama periode belum dikunci" />
       <StatStrip items={[
         { label: "Jurnal berlaku", value: active.length },
         { label: "Jurnal bulan ini", value: thisMonth },
         { label: "Nilai jurnal berlaku", value: formatIDR(active.reduce((s, e) => s + e.total, 0)) },
         { label: "Dibatalkan", value: entries.length - active.length, tone: entries.length - active.length ? "warning" : undefined },
       ]} />
-      <ManualJournalPanel accounts={accounts} entries={entries} today={today} canWrite={can(user.role, "accounting", "write")} />
+      <ManualJournalPanel accounts={accounts} entries={entries} today={today} canWrite={can(user.role, "accounting", "write")} lockKey={await getLockKey(prisma)} editId={entries.some((e) => e.id === sp.edit) ? sp.edit : undefined} />
     </div>
   );
 }

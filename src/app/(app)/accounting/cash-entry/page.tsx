@@ -5,6 +5,7 @@ import { cashAccountOptions, cashCoaIds } from "@/lib/cash-accounts";
 import { listCashEntries } from "@/lib/cash-entry";
 import { listTransfers } from "@/lib/bank-transfer";
 import { latestRate } from "@/lib/fx";
+import { getLockKey } from "@/lib/period-lock";
 import { formatIDR } from "@/lib/format";
 import { PageHeader } from "@/components/page-header";
 import { StatStrip } from "@/components/stat-strip";
@@ -14,7 +15,7 @@ import { TransferPanel } from "./transfer-panel";
 
 export const dynamic = "force-dynamic";
 
-type SP = { rekening?: string; nominal?: string; tanggal?: string; ket?: string; arah?: string; tab?: string };
+type SP = { rekening?: string; nominal?: string; tanggal?: string; ket?: string; arah?: string; tab?: string; edit?: string };
 
 export default async function CashEntryPage({ searchParams }: { searchParams: Promise<SP> }) {
   const user = await requireCan("accounting", "read");
@@ -51,25 +52,27 @@ export default async function CashEntryPage({ searchParams }: { searchParams: Pr
       }
     : undefined;
   const canWrite = can(user.role, "accounting", "write");
+  const lock = await getLockKey(prisma);
+  const editId = entries.some((e) => e.id === sp.edit) ? sp.edit : undefined;
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Kas Masuk / Keluar" description="Transaksi kas dan bank di luar invoice dan bill, serta transfer antar rekening" />
+      <PageHeader title="Jurnal Penerimaan & Pengeluaran" description="Transaksi kas dan bank di luar invoice dan bill, serta transfer antar rekening" />
       <StatStrip items={[
         { label: "Transaksi kas", value: active.length },
-        { label: "Total kas masuk", value: formatIDR(totalIn), tone: "success" },
-        { label: "Total kas keluar", value: formatIDR(totalOut), tone: "warning" },
+        { label: "Total penerimaan", value: formatIDR(totalIn), tone: "success" },
+        { label: "Total pengeluaran", value: formatIDR(totalOut), tone: "warning" },
         { label: "Transfer antar rekening", value: transfers.filter((t) => !t.reversed).length },
       ]} />
       <Tabs defaultValue={sp.tab === "transfer" ? "transfer" : "kas"}>
         <TabsList>
-          <TabsTrigger value="kas">Kas masuk / keluar</TabsTrigger>
+          <TabsTrigger value="kas">Penerimaan / pengeluaran</TabsTrigger>
           <TabsTrigger value="transfer">Transfer antar rekening</TabsTrigger>
         </TabsList>
         <TabsContent value="kas">
           <CashEntryPanel
             cashAccounts={cash.options} defaultCashId={cash.defaultId} prefill={prefill} rates={rates}
-            inAccounts={inAccounts} outAccounts={outAccounts} entries={entries} today={today} canWrite={canWrite}
+            inAccounts={inAccounts} outAccounts={outAccounts} entries={entries} today={today} canWrite={canWrite} lockKey={lock} editId={editId}
           />
         </TabsContent>
         <TabsContent value="transfer">

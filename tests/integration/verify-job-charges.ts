@@ -39,9 +39,7 @@ async function main() {
 
   const invId = await createInvoiceFromJobCore(db, job.id);
   const inv = await db.invoice.findUniqueOrThrow({ where: { id: invId } });
-  ok(Number(inv.subtotal) === 19_500_000 && Number(inv.ppnAmount) === 385_000, `invoice dari charge manual: subtotal ${inv.subtotal}, PPN ${inv.ppnAmount}`);
-  ok((await err(() => deleteJobCharge(db, of))).includes("sudah ditagih"), "charge yang sudah ditagih tidak bisa dihapus");
-  ok((await err(() => updateJobCharge(db, of, { side: "SELLING", chargeCodeId: cc.OF.id, qty: 1, unitPrice: 1, taxable: false }))).includes("sudah ditagih"), "charge yang sudah ditagih tidak bisa diubah");
+  ok(Number(inv.subtotal) === 19_500_000 && Number(inv.ppnAmount) === 214_500, `invoice dari charge manual: subtotal ${inv.subtotal}, PPN ${inv.ppnAmount}`);
 
   // Biaya tambahan setelah invoice pertama: ditagih di invoice kedua, hanya baris baru.
   const extra = await addJobCharge(db, job.id, { side: "SELLING", chargeCodeId: cc.THC.id, qty: 1, unitPrice: 500_000, taxable: true, description: "Lift on/off tambahan" });
@@ -52,7 +50,7 @@ async function main() {
   await deleteJobCharge(db, extra);
   ok((await db.costingLine.count({ where: { id: extra } })) === 0, "baris tambahan bisa dihapus setelah invoicenya dibatalkan");
 
-  const billId = await createBillFromJobCore(db, job.id, trucker.id);
+  const billId = await createBillFromJobCore(db, job.id, trucker.id, undefined, { ppn: 220_000 });
   const bill = await db.vendorBill.findUniqueOrThrow({ where: { id: billId } });
   ok(Number(bill.subtotal) === 2_000_000 && Number(bill.ppnAmount) === 220_000, `bill dari charge buying manual: subtotal ${bill.subtotal}, PPN ${bill.ppnAmount}, PPh 23 ${bill.pph23Amount}`);
   ok((await err(() => deleteJobCharge(db, buy))).includes("sudah di-bill"), "charge buying yang sudah di-bill tidak bisa dihapus");

@@ -5,7 +5,8 @@ import { Prisma, type DomesticStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { assertCan } from "@/lib/auth-helpers";
 import { writeAudit } from "@/lib/audit";
-import { genDocNumber, SEQ } from "@/lib/sequence";
+import { genDocNumber, genInvoiceNumber, SEQ } from "@/lib/sequence";
+import { getPpnRate } from "@/lib/receivables";
 import { postJournal } from "@/lib/journal";
 import { accountMap, ACC } from "@/lib/coa";
 import { clean } from "@/lib/crud";
@@ -175,14 +176,15 @@ export async function createInvoiceFromDomestic(id: string): Promise<ActionResul
       lines.push({ chargeCode: { connect: { id: cc.id } }, description: p.label, qty: D(1), unitPrice: D(p.amount), amount: D(p.amount), taxable: cc.defaultTaxable });
     }
     subtotal = r2(subtotal); taxableBase = r2(taxableBase);
-    const ppn = r2(taxableBase * PPN);
+    const ppnRate = await getPpnRate(tx);
+    const ppn = r2(taxableBase * ppnRate);
     const total = r2(subtotal + ppn);
 
-    const number = await genDocNumber(tx, SEQ.INVOICE, date);
+    const number = await genInvoiceNumber(tx, date);
     const inv = await tx.invoice.create({
       data: {
         number, domesticShipmentId: s.id, customerId: s.customerId, date, dueDate, currency: "IDR",
-        subtotal: D(subtotal), taxableBase: D(taxableBase), ppnAmount: D(ppn), total: D(total),
+        subtotal: D(subtotal), taxableBase: D(taxableBase), ppnRate: D(ppnRate), ppnAmount: D(ppn), total: D(total),
         status: "UNPAID", postedAt: date, notes: `STT ${s.number}`, lines: { create: lines },
       },
     });

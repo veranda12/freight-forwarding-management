@@ -22,10 +22,12 @@ export async function postJournal(
     lines: JournalLineInput[];
     createdById?: string;
     date2?: Date;
+    /** Nomor bukti (BM, BK, KM, KK, JU). Kosong = nomor JE otomatis. */
+    number?: string;
   }
 ): Promise<string> {
   await assertNotLocked(tx, opts.date);
-  const number = await genDocNumber(tx, SEQ.JOURNAL, opts.date);
+  const number = opts.number ?? (await genDocNumber(tx, SEQ.JOURNAL, opts.date));
   const totalDebit = r2(opts.lines.reduce((s, l) => s + (l.debit ?? 0), 0));
   const totalCredit = r2(opts.lines.reduce((s, l) => s + (l.credit ?? 0), 0));
   if (Math.abs(totalDebit - totalCredit) > 0.5) {
@@ -47,6 +49,57 @@ export async function postJournal(
     },
   });
   return je.id;
+}
+
+/** Alasan jurnal tidak bisa diedit, atau null bila masih bisa. Murni. */
+export function journalEditBlock(e: { isReversed: boolean; isReversal: boolean; lines: { reconciledAt: Date | null; statementLine?: unknown }[] }): string | null {
+  if (e.isReversed) return "Transaksi ini sudah dibatalkan.";
+  if (e.isReversal) return "Jurnal pembatalan tidak bisa diedit.";
+  if (e.lines.some((l) => l.reconciledAt || l.statementLine)) return "Transaksi sudah direkonsiliasi. Lepas cocokannya dulu di Rekonsiliasi Bank.";
+  return null;
+}
+
+/**
+ * Ganti isi jurnal tanpa mengubah nomornya. Dipakai untuk koreksi selama periode belum dikunci.
+ * Mengembalikan isi sebelum dan sesudah untuk riwayat perubahan.
+ */
+export async function replaceJournal(
+  tx: Tx,
+  entryId: string,
+  next: { date: Date; description: string; lines: JournalLineInput[]; sourceId?: string }
+) {
+  const old = await tx.journalEntry.findUnique({
+    where: { id: entryId },
+    include: { lines: { include: { statementLine: { select: { id: true } }, account: { select: { code: true } } } } },
+  });
+  if (!old) throw new Error("Transaksi tidak ditemukan.");
+  const block = journalEditBlock(old);
+  if (block) throw new Error(block);
+  await assertNotLocked(tx, old.date);
+  await assertNotLocked(tx, next.date);
+  const debit = r2(next.lines.reduce((s, l) => s + (l.debit ?? 0), 0));
+  const credit = r2(next.lines.reduce((s, l) => s + (l.credit ?? 0), 0));
+  if (Math.abs(debit - credit) > 0.5) throw new Error(`Jurnal tidak seimbang (D ${debit} ≠ K ${credit}).`);
+  await tx.journalLine.deleteMany({ where: { entryId } });
+  await tx.journalEntry.update({
+    where: { id: entryId },
+    data: {
+      date: next.date, description: next.description, ...(next.sourceId ? { sourceId: next.sourceId } : {}),
+      lines: {
+        create: next.lines.map((l) => ({
+          accountId: l.accountId, debit: new Prisma.Decimal(r2(l.debit ?? 0)), credit: new Prisma.Decimal(r2(l.credit ?? 0)),
+          description: l.description, amountForeign: l.amountForeign ? new Prisma.Decimal(r2(Math.abs(l.amountForeign))) : null,
+        })),
+      },
+    },
+  });
+  return {
+    before: {
+      date: old.date.toISOString(), description: old.description,
+      lines: old.lines.map((l) => ({ account: l.account.code, debit: Number(l.debit), credit: Number(l.credit), description: l.description })),
+    },
+    after: { date: next.date.toISOString(), description: next.description, lines: next.lines },
+  };
 }
 
 /**

@@ -15,7 +15,7 @@ export default async function CostingPage() {
     include: { customer: { select: { name: true } } },
   });
   const rows: CostingRow[] = jobs.map((j) => ({
-    id: j.id, number: j.number, customer: j.customer.name, mode: j.mode,
+    id: j.id, number: j.number, bl: [j.hblNo, j.mblNo, j.hawbNo, j.mawbNo].filter(Boolean).join(" / "), customer: j.customer.name, mode: j.mode,
     revenue: Number(j.revenueIdr), cost: Number(j.costIdr), profit: Number(j.profitIdr), margin: Number(j.marginPct),
   }));
   const totalRev = rows.reduce((s, r) => s + r.revenue, 0);

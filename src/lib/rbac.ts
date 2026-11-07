@@ -22,6 +22,7 @@ export type Resource =
   | "costing"
   | "invoices"
   | "bills"
+  | "vouchers"
   | "notes"
   | "payments"
   | "accounting"
@@ -51,32 +52,33 @@ const MATRIX: Record<Resource, { read: Role[]; write: Role[] }> = {
   ports: { read: ALL, write: ["OPERATION"] },
   vehicles: { read: ALL, write: ["OPERATION"] },
   currencies: { read: ALL, write: ["FINANCE"] },
-  charges: { read: ["SALES", "OPERATION", "FINANCE"], write: ["FINANCE"] },
+  charges: { read: ["SALES", "FINANCE"], write: ["FINANCE"] },
   containers: { read: ALL, write: ["OPERATION"] },
   commodities: { read: ALL, write: ["OPERATION", "SALES"] },
   taxes: { read: ["FINANCE", "SALES"], write: ["FINANCE"] },
   coa: { read: ["FINANCE"], write: ["FINANCE"] },
 
-  rates: { read: ["SALES", "OPERATION"], write: ["SALES"] },
+  rates: { read: ["SALES"], write: ["SALES"] },
   weightRules: { read: ALL, write: ["SALES", "OPERATION"] },
 
   // Domestik — modul terpisah dari Ekspor-Impor
   domestic: { read: ["SALES", "OPERATION", "DOCUMENTATION", "FINANCE"], write: ["OPERATION", "SALES"] },
   domesticTariffs: { read: ["SALES", "OPERATION", "FINANCE"], write: ["SALES"] },
-  quotations: { read: ["SALES", "OPERATION"], write: ["SALES"] },
+  quotations: { read: ["SALES"], write: ["SALES"] },
 
   jobs: { read: ["SALES", "OPERATION", "DOCUMENTATION", "FINANCE"], write: ["OPERATION"] },
   bookings: { read: ["OPERATION", "DOCUMENTATION"], write: ["OPERATION"] },
   documents: { read: ["OPERATION", "DOCUMENTATION", "FINANCE"], write: ["DOCUMENTATION", "OPERATION"] },
 
-  costing: { read: ["SALES", "OPERATION", "FINANCE"], write: ["OPERATION", "FINANCE"] },
+  costing: { read: ["SALES", "FINANCE"], write: ["FINANCE"] },
   invoices: { read: ["FINANCE", "SALES"], write: ["FINANCE"] },
   bills: { read: ["FINANCE"], write: ["FINANCE"] },
+  vouchers: { read: ["FINANCE"], write: ["FINANCE"] },
   notes: { read: ["FINANCE"], write: ["FINANCE"] },
   payments: { read: ["FINANCE"], write: ["FINANCE"] },
   accounting: { read: ["FINANCE"], write: ["FINANCE"] },
 
-  reports: { read: ["SALES", "OPERATION", "FINANCE"], write: [] },
+  reports: { read: ["SALES", "FINANCE"], write: [] },
   users: { read: [], write: [] },
   settings: { read: ["FINANCE"], write: [] },
   audit: { read: [], write: [] },

@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { ArrowDownLeft, ArrowUpRight, Ban, Loader2, Plus } from "lucide-react";
+import { ArrowDownLeft, ArrowUpRight, Ban, Loader2, Pencil, Plus, Printer, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,38 +14,76 @@ import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, Di
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { EmptyState } from "@/components/empty-state";
+import { MoneyInput } from "@/components/money-input";
+import { SearchableSelect } from "@/components/searchable-select";
 import { formatIDR, formatDate, formatMoney } from "@/lib/format";
-import { cancelCashEntryAction, createCashEntryAction } from "../actions";
+import { cancelCashEntryAction, createCashEntryAction, previewProofAction, updateCashEntryAction } from "../actions";
 
-export type CashOpt = { id: string; label: string; currency?: string };
+export type CashOpt = { id: string; label: string; currency?: string; kind?: string };
 type Opt = { id: string; label: string };
 type Entry = {
   id: string; number: string; date: string; description: string; direction: "IN" | "OUT"; amount: number;
   bankName: string; counter: string; reversed: boolean; currency: string; amountForeign: number | null;
+  bankAccountId: string; note: string; reference: string; rate: number | null; reconciled: boolean;
+  rows: { counterAccountId: string; amount: number; description: string }[];
 };
 export type CashPrefill = { direction: "IN" | "OUT"; bankAccountId: string; amount: string; dateKey: string; description: string };
+type Row = { key: number; counterAccountId: string; amount: string; description: string };
 
-export function CashEntryPanel({ cashAccounts, defaultCashId, inAccounts, outAccounts, entries, today, canWrite, prefill, rates }: {
+let seq = 0;
+const newRow = (amount = ""): Row => ({ key: ++seq, counterAccountId: "", amount, description: "" });
+const LABEL = { IN: "Jurnal Penerimaan", OUT: "Jurnal Pengeluaran" } as const;
+const dateKeyOf = (iso: string) => new Date(new Date(iso).getTime() + 7 * 3600 * 1000).toISOString().slice(0, 10);
+
+export function CashEntryPanel({ cashAccounts, defaultCashId, inAccounts, outAccounts, entries, today, canWrite, prefill, rates, lockKey, editId }: {
   cashAccounts: CashOpt[]; defaultCashId: string | null; inAccounts: Opt[]; outAccounts: Opt[]; entries: Entry[];
-  today: string; canWrite: boolean; prefill?: CashPrefill; rates: Record<string, number>;
+  today: string; canWrite: boolean; prefill?: CashPrefill; rates: Record<string, number>; lockKey: string | null; editId?: string;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
-  const blank = { direction: "OUT" as "IN" | "OUT", bankAccountId: defaultCashId ?? "", counterAccountId: "", amount: "", rate: "", dateKey: today, description: "", reference: "" };
-  const [open, setOpen] = useState(!!prefill && canWrite);
-  const [f, setF] = useState(prefill ? { ...blank, ...prefill } : blank);
+  const blank = { direction: "OUT" as "IN" | "OUT", bankAccountId: defaultCashId ?? "", rate: "", dateKey: today, description: "", reference: "" };
+  const editing0 = entries.find((e) => e.id === editId) ?? null;
+  const fromEntry = (e: Entry) => ({ direction: e.direction, bankAccountId: e.bankAccountId, rate: e.rate ? String(e.rate) : "", dateKey: dateKeyOf(e.date), description: e.note, reference: e.reference });
+  const rowsOf = (e: Entry): Row[] => e.rows.map((r) => ({ key: ++seq, counterAccountId: r.counterAccountId, amount: String(r.amount), description: r.description }));
+  const [editing, setEditing] = useState<Entry | null>(canWrite ? editing0 : null);
+  const [open, setOpen] = useState((!!prefill || !!editing0) && canWrite);
+  const [f, setF] = useState(editing0 ? fromEntry(editing0) : prefill ? { ...blank, direction: prefill.direction, bankAccountId: prefill.bankAccountId, dateKey: prefill.dateKey, description: prefill.description } : blank);
+  const [rows, setRows] = useState<Row[]>(() => (editing0 ? rowsOf(editing0) : [newRow(prefill?.amount ?? "")]));
   const set = (p: Partial<typeof f>) => setF((x) => ({ ...x, ...p }));
+  const setRow = (key: number, p: Partial<Row>) => setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...p } : r)));
   const [cancel, setCancel] = useState<Entry | null>(null);
   const [reason, setReason] = useState("");
+  const [preview, setPreview] = useState("");
   const counterOpts = f.direction === "IN" ? inAccounts : outAccounts;
-  const cur = cashAccounts.find((a) => a.id === f.bankAccountId)?.currency ?? "IDR";
+  const account = cashAccounts.find((a) => a.id === f.bankAccountId);
+  const cur = account?.currency ?? "IDR";
   const isFx = cur !== "IDR";
   const rateNum = Number(f.rate) || rates[cur] || 0;
+  const total = rows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
+  const rowsReady = rows.length > 0 && rows.every((r) => r.counterAccountId && Number(r.amount) > 0);
+  // Saat edit, rekening hanya bisa diganti ke jenis yang sama, karena kodenya ada di nomor bukti.
+  const editKind = editing ? cashAccounts.find((a) => a.id === editing.bankAccountId)?.kind : null;
+  const cashChoices = editKind ? cashAccounts.filter((a) => a.kind === editKind) : cashAccounts;
 
+  // Nomor bukti tampil setelah rekening dipilih, nomor final terbentuk saat disimpan.
+  useEffect(() => {
+    if (editing || !open || !account?.kind || !/^\d{4}-\d{2}-\d{2}$/.test(f.dateKey)) { setPreview(""); return; }
+    const code = account.kind === "CASH" ? (f.direction === "IN" ? "KM" : "KK") : f.direction === "IN" ? "BM" : "BK";
+    let live = true;
+    previewProofAction(code, f.dateKey).then((n) => { if (live) setPreview(n); }).catch(() => setPreview(""));
+    return () => { live = false; };
+  }, [editing, open, account?.kind, f.direction, f.dateKey]);
+
+  function startNew() { setEditing(null); setF(blank); setRows([newRow()]); }
+  function startEdit(e: Entry) { setEditing(e); setF(fromEntry(e)); setRows(rowsOf(e)); setOpen(true); }
   function save() {
     start(async () => {
-      const res = await createCashEntryAction({ ...f, amount: Number(f.amount), rate: isFx ? rateNum : null });
-      if (res.ok) { toast.success(f.direction === "IN" ? "Kas masuk dicatat." : "Kas keluar dicatat."); setOpen(false); setF(blank); router.replace("/accounting/cash-entry"); router.refresh(); }
+      const input = {
+        direction: f.direction, bankAccountId: f.bankAccountId, dateKey: f.dateKey, description: f.description, reference: f.reference, rate: isFx ? rateNum : null,
+        rows: rows.map((r) => ({ counterAccountId: r.counterAccountId, amount: Number(r.amount), description: r.description })),
+      };
+      const res = editing ? await updateCashEntryAction(editing.id, input) : await createCashEntryAction(input);
+      if (res.ok) { toast.success(editing ? "Transaksi diperbarui, nomor bukti tetap." : `${LABEL[f.direction]} dicatat.`); setOpen(false); setEditing(null); setF(blank); setRows([newRow()]); router.replace("/accounting/cash-entry"); router.refresh(); }
       else toast.error(res.error);
     });
   }
@@ -56,51 +95,64 @@ export function CashEntryPanel({ cashAccounts, defaultCashId, inAccounts, outAcc
       else toast.error(res.error);
     });
   }
+  const isLocked = (e: Entry) => !!lockKey && dateKeyOf(e.date) <= lockKey;
 
   return (
     <div className="space-y-4">
       {canWrite && (
-        <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (v && !prefill) setF(blank); }}>
-          <DialogTrigger asChild><Button><Plus /> Catat transaksi kas</Button></DialogTrigger>
-          <DialogContent className="max-w-lg">
+        <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (v && !prefill) startNew(); if (!v) setEditing(null); }}>
+          <DialogTrigger asChild><Button><Plus /> Catat transaksi</Button></DialogTrigger>
+          <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>Catat kas masuk atau kas keluar</DialogTitle>
-              <DialogDescription>Untuk transaksi di luar invoice dan bill: biaya admin bank, bunga, gaji, listrik, sewa, atau pemasukan lain.</DialogDescription>
+              <DialogTitle>{editing ? `Edit ${editing.number}` : LABEL[f.direction]}</DialogTitle>
+              <DialogDescription>{editing ? "Nomor bukti tetap, dan isi sebelumnya tersimpan di riwayat perubahan." : "Untuk transaksi di luar invoice dan bill. Satu nomor bukti bisa berisi beberapa baris."}</DialogDescription>
             </DialogHeader>
             <div className="grid gap-3 text-sm sm:grid-cols-2">
-              <div className="flex gap-2 sm:col-span-2">
-                <Button type="button" variant={f.direction === "OUT" ? "default" : "outline"} className="flex-1" onClick={() => set({ direction: "OUT", counterAccountId: "" })}><ArrowUpRight /> Kas keluar</Button>
-                <Button type="button" variant={f.direction === "IN" ? "default" : "outline"} className="flex-1" onClick={() => set({ direction: "IN", counterAccountId: "" })}><ArrowDownLeft /> Kas masuk</Button>
-              </div>
-              <div className="space-y-1.5 sm:col-span-2">
+              {!editing && (
+                <div className="flex gap-2 sm:col-span-2">
+                  <Button type="button" variant={f.direction === "OUT" ? "default" : "outline"} className="flex-1" onClick={() => { set({ direction: "OUT" }); setRows([newRow()]); }}><ArrowUpRight /> Jurnal Pengeluaran</Button>
+                  <Button type="button" variant={f.direction === "IN" ? "default" : "outline"} className="flex-1" onClick={() => { set({ direction: "IN" }); setRows([newRow()]); }}><ArrowDownLeft /> Jurnal Penerimaan</Button>
+                </div>
+              )}
+              <div className="space-y-1.5">
                 <Label>{f.direction === "OUT" ? "Dibayar dari" : "Diterima di"}</Label>
                 <Select value={f.bankAccountId} onValueChange={(v) => set({ bankAccountId: v, rate: "" })}>
                   <SelectTrigger><SelectValue placeholder="Pilih kas atau rekening" /></SelectTrigger>
-                  <SelectContent>{cashAccounts.map((a) => <SelectItem key={a.id} value={a.id}>{a.label}{a.currency && a.currency !== "IDR" ? ` (${a.currency})` : ""}</SelectItem>)}</SelectContent>
+                  <SelectContent>{cashChoices.map((a) => <SelectItem key={a.id} value={a.id}>{a.label}{a.currency && a.currency !== "IDR" ? ` (${a.currency})` : ""}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
-              <div className="space-y-1.5 sm:col-span-2">
-                <Label>{f.direction === "OUT" ? "Untuk (akun beban atau lainnya)" : "Dari (akun pendapatan atau lainnya)"}</Label>
-                <Select value={f.counterAccountId} onValueChange={(v) => set({ counterAccountId: v })}>
-                  <SelectTrigger><SelectValue placeholder="Pilih akun lawan" /></SelectTrigger>
-                  <SelectContent>{counterOpts.map((a) => <SelectItem key={a.id} value={a.id}>{a.label}</SelectItem>)}</SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1.5"><Label>Tanggal</Label><Input type="date" value={f.dateKey} onChange={(e) => set({ dateKey: e.target.value })} /></div>
-              <div className="space-y-1.5"><Label>Nominal ({cur})</Label><Input type="number" min={0} step="0.01" value={f.amount} onChange={(e) => set({ amount: e.target.value })} /></div>
-              {isFx && (
-                <div className="space-y-1.5 sm:col-span-2">
+              <div className="space-y-1.5"><Label>No. Bukti</Label><Input readOnly value={editing?.number ?? preview} placeholder="Pilih rekening dulu" className="bg-muted/40" /></div>
+              <div className="space-y-1.5"><Label>Tanggal transaksi</Label><Input type="date" value={f.dateKey} onChange={(e) => set({ dateKey: e.target.value })} /></div>
+              {isFx ? (
+                <div className="space-y-1.5">
                   <Label>Kurs (IDR per 1 {cur})</Label>
                   <Input type="number" min={0} value={f.rate} onChange={(e) => set({ rate: e.target.value })} placeholder={rates[cur] ? `otomatis ${rates[cur]}` : "isi kurs"} />
-                  <p className="text-xs text-muted-foreground">Dicatat di buku: {formatIDR(Math.round(Number(f.amount || 0) * rateNum * 100) / 100)}</p>
                 </div>
-              )}
+              ) : <div />}
               <div className="space-y-1.5 sm:col-span-2"><Label>Keterangan</Label><Input value={f.description} onChange={(e) => set({ description: e.target.value })} placeholder={f.direction === "OUT" ? "Biaya admin bank Oktober" : "Bunga jasa giro Oktober"} /></div>
-              <div className="space-y-1.5 sm:col-span-2"><Label>Referensi (opsional)</Label><Input value={f.reference} onChange={(e) => set({ reference: e.target.value })} placeholder="No. bukti / mutasi rekening koran" /></div>
+              <div className="space-y-2 sm:col-span-2">
+                <Label>{f.direction === "OUT" ? "Tujuan pembayaran" : "Sumber penerimaan"}</Label>
+                {rows.map((r) => (
+                  <div key={r.key} className="grid gap-2 sm:grid-cols-[1fr_9rem_2.25rem]">
+                    <div className="space-y-1">
+                      <SearchableSelect value={r.counterAccountId} onChange={(v) => setRow(r.key, { counterAccountId: v })} options={counterOpts} placeholder="Pilih akun" ariaLabel="Akun lawan" />
+                      <Input aria-label="Keterangan baris" className="h-8" value={r.description} onChange={(e) => setRow(r.key, { description: e.target.value })} placeholder="Keterangan baris (opsional)" />
+                    </div>
+                    <MoneyInput aria-label={`Nominal ${cur}`} value={r.amount} onChange={(v) => setRow(r.key, { amount: v })} placeholder="Nominal" className="text-right" />
+                    <Button type="button" size="icon" variant="ghost" aria-label="Hapus baris" disabled={rows.length <= 1} onClick={() => setRows((rs) => rs.filter((x) => x.key !== r.key))}><Trash2 /></Button>
+                  </div>
+                ))}
+                <div className="flex items-center justify-between">
+                  <Button type="button" size="sm" variant="outline" onClick={() => setRows((rs) => [...rs, newRow()])}><Plus /> Tambah baris</Button>
+                  <span className="font-medium tabular-nums">Total {isFx ? formatMoney(total, cur, 2) : formatIDR(total)}</span>
+                </div>
+                {isFx && <p className="text-xs text-muted-foreground">Dicatat di buku: {formatIDR(Math.round(total * rateNum * 100) / 100)}</p>}
+              </div>
+              <div className="space-y-1.5 sm:col-span-2"><Label>Referensi (opsional)</Label><Input value={f.reference} onChange={(e) => set({ reference: e.target.value })} placeholder="No. mutasi rekening koran" /></div>
             </div>
             <DialogFooter>
               <DialogClose asChild><Button variant="ghost">Batal</Button></DialogClose>
-              <Button onClick={save} disabled={pending || !f.bankAccountId || !f.counterAccountId || !(Number(f.amount) > 0) || f.description.trim().length < 3 || (isFx && !(rateNum > 0))}>
+              <Button onClick={save} disabled={pending || !f.bankAccountId || !rowsReady || f.description.trim().length < 3 || (isFx && !(rateNum > 0))}>
                 {pending ? <Loader2 className="animate-spin" /> : null} Simpan
               </Button>
             </DialogFooter>
@@ -111,11 +163,11 @@ export function CashEntryPanel({ cashAccounts, defaultCashId, inAccounts, outAcc
       <Card>
         <CardContent className="p-0">
           {entries.length === 0 ? (
-            <EmptyState title="Belum ada kas masuk atau keluar" className="border-0" />
+            <EmptyState title="Belum ada transaksi" className="border-0" />
           ) : (
             <Table>
               <TableHeader><TableRow>
-                <TableHead>Tanggal</TableHead><TableHead>No. Jurnal</TableHead><TableHead>Kas / Rekening</TableHead>
+                <TableHead>Tanggal</TableHead><TableHead>No. Bukti</TableHead><TableHead>Kas / Rekening</TableHead>
                 <TableHead>Akun lawan</TableHead><TableHead>Keterangan</TableHead>
                 <TableHead className="text-right">Masuk</TableHead><TableHead className="text-right">Keluar</TableHead>
                 <TableHead>Status</TableHead>{canWrite && <TableHead className="text-right">Aksi</TableHead>}
@@ -131,7 +183,7 @@ export function CashEntryPanel({ cashAccounts, defaultCashId, inAccounts, outAcc
                   return (
                     <TableRow key={e.id} className={e.reversed ? "opacity-60" : ""}>
                       <TableCell className="whitespace-nowrap">{formatDate(e.date)}</TableCell>
-                      <TableCell className="font-mono text-xs">{e.number}</TableCell>
+                      <TableCell className="whitespace-nowrap"><Link href={`/accounting/journal/${e.id}`} className="font-medium text-primary hover:underline">{e.number}</Link></TableCell>
                       <TableCell>{e.bankName}</TableCell>
                       <TableCell className="text-muted-foreground">{e.counter}</TableCell>
                       <TableCell className="max-w-xs truncate" title={e.description}>{e.description}</TableCell>
@@ -140,7 +192,11 @@ export function CashEntryPanel({ cashAccounts, defaultCashId, inAccounts, outAcc
                       <TableCell>{e.reversed ? <Badge variant="outline">Dibatalkan</Badge> : <Badge variant="outline" className="border-success/50 text-success">Berlaku</Badge>}</TableCell>
                       {canWrite && (
                         <TableCell className="text-right">
-                          {!e.reversed && <Button size="sm" variant="ghost" className="text-destructive" onClick={() => { setCancel(e); setReason(""); }}><Ban /> Batalkan</Button>}
+                          <span className="inline-flex gap-0.5">
+                            <Button asChild size="icon" variant="ghost" className="h-8 w-8"><a href={`/api/accounting/journals/${e.id}/pdf`} target="_blank" rel="noopener" aria-label="Print"><Printer /></a></Button>
+                            {!e.reversed && !e.reconciled && !isLocked(e) && <Button size="icon" variant="ghost" className="h-8 w-8" aria-label="Edit" onClick={() => startEdit(e)}><Pencil /></Button>}
+                            {!e.reversed && <Button size="sm" variant="ghost" className="text-destructive" onClick={() => { setCancel(e); setReason(""); }}><Ban /> Batalkan</Button>}
+                          </span>
                         </TableCell>
                       )}
                     </TableRow>

@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Loader2, Wallet, Ban } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { MoneyInput } from "@/components/money-input";
 import { Label } from "@/components/ui/label";
 import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger, DialogClose, DialogDescription,
@@ -17,22 +18,23 @@ import { formatIDR } from "@/lib/format";
 import { recordReceipt, cancelInvoice } from "../actions";
 
 export function InvoiceActions({
-  invoiceId, currency, outstanding, outstandingForeign, bookedRate, defaultPaymentRate, canWrite, cancellable, pph23Suggest, cashAccounts, defaultCashId,
+  invoiceId, currency, outstanding, outstandingForeign, bookedRate, defaultPaymentRate, canWrite, cancellable, payable, pph23Suggest, cashAccounts, defaultCashId,
 }: {
   invoiceId: string; currency: string; outstanding: number; outstandingForeign: number;
-  bookedRate: number; defaultPaymentRate: number | null; canWrite: boolean; cancellable: boolean; pph23Suggest: number;
+  bookedRate: number; defaultPaymentRate: number | null; canWrite: boolean; cancellable: boolean; payable: boolean; pph23Suggest: number;
   cashAccounts: { id: string; label: string }[]; defaultCashId: string | null;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [open, setOpen] = useState(false);
   const isFx = currency !== "IDR";
-  const [amount, setAmount] = useState(String(Math.max(0, Math.round((outstanding - pph23Suggest) * 100) / 100)));
+  const [amount, setAmount] = useState(String(Math.max(0, Math.round(outstanding * 100) / 100)));
   const [amountF, setAmountF] = useState(String(outstandingForeign));
   const [payRate, setPayRate] = useState(defaultPaymentRate ? String(defaultPaymentRate) : "");
-  const [pph23, setPph23] = useState(pph23Suggest > 0 ? String(pph23Suggest) : "0");
-  const [admin, setAdmin] = useState("0");
-  const [other, setOther] = useState("0");
+  const [withPph23, setWithPph23] = useState(false);
+  const [admin, setAdmin] = useState("");
+  const [other, setOther] = useState("");
+  const [otherNote, setOtherNote] = useState("");
   const [bankAccountId, setBankAccountId] = useState(defaultCashId ?? "");
   const [method, setMethod] = useState("TRANSFER");
   const [reference, setReference] = useState("");
@@ -44,10 +46,18 @@ export function InvoiceActions({
   const cash = isFx ? Number(amountF) * Number(payRate) : Number(amount);
   const fx = cash - booked;
   const toNum = (v: string) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : 0);
-  const deductions = isFx ? undefined : { pph23: toNum(pph23), admin: toNum(admin), other: toNum(other) };
+  const deductions = isFx ? undefined : { pph23: withPph23 ? pph23Suggest : 0, admin: toNum(admin), other: toNum(other), otherNote };
   const deductTotal = deductions ? deductions.pph23 + deductions.admin + deductions.other : 0;
   const applied = Math.round((cash + deductTotal) * 100) / 100;
   const over = !isFx && applied > outstanding + 0.5;
+  const needNote = toNum(other) > 0 && otherNote.trim().length < 3;
+
+  /** PPh 23 mengurangi uang yang masuk ke rekening. */
+  function togglePph23(on: boolean) {
+    setWithPph23(on);
+    const next = Math.round((Number(amount) + (on ? -pph23Suggest : pph23Suggest)) * 100) / 100;
+    setAmount(String(Math.max(0, next)));
+  }
 
   function submit() {
     start(async () => {
@@ -70,7 +80,7 @@ export function InvoiceActions({
 
   return (
     <div className="flex items-center gap-2">
-      {outstanding > 0 && (
+      {outstanding > 0 && payable && (
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild><Button><Wallet /> Catat Pembayaran</Button></DialogTrigger>
           <DialogContent>
@@ -86,26 +96,20 @@ export function InvoiceActions({
                   <div className="space-y-1.5"><Label>Kurs bayar (IDR per {currency})</Label><Input type="number" value={payRate} onChange={(e) => setPayRate(e.target.value)} /></div>
                 </div>
               ) : (
-                <div className="space-y-1.5"><Label>Uang masuk ke rekening (IDR)</Label><Input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} /></div>
+                <div className="space-y-1.5"><Label>Uang masuk ke rekening (IDR)</Label><MoneyInput value={amount} onChange={setAmount} /></div>
               )}
               {!isFx && (
                 <div className="space-y-2 rounded-md border px-3 py-2 text-sm">
                   <p className="font-medium">Potongan (jika ada)</p>
-                  <div className="grid grid-cols-3 gap-2">
-                    <div className="space-y-1">
-                      <Label className="text-xs">PPh 23 dipotong</Label>
-                      <Input type="number" min={0} value={pph23} onChange={(e) => setPph23(e.target.value)} />
-                      {pph23Suggest > 0 && <p className="text-xs text-muted-foreground">Saran 2%: {formatIDR(pph23Suggest)}</p>}
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs">Biaya admin bank</Label>
-                      <Input type="number" min={0} value={admin} onChange={(e) => setAdmin(e.target.value)} />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs">Potongan lain</Label>
-                      <Input type="number" min={0} value={other} onChange={(e) => setOther(e.target.value)} />
-                    </div>
+                  <label className="flex items-center gap-2">
+                    <input type="checkbox" className="h-4 w-4 accent-primary" checked={withPph23} onChange={(e) => togglePph23(e.target.checked)} />
+                    PPh 23 dipotong customer (2% dari jasa): <span className="tabular-nums">{formatIDR(pph23Suggest)}</span>
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1"><Label className="text-xs">Biaya admin bank</Label><MoneyInput value={admin} onChange={setAdmin} placeholder="0" /></div>
+                    <div className="space-y-1"><Label className="text-xs">Potongan lain</Label><MoneyInput value={other} onChange={setOther} placeholder="0" /></div>
                   </div>
+                  {toNum(other) > 0 && <div className="space-y-1"><Label className="text-xs">Keterangan potongan lain</Label><Input value={otherNote} onChange={(e) => setOtherNote(e.target.value)} placeholder="contoh: selisih pembulatan" /></div>}
                   <div className="flex justify-between"><span>Total dilunasi (uang masuk + potongan)</span><span className="tabular-nums">{formatIDR(applied)}</span></div>
                   <div className="flex justify-between font-medium"><span>Sisa setelah pembayaran</span><span className="tabular-nums">{formatIDR(Math.round((outstanding - applied) * 100) / 100)}</span></div>
                   {over && <p className="text-xs text-destructive">Uang masuk dan potongan melebihi sisa tagihan.</p>}
@@ -139,7 +143,7 @@ export function InvoiceActions({
             </div>
             <DialogFooter>
               <DialogClose asChild><Button variant="ghost">Batal</Button></DialogClose>
-              <Button onClick={submit} disabled={pending || over || cash <= 0 || !bankAccountId}>{pending ? <Loader2 className="animate-spin" /> : null} Simpan</Button>
+              <Button onClick={submit} disabled={pending || over || needNote || cash <= 0 || !bankAccountId}>{pending ? <Loader2 className="animate-spin" /> : null} Simpan</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

@@ -28,7 +28,7 @@ export default async function BillDetail({ params }: { params: Promise<{ id: str
     include: {
       vendor: { select: { name: true, code: true, isForeign: true } },
       job: { select: { id: true, number: true } },
-      lines: { include: { chargeCode: true } },
+      lines: { include: { chargeCode: true, job: { select: { id: true, number: true, hblNo: true, mblNo: true } } } },
       allocations: { include: { payment: { select: { id: true, number: true, date: true } } } },
     },
   });
@@ -44,6 +44,8 @@ export default async function BillDetail({ params }: { params: Promise<{ id: str
   const defaultPaymentRate = isFx ? await latestRate(prisma, bill.currency, new Date().toISOString().slice(0, 10)) : 1;
   const payable = bill.status !== "PAID" && bill.status !== "CANCELLED";
   const cash = await cashAccountOptions(prisma, "payment");
+  const jobs = [...new Map(bill.lines.flatMap((l) => (l.job ? [[l.job.id, l.job] as const] : []))).values()];
+  if (jobs.length === 0 && bill.job) jobs.push({ ...bill.job, hblNo: null, mblNo: null });
 
   return (
     <div className="space-y-6">
@@ -66,10 +68,14 @@ export default async function BillDetail({ params }: { params: Promise<{ id: str
             />
           )}
         </PageHeader>
-        {bill.job && (
-          <Link href={`/jobs/${bill.job.id}`} className="mt-2 inline-flex items-center gap-1.5 text-sm text-primary hover:underline">
-            <Briefcase className="h-4 w-4" /> Job {bill.job.number}
-          </Link>
+        {jobs.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+            {jobs.map((j) => (
+              <Link key={j.id} href={`/costing/${j.id}`} className="inline-flex items-center gap-1.5 text-sm text-primary hover:underline">
+                <Briefcase className="h-4 w-4" /> {j.number}{(j.hblNo ?? j.mblNo) ? ` · B/L ${j.hblNo ?? j.mblNo}` : ""}
+              </Link>
+            ))}
+          </div>
         )}
       </div>
 
@@ -80,14 +86,14 @@ export default async function BillDetail({ params }: { params: Promise<{ id: str
             {bill.lines.length ? (
               <Table>
                 <TableHeader><TableRow>
-                  <TableHead>Charge</TableHead><TableHead>Keterangan</TableHead><TableHead>Qty</TableHead>
+                  <TableHead>Charge</TableHead><TableHead>Job</TableHead><TableHead>Qty</TableHead>
                   <TableHead>Harga</TableHead><TableHead>PPh 23</TableHead><TableHead className="text-right">Jumlah</TableHead>
                 </TableRow></TableHeader>
                 <TableBody>
                   {bill.lines.map((l) => (
                     <TableRow key={l.id}>
                       <TableCell><span className="font-medium">{l.chargeCode.code}</span> <span className="text-muted-foreground">{l.chargeCode.name}</span></TableCell>
-                      <TableCell className="text-muted-foreground">{l.description ?? "-"}</TableCell>
+                      <TableCell className="text-muted-foreground">{l.job ? l.job.number : l.description ?? "-"}</TableCell>
                       <TableCell>{formatNumber(Number(l.qty), 0)}</TableCell>
                       <TableCell className="tabular-nums">{formatIDR(Number(l.unitPrice))}</TableCell>
                       <TableCell>{l.pph23 ? <Badge variant="outline">2%</Badge> : "-"}</TableCell>

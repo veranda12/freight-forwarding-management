@@ -24,7 +24,7 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
       where: { id },
       include: {
         customer: true,
-        lines: { include: { chargeCode: true }, orderBy: { sortOrder: "asc" } },
+        lines: { include: { chargeCode: true, job: { select: { id: true, number: true, hblNo: true, mblNo: true, hawbNo: true, mawbNo: true } } }, orderBy: { sortOrder: "asc" } },
         job: { include: { pol: true, pod: true, originAirport: true, destAirport: true, containers: { include: { containerType: true }, orderBy: { containerNo: "asc" } } } },
       },
     }),
@@ -47,26 +47,32 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
     }));
   }
 
+  // Invoice gabungan: semua job dan B/L dicetak, dan tiap baris menyebut B/L asalnya.
+  const jobs = [...new Map(inv.lines.flatMap((l) => (l.job ? [[l.job.id, l.job] as const] : []))).values()];
+  const multi = jobs.length > 1;
+  const blOf = (j: (typeof jobs)[number]) => j.hblNo ?? j.mblNo ?? j.hawbNo ?? j.mawbNo ?? j.number;
+
   const pdfInv: PdfInvoice = {
+    ppnRate: Number(inv.ppnRate),
     number: inv.number, date: inv.date, dueDate: inv.dueDate,
     termDays: Math.max(0, Math.round((inv.dueDate.getTime() - inv.date.getTime()) / 86400000)),
     currency: inv.currency, exchangeRate: Number(inv.exchangeRate), amountForeign: Number(inv.amountForeign),
     subtotal: Number(inv.subtotal), ppn: Number(inv.ppnAmount), total: Number(inv.total), status: inv.status,
     customer: { name: inv.customer.name, address: inv.customer.address, city: inv.customer.city, country: inv.customer.country, npwp: inv.customer.npwp },
     shipment: job ? {
-      jobNumber: job.number,
-      blNo: job.hblNo ?? job.mblNo ?? job.hawbNo ?? job.mawbNo,
-      vessel: [job.vesselName, job.voyageNo].filter(Boolean).join(" / ") || job.flightNo,
+      jobNumber: multi ? jobs.map((j) => j.number).join(", ") : job.number,
+      blNo: multi ? jobs.map(blOf).join(", ") : job.hblNo ?? job.mblNo ?? job.hawbNo ?? job.mawbNo,
+      vessel: multi ? null : [job.vesselName, job.voyageNo].filter(Boolean).join(" / ") || job.flightNo,
       route: [job.pol?.name ?? job.originAirport?.name, job.pod?.name ?? job.destAirport?.name].filter(Boolean).join(" to ") || null,
-      containers: groups.length ? groups.map((g) => `${g.count} x ${g.code}`).join(", ") : null,
-      lane: job.customsLane ? LANE_EN[job.customsLane] : null,
-      containerNos: job.containers.map((c) => c.containerNo).join(", ") || null,
+      containers: !multi && groups.length ? groups.map((g) => `${g.count} x ${g.code}`).join(", ") : null,
+      lane: !multi && job.customsLane ? LANE_EN[job.customsLane] : null,
+      containerNos: multi ? null : job.containers.map((c) => c.containerNo).join(", ") || null,
     } : null,
     lines: inv.lines.map((l) => ({
-      section: l.section ?? l.chargeCode.invoiceSection, name: l.description ?? l.chargeCode.name, note: l.note,
+      section: l.section ?? l.chargeCode.invoiceSection, name: l.description ?? l.chargeCode.name, note: multi && l.job ? [`B/L ${blOf(l.job)}`, l.note].filter(Boolean).join(" · ") : l.note,
       qty: Number(l.qty), unitLabel: l.unitLabel, unitPrice: Number(l.unitPrice), amount: Number(l.amount), asReceipt: l.asReceipt,
     })),
-    excluded,
+    excluded: multi ? [] : excluded,
   };
 
   const logo = company?.logoPath ? path.join(process.cwd(), "public", company.logoPath.replace(/^\/+/, "")) : null;

@@ -1,5 +1,6 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { latestRate } from "./fx";
+import { rebuildInvoice } from "./receivables";
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -45,16 +46,18 @@ export function validateJobCharge(input: JobChargeInput) {
 }
 
 /** Alasan baris tidak bisa diubah atau dihapus, atau null jika masih bebas. */
-export function chargeLockReason(line: { side: string; invoiced: boolean; billed: boolean; recordedAt: Date | null }): string | null {
-  if (line.side === "SELLING" && line.invoiced) return "Baris selling ini sudah ditagih. Batalkan invoicenya dulu untuk mengubah.";
+export function chargeLockReason(line: { side: string; invoiced: boolean; billed: boolean; recordedAt: Date | null; voucherId?: string | null; invoiceOpen?: boolean }): string | null {
+  if (line.side === "SELLING" && line.invoiced && !line.invoiceOpen) return "Baris selling ini sudah ada pembayarannya, jadi tidak bisa diubah.";
   if (line.side === "BUYING" && line.billed) return "Baris buying ini sudah di-bill ke vendor.";
+  if (line.side === "BUYING" && line.voucherId) return "Baris buying ini sudah masuk voucher. Batalkan vouchernya dulu untuk mengubah.";
   if (line.side === "BUYING" && line.recordedAt) return "Beban armada baris ini sudah dicatat ke jurnal.";
   return null;
 }
 
 /** Hitung ulang revenue, cost, profit, dan margin job dari baris costing. */
 export async function recalcJobTotals(tx: Tx, jobId: string) {
-  const lines = await tx.costingLine.findMany({ where: { jobId }, select: { side: true, actualIdr: true } });
+  // Reimburse (as receipt) hanya titipan, jadi tidak dihitung ke pendapatan, biaya, maupun margin.
+  const lines = await tx.costingLine.findMany({ where: { jobId, asReceipt: false }, select: { side: true, actualIdr: true } });
   const revenue = r2(lines.filter((l) => l.side === "SELLING").reduce((s, l) => s + Number(l.actualIdr), 0));
   const cost = r2(lines.filter((l) => l.side === "BUYING").reduce((s, l) => s + Number(l.actualIdr), 0));
   const profit = r2(revenue - cost);
@@ -92,6 +95,7 @@ export async function addJobCharge(db: PrismaClient, jobId: string, input: JobCh
     const job = await tx.job.findUnique({ where: { id: jobId }, select: { id: true, status: true } });
     if (!job) throw new Error("Job tidak ditemukan.");
     if (job.status === "CANCELLED") throw new Error("Job sudah dibatalkan.");
+    if (job.status === "CLOSED") throw new Error("Job sudah Closed. Admin perlu membuka job dulu untuk menambah biaya.");
     const last = await tx.costingLine.aggregate({ where: { jobId }, _max: { sortOrder: true } });
     const line = await tx.costingLine.create({ data: { jobId, ...(await lineData(tx, v)), sortOrder: (last._max.sortOrder ?? -1) + 1 } });
     await recalcJobTotals(tx, jobId);
@@ -103,14 +107,16 @@ export async function addJobCharge(db: PrismaClient, jobId: string, input: JobCh
 export async function updateJobCharge(db: PrismaClient, lineId: string, input: JobChargeInput) {
   const v = validateJobCharge(input);
   return db.$transaction(async (tx) => {
-    const line = await tx.costingLine.findUnique({ where: { id: lineId } });
+    const line = await tx.costingLine.findUnique({ where: { id: lineId }, include: { invoice: { select: { status: true } } } });
     if (!line) throw new Error("Baris charge tidak ditemukan.");
-    const locked = chargeLockReason(line);
+    const locked = chargeLockReason({ ...line, invoiceOpen: line.invoice?.status === "UNPAID" });
     if (locked) throw new Error(locked);
     if (line.side !== v.side) throw new Error("Sisi selling atau buying tidak bisa diubah. Hapus lalu tambah baris baru.");
     // Baris yang diubah manual tidak lagi ditimpa saat rate card dihitung ulang.
     await tx.costingLine.update({ where: { id: lineId }, data: { ...(await lineData(tx, v)), fromRateCard: false } });
     await recalcJobTotals(tx, line.jobId);
+    // Invoice yang belum dibayar ikut diperbarui, nomornya tetap.
+    if (line.invoiceId) await rebuildInvoice(tx, line.invoiceId);
     return line.jobId;
   });
 }
@@ -118,12 +124,16 @@ export async function updateJobCharge(db: PrismaClient, lineId: string, input: J
 /** Hapus baris charge yang belum ditagih atau di-bill. */
 export async function deleteJobCharge(db: PrismaClient, lineId: string) {
   return db.$transaction(async (tx) => {
-    const line = await tx.costingLine.findUnique({ where: { id: lineId } });
+    const line = await tx.costingLine.findUnique({ where: { id: lineId }, include: { invoice: { select: { status: true } } } });
     if (!line) throw new Error("Baris charge tidak ditemukan.");
-    const locked = chargeLockReason(line);
+    const locked = chargeLockReason({ ...line, invoiceOpen: line.invoice?.status === "UNPAID" });
     if (locked) throw new Error(locked);
+    if (line.invoiceId && (await tx.costingLine.count({ where: { invoiceId: line.invoiceId } })) <= 1) {
+      throw new Error("Ini baris terakhir di invoice. Batalkan invoicenya kalau tidak jadi ditagih.");
+    }
     await tx.costingLine.delete({ where: { id: lineId } });
     await recalcJobTotals(tx, line.jobId);
+    if (line.invoiceId) await rebuildInvoice(tx, line.invoiceId);
     return line.jobId;
   });
 }
@@ -163,5 +173,56 @@ export async function prepareInvoiceCharges(db: PrismaClient, jobId: string, pre
       await tx.costingLine.create({ data: { jobId, ...(await lineData(tx, v)), sortOrder: sort++ } });
     }
     await recalcJobTotals(tx, jobId);
+  });
+}
+
+export type InvoiceEdit = {
+  /** Ubah qty, harga (mata uang baris), atau keterangan baris yang sudah ada di invoice. */
+  updates?: { lineId: string; qty: number | string; unitPrice: number | string; description?: string | null }[];
+  /** Baris yang dihapus dari invoice dan dari costing. */
+  removeIds?: string[];
+  /** Baris selling job yang sama yang belum ditagih, ikut ditagih di invoice ini. */
+  addIds?: string[];
+  /** Biaya baru yang langsung ditagih di invoice ini. */
+  extras?: { chargeCodeId: string; description?: string | null; qty: number | string; unitPrice: number | string; asReceipt: boolean }[];
+  date?: string; dueDate?: string; notes?: string | null;
+};
+
+/**
+ * Edit isi invoice yang belum dibayar langsung dari halaman invoice: ubah, hapus, atau tambah baris.
+ * Costing job ikut berubah, nomor invoice tetap.
+ */
+export async function editInvoiceCharges(db: PrismaClient, invoiceId: string, edit: InvoiceEdit) {
+  return db.$transaction(async (tx) => {
+    const inv = await tx.invoice.findUnique({ where: { id: invoiceId }, include: { costingLines: { select: { id: true, jobId: true } } } });
+    if (!inv) throw new Error("Invoice tidak ditemukan.");
+    if (inv.status !== "UNPAID" || Number(inv.amountPaid) > 0) throw new Error("Invoice sudah ada pembayaran, jadi tidak bisa diedit.");
+    const jobId = inv.costingLines[0]?.jobId ?? inv.jobId;
+    if (!jobId) throw new Error("Invoice ini tidak tertaut ke job, jadi tidak bisa diedit.");
+    const own = new Set(inv.costingLines.map((l) => l.id));
+
+    for (const u of edit.updates ?? []) {
+      if (!own.has(u.lineId)) throw new Error("Baris tidak ada di invoice ini. Muat ulang halaman.");
+      const line = await tx.costingLine.findUniqueOrThrow({ where: { id: u.lineId } });
+      const v = validateJobCharge({
+        side: "SELLING", chargeCodeId: line.chargeCodeId, description: u.description ?? line.description, qty: u.qty, unitPrice: u.unitPrice,
+        currency: line.currency, rate: Number(line.exchangeRate), taxable: !line.asReceipt, asReceipt: line.asReceipt, unitLabel: line.unitLabel,
+      });
+      await tx.costingLine.update({ where: { id: line.id }, data: { ...(await lineData(tx, v)), fromRateCard: false } });
+    }
+    const removeIds = (edit.removeIds ?? []).filter((id) => own.has(id));
+    if (removeIds.length) await tx.costingLine.deleteMany({ where: { id: { in: removeIds } } });
+    if (edit.addIds?.length) {
+      const marked = await tx.costingLine.updateMany({ where: { id: { in: edit.addIds }, jobId, side: "SELLING", invoiced: false }, data: { invoiced: true, invoiceId } });
+      if (marked.count !== edit.addIds.length) throw new Error("Ada baris yang sudah ditagih di invoice lain. Muat ulang halaman.");
+    }
+    let sort = ((await tx.costingLine.aggregate({ where: { jobId }, _max: { sortOrder: true } }))._max.sortOrder ?? -1) + 1;
+    for (const e of edit.extras ?? []) {
+      const v = validateJobCharge({ ...e, side: "SELLING", currency: "IDR", taxable: !e.asReceipt });
+      await tx.costingLine.create({ data: { jobId, ...(await lineData(tx, v)), sortOrder: sort++, invoiced: true, invoiceId } });
+    }
+    if ((await tx.costingLine.count({ where: { invoiceId } })) === 0) throw new Error("Invoice harus berisi minimal satu baris. Batalkan invoicenya kalau tidak jadi ditagih.");
+    await recalcJobTotals(tx, jobId);
+    return rebuildInvoice(tx, invoiceId, { date: edit.date, dueDate: edit.dueDate, notes: edit.notes });
   });
 }

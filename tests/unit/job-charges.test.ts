@@ -38,7 +38,7 @@ describe("validateJobCharge", () => {
 describe("chargeLockReason", () => {
   const free = { side: "SELLING", invoiced: false, billed: false, recordedAt: null };
   it("baris bebas tidak terkunci", () => expect(chargeLockReason(free)).toBeNull());
-  it("selling yang sudah ditagih terkunci", () => expect(chargeLockReason({ ...free, invoiced: true })).toMatch(/ditagih/));
+  it("selling yang sudah ditagih terkunci", () => expect(chargeLockReason({ ...free, invoiced: true })).toMatch(/pembayaran/));
   it("buying yang sudah di-bill atau dicatat terkunci", () => {
     expect(chargeLockReason({ ...free, side: "BUYING", billed: true })).toMatch(/bill/);
     expect(chargeLockReason({ ...free, side: "BUYING", recordedAt: new Date() })).toMatch(/armada/);

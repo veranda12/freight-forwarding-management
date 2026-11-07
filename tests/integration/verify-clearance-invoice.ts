@@ -78,7 +78,7 @@ async function main() {
   const redInvId = await createInvoiceFromJobCore(db, red.id);
   const redInv = await db.invoice.findUniqueOrThrow({ where: { id: redInvId }, include: { lines: true } });
   const sum = rl.reduce((t2, l) => t2 + n(l.actualIdr), 0) + 100_000;
-  ok(n(redInv.subtotal) === sum && n(redInv.ppnAmount) === 11_000, `invoice jalur merah subtotal ${redInv.subtotal}, PPN hanya atas biaya kena PPN (${redInv.ppnAmount})`);
+  ok(n(redInv.subtotal) === sum && n(redInv.ppnAmount) === Math.round(n(redInv.taxableBase) * 0.011 * 100) / 100, `invoice jalur merah subtotal ${redInv.subtotal}, PPN hanya dari pendapatan (${redInv.ppnAmount})`);
   await cancelInvoiceCore(db, redInvId);
   ok((await db.costingLine.count({ where: { jobId: red.id, invoiced: false } })) === rl.length + 1, "batal invoice membuka kembali semua baris");
 

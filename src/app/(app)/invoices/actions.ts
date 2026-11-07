@@ -1,33 +1,41 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { assertCan } from "@/lib/auth-helpers";
 import { writeAudit } from "@/lib/audit";
-import { prepareInvoiceCharges, type InvoicePrep } from "@/lib/job-charges";
-import { cancelInvoiceCore, createInvoiceFromJobCore, recordReceiptCore, type InvoiceOpts, type ReceiptInput } from "@/lib/receivables";
+import { cancelInvoiceCore, createInvoiceCore, recordReceiptCore, type InvoiceOpts, type ReceiptInput } from "@/lib/receivables";
 import { errorMessage } from "@/lib/action-error";
+import { editInvoiceCharges, type InvoiceEdit } from "@/lib/job-charges";
 
-/**
- * Buat AR Invoice dari selling costing sebuah job (IDR, atau valas dengan kurs tagihan).
- * `prep` menyesuaikan nilai aktual dan menambah biaya lain sebelum invoice dibuat.
- */
-export async function createInvoiceFromJob(jobId: string, opts: InvoiceOpts = {}, prep: InvoicePrep = {}): Promise<void> {
+type Saved = { ok: true; id: string } | { ok: false; error: string };
+
+/** Buat invoice dari baris selling beberapa job atau B/L. */
+export async function createInvoiceAction(lineIds: string[], opts: InvoiceOpts = {}): Promise<Saved> {
   const user = await assertCan("invoices", "write");
-  const job = await prisma.job.findUnique({ where: { id: jobId }, select: { number: true } });
-  if (!job) throw new Error("Job tidak ditemukan.");
-  if (prep.updates?.length || prep.extras?.length) {
-    await assertCan("costing", "write");
-    await prepareInvoiceCharges(prisma, jobId, prep);
-    await writeAudit({ entity: "Job", entityId: jobId, action: "INVOICE_PREP", summary: `${prep.updates?.length ?? 0} baris disesuaikan, ${prep.extras?.length ?? 0} biaya ditambah`, userId: user.id });
+  try {
+    const id = await createInvoiceCore(prisma, lineIds, user.id, opts);
+    await writeAudit({ entity: "Invoice", entityId: id, action: "CREATE", summary: `${lineIds.length} baris`, userId: user.id });
+    revalidatePath("/invoices");
+    return { ok: true, id };
+  } catch (e) {
+    return { ok: false, error: errorMessage(e, "Gagal membuat invoice.") };
   }
-  const invoiceId = await createInvoiceFromJobCore(prisma, jobId, user.id, opts);
-  const cur = opts.currency && opts.currency !== "IDR" ? ` (${opts.currency})` : "";
-  await writeAudit({ entity: "Invoice", entityId: invoiceId, action: "CREATE_FROM_JOB", summary: `${job.number}${cur}`, userId: user.id });
-  revalidatePath(`/jobs/${jobId}`);
-  revalidatePath("/invoices");
-  redirect(`/invoices/${invoiceId}`);
+}
+
+/** Edit isi invoice: ubah, hapus, atau tambah baris. Nomor tetap, isi lama tercatat. */
+export async function editInvoiceAction(invoiceId: string, edit: InvoiceEdit): Promise<Saved> {
+  const user = await assertCan("invoices", "write");
+  try {
+    const changes = await editInvoiceCharges(prisma, invoiceId, edit);
+    await writeAudit({ entity: "Invoice", entityId: invoiceId, action: "EDIT", summary: "Edit isi invoice", changes, userId: user.id });
+    revalidatePath("/invoices");
+    revalidatePath(`/invoices/${invoiceId}`);
+    revalidatePath("/costing");
+    return { ok: true, id: invoiceId };
+  } catch (e) {
+    return { ok: false, error: errorMessage(e, "Gagal mengubah invoice.") };
+  }
 }
 
 /** Catat penerimaan. IDR: nominal IDR. Valas: nominal valas + kurs pembayaran. */

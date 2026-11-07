@@ -3,7 +3,6 @@ import { prisma } from "@/lib/prisma";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ChargeTaxEdit } from "./charge-tax-edit";
 import { ChargeMapEdit } from "./charge-map-edit";
 import { ChargeNew } from "./charge-new";
 import { ChargePrintEdit } from "./charge-print-edit";
@@ -35,7 +34,7 @@ export default async function ChargesPage() {
           <Table>
             <TableHeader><TableRow>
               <TableHead>Kode</TableHead><TableHead>Nama</TableHead><TableHead>Akun Pendapatan</TableHead>
-              <TableHead>Akun Biaya</TableHead><TableHead>Seksi invoice</TableHead><TableHead>PPN</TableHead><TableHead>PPh 23</TableHead><TableHead>PPh 26</TableHead><TableHead className="text-right">Aksi</TableHead>
+              <TableHead>Akun Biaya</TableHead><TableHead>Seksi invoice</TableHead><TableHead className="text-right">Aksi</TableHead>
             </TableRow></TableHeader>
             <TableBody>
               {charges.map((c) => (
@@ -44,11 +43,8 @@ export default async function ChargesPage() {
                   <TableCell>{c.name}</TableCell>
                   <TableCell className="text-muted-foreground text-xs">{c.revenueAccount ? `${c.revenueAccount.code} ${c.revenueAccount.name}` : "-"}</TableCell>
                   <TableCell className="text-muted-foreground text-xs">{c.expenseAccount ? `${c.expenseAccount.code} ${c.expenseAccount.name}` : "-"}</TableCell>
-                  <TableCell className="text-xs text-muted-foreground">{c.invoiceSection ? SECTION_LABELS[c.invoiceSection] : "-"}{c.asReceipt && <Badge variant="outline" className="ml-1.5 text-[10px]">As receipt</Badge>}</TableCell>
-                  <TableCell>{c.defaultTaxable ? <Badge variant="outline">11%</Badge> : "-"}</TableCell>
-                  <TableCell>{c.isPph23 ? <Badge variant="outline">2%</Badge> : "-"}</TableCell>
-                  <TableCell>{c.isPph26 ? <Badge variant="outline">{Number(c.pph26Rate)}%</Badge> : "-"}</TableCell>
-                  <TableCell className="text-right whitespace-nowrap"><ChargeMapEdit id={c.id} code={c.code} name={c.name} revenueAccountId={c.revenueAccountId} expenseAccountId={c.expenseAccountId} revenueAccounts={revenueAccounts} expenseAccounts={expenseAccounts} /><ChargePrintEdit id={c.id} code={c.code} name={c.name} invoiceSection={c.invoiceSection} asReceipt={c.asReceipt} /><ChargeTaxEdit id={c.id} code={c.code} name={c.name} defaultTaxable={c.defaultTaxable} isPph23={c.isPph23} isPph26={c.isPph26} pph26Rate={Number(c.pph26Rate)} /></TableCell>
+                  <TableCell className="text-xs text-muted-foreground">{c.invoiceSection ? SECTION_LABELS[c.invoiceSection] : "-"}{c.asReceipt && <Badge variant="outline" className="ml-1.5 text-[10px]">Reimburse</Badge>}</TableCell>
+                  <TableCell className="text-right whitespace-nowrap"><ChargeMapEdit id={c.id} code={c.code} name={c.name} revenueAccountId={c.revenueAccountId} expenseAccountId={c.expenseAccountId} revenueAccounts={revenueAccounts} expenseAccounts={expenseAccounts} /><ChargePrintEdit id={c.id} code={c.code} name={c.name} invoiceSection={c.invoiceSection} asReceipt={c.asReceipt} /></TableCell>
                 </TableRow>
               ))}
             </TableBody>

@@ -10,7 +10,7 @@ import { errorMessage } from "@/lib/action-error";
 
 export type CompanyInput = {
   name: string; legalName: string; npwp: string; address: string; city: string; phone: string; email: string; website: string;
-  bankName: string; bankAccount: string; bankHolder: string; bankBranch: string; signatoryName: string; signatoryTitle: string;
+  bankName: string; bankAccount: string; bankHolder: string; bankBranch: string; signatoryName: string; signatoryTitle: string; docCode: string;
 };
 type Result = { ok: true } | { ok: false; error: string };
 
@@ -29,6 +29,7 @@ function parse(input: CompanyInput) {
     phone: opt(input.phone), email: email || null, website: opt(input.website),
     bankName: opt(input.bankName), bankAccount: opt(input.bankAccount), bankHolder: opt(input.bankHolder), bankBranch: opt(input.bankBranch),
     signatoryName: opt(input.signatoryName), signatoryTitle: opt(input.signatoryTitle),
+    docCode: (input.docCode ?? "").trim().toUpperCase() || "SLG",
   };
 }
 

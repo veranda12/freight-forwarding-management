@@ -185,6 +185,13 @@ enum JournalSource {
   TAX_REMIT
   CASH_ENTRY
   BANK_TRANSFER
+  VOUCHER
+}
+
+enum VoucherStatus {
+  ISSUED
+  PAID
+  CANCELLED
 }
 
 enum CashAccountKind {
@@ -259,6 +266,7 @@ model User {
   milestones     Milestone[]
   auditLogs      AuditLog[]
   journalEntries JournalEntry[]
+  vouchers       Voucher[]      @relation("VoucherCreatedBy")
 }
 
 model Account {
@@ -316,6 +324,8 @@ model CompanySetting {
   bankBranch  String?
   signatoryName  String?
   signatoryTitle String?
+  /// Kode perusahaan pada nomor bukti, misalnya SLG/BM/26/11/001.
+  docCode     String   @default("SLG")
   updatedAt   DateTime @updatedAt
 }
 
@@ -415,6 +425,7 @@ model Vendor {
   bookings          Booking[]
   costings          CostingLine[]
   bills             VendorBill[]
+  vouchers          Voucher[]
   payments          Payment[]
   domesticShipments DomesticShipment[]
 
@@ -780,7 +791,10 @@ model Job {
   costings   CostingLine[]
   booking    Booking?
   invoices   Invoice[]
+  invoiceLines InvoiceLine[]
   bills      VendorBill[]
+  billLines  BillLine[]
+  vouchers   Voucher[]
 
   @@index([status])
   @@index([mode])
@@ -891,12 +905,47 @@ model CostingLine {
   invoiceId     String?
   invoice       Invoice?   @relation("InvoiceCostings", fields: [invoiceId], references: [id], onDelete: SetNull)
   billed        Boolean    @default(false)
+  /// Voucher pengeluaran yang memuat baris buying ini. Baris terkunci sejak voucher dibuat.
+  voucherId     String?
+  voucher       Voucher?   @relation(fields: [voucherId], references: [id], onDelete: SetNull)
   sortOrder     Int        @default(0)
   recordedAt        DateTime?
   recordedJournalId String?
 
   @@index([jobId, side])
   @@index([invoiceId])
+  @@index([voucherId])
+}
+
+/// Voucher pengeluaran biaya harian job. Dibuat Finance, nomor bukti BK atau KK terbentuk saat dibayar.
+model Voucher {
+  id             String        @id @default(cuid())
+  number         String        @unique
+  jobId          String
+  job            Job           @relation(fields: [jobId], references: [id])
+  date           DateTime
+  payee          String
+  vendorId       String?
+  vendor         Vendor?       @relation(fields: [vendorId], references: [id])
+  notes          String?
+  total          Decimal       @default(0) @db.Decimal(18, 2)
+  status         VoucherStatus @default(ISSUED)
+  method         String?
+  reference      String?
+  bankAccountId  String?
+  paidAt         DateTime?
+  proofNumber    String?
+  journalEntryId String?
+  cancelReason   String?
+  createdById    String?
+  createdBy      User?         @relation("VoucherCreatedBy", fields: [createdById], references: [id])
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  lines CostingLine[]
+
+  @@index([jobId])
+  @@index([status])
 }
 
 // ============================================================
@@ -918,6 +967,7 @@ model Invoice {
   exchangeRate       Decimal           @default(1) @db.Decimal(18, 6)
   subtotal           Decimal           @default(0) @db.Decimal(18, 2) // IDR
   taxableBase        Decimal           @default(0) @db.Decimal(18, 2)
+  ppnRate            Decimal           @default(0.11) @db.Decimal(6, 4)
   ppnAmount          Decimal           @default(0) @db.Decimal(18, 2)
   total              Decimal           @default(0) @db.Decimal(18, 2)
   amountPaid         Decimal           @default(0) @db.Decimal(18, 2)
@@ -955,6 +1005,11 @@ model InvoiceLine {
   unitLabel    String?
   note         String?
   sortOrder    Int        @default(0)
+  /// Job asal baris. Satu invoice bisa berisi beberapa job atau B/L.
+  jobId        String?
+  job          Job?       @relation(fields: [jobId], references: [id])
+
+  @@index([jobId])
 }
 
 model VendorBill {
@@ -1005,6 +1060,11 @@ model BillLine {
   unitPrice    Decimal    @default(0) @db.Decimal(18, 2)
   amount       Decimal    @default(0) @db.Decimal(18, 2)
   pph23        Boolean    @default(false)
+  /// Job asal baris. Satu bill vendor bisa berisi biaya beberapa job.
+  jobId        String?
+  job          Job?       @relation(fields: [jobId], references: [id])
+
+  @@index([jobId])
 }
 
 model Note {
@@ -1205,6 +1265,8 @@ model DomesticEvent {
 model AccountingSetting {
   id          String    @id @default("default")
   lockedUntil DateTime?
+  /// Tarif PPN keluaran untuk invoice baru. Invoice menyimpan tarifnya sendiri.
+  ppnRate     Decimal   @default(0.011) @db.Decimal(6, 4)
   updatedAt   DateTime  @updatedAt
 }
 

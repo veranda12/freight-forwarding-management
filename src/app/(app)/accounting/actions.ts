@@ -9,8 +9,9 @@ import { setLockKey } from "@/lib/period-lock";
 import { createFixedAsset, runDepreciation, type NewAssetInput } from "@/lib/fixed-assets";
 import { runRevaluation } from "@/lib/fx";
 import { remitTaxPeriod, cancelTaxRemittance } from "@/lib/tax";
-import { createCashEntry, cancelCashEntry, type CashEntryInput } from "@/lib/cash-entry";
-import { createManualJournal, cancelManualJournal, type ManualJournalInput } from "@/lib/manual-journal";
+import { createCashEntry, cancelCashEntry, updateCashEntry, type CashEntryInput } from "@/lib/cash-entry";
+import { previewProofNumber, type ProofCode } from "@/lib/sequence";
+import { createManualJournal, cancelManualJournal, updateManualJournal, type ManualJournalInput } from "@/lib/manual-journal";
 import { createTransfer, cancelTransfer, type TransferInput } from "@/lib/bank-transfer";
 import { importStatement, autoMatch, matchManual, unmatch, deleteStatementLine } from "@/lib/bank-statement";
 import type { ParsedRow } from "@/lib/bank-statement-csv";
@@ -107,6 +108,23 @@ export async function createCashEntryAction(input: CashEntryInput): Promise<Resu
     refresh("/accounting/cash-entry", "/accounting", "/accounting/cash-flow", "/accounting/bank-rec");
     return { ok: true };
   } catch (e) { return fail(e); }
+}
+
+/** Edit bukti kas. Nomor tetap, isi lama tersimpan di riwayat perubahan. */
+export async function updateCashEntryAction(journalEntryId: string, input: CashEntryInput): Promise<Result> {
+  const user = await assertCan("accounting", "write");
+  try {
+    const changes = await updateCashEntry(prisma, journalEntryId, input);
+    await writeAudit({ entity: "JournalEntry", entityId: journalEntryId, action: "EDIT", summary: input.description, changes, userId: user.id });
+    refresh("/accounting", "/accounting/cash-entry", `/accounting/journal/${journalEntryId}`);
+    return { ok: true };
+  } catch (e) { return fail(e); }
+}
+
+/** Perkiraan nomor bukti untuk ditampilkan di form. */
+export async function previewProofAction(code: ProofCode, dateKey: string): Promise<string> {
+  await assertCan("accounting", "read");
+  return previewProofNumber(prisma, code, new Date(`${dateKey}T12:00:00+07:00`));
 }
 
 export async function cancelCashEntryAction(journalEntryId: string, reason: string): Promise<Result> {
@@ -207,6 +225,17 @@ export async function createManualJournalAction(input: ManualJournalInput): Prom
     await writeAudit({ entity: "ManualJournal", entityId: r.journalEntryId, action: "CREATE", summary: `${r.number} ${input.description} ${Math.round(r.total)}`, userId: user.id });
     refresh(...MANUAL_PATHS);
     return { ok: true, number: r.number };
+  } catch (e) { return fail(e); }
+}
+
+/** Edit Jurnal Umum. Nomor tetap, isi lama tersimpan di riwayat perubahan. */
+export async function updateManualJournalAction(journalEntryId: string, input: ManualJournalInput): Promise<Result> {
+  const user = await assertCan("accounting", "write");
+  try {
+    const changes = await updateManualJournal(prisma, journalEntryId, input);
+    await writeAudit({ entity: "JournalEntry", entityId: journalEntryId, action: "EDIT", summary: input.description, changes, userId: user.id });
+    refresh("/accounting", "/accounting/manual-journal", `/accounting/journal/${journalEntryId}`);
+    return { ok: true };
   } catch (e) { return fail(e); }
 }
 

@@ -1,26 +1,27 @@
 "use client";
 
 import { Fragment, useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Ban, ChevronDown, ChevronRight, Loader2, Plus, Trash2 } from "lucide-react";
+import { Ban, ChevronDown, ChevronRight, Loader2, Pencil, Plus, Printer, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { EmptyState } from "@/components/empty-state";
+import { SearchableSelect } from "@/components/searchable-select";
 import { formatIDR, formatDate } from "@/lib/format";
-import { cancelManualJournalAction, createManualJournalAction } from "../actions";
+import { cancelManualJournalAction, createManualJournalAction, updateManualJournalAction } from "../actions";
 
 type Opt = { id: string; label: string };
 type Entry = {
   id: string; number: string; date: string; description: string; total: number; reversed: boolean;
-  reversalNumber: string | null; createdBy: string | null;
-  lines: { account: string; description: string | null; debit: number; credit: number }[];
+  reversalNumber: string | null; createdBy: string | null; reconciled: boolean;
+  lines: { accountId: string; account: string; description: string | null; debit: number; credit: number }[];
 };
 type Line = { key: number; accountId: string; description: string; debit: string; credit: string };
 
@@ -28,12 +29,18 @@ const cents = (v: string) => Math.round((Number(v) || 0) * 100);
 let seq = 0;
 const newLine = (): Line => ({ key: ++seq, accountId: "", description: "", debit: "", credit: "" });
 
-export function ManualJournalPanel({ accounts, entries, today, canWrite }: { accounts: Opt[]; entries: Entry[]; today: string; canWrite: boolean }) {
+const dateKeyOf = (iso: string) => new Date(new Date(iso).getTime() + 7 * 3600 * 1000).toISOString().slice(0, 10);
+const headOf = (e: Entry) => ({ dateKey: dateKeyOf(e.date), description: e.description.replace(/^Jurnal (manual|umum): /i, ""), reference: "" });
+const linesOf = (e: Entry): Line[] => e.lines.map((l) => ({ key: ++seq, accountId: l.accountId, description: l.description ?? "", debit: l.debit ? String(l.debit) : "", credit: l.credit ? String(l.credit) : "" }));
+
+export function ManualJournalPanel({ accounts, entries, today, canWrite, lockKey, editId }: { accounts: Opt[]; entries: Entry[]; today: string; canWrite: boolean; lockKey: string | null; editId?: string }) {
   const router = useRouter();
   const [pending, start] = useTransition();
-  const [open, setOpen] = useState(false);
-  const [head, setHead] = useState({ dateKey: today, description: "", reference: "" });
-  const [lines, setLines] = useState<Line[]>(() => [newLine(), newLine()]);
+  const editing0 = (canWrite && entries.find((e) => e.id === editId)) || null;
+  const [editing, setEditing] = useState<Entry | null>(editing0);
+  const [open, setOpen] = useState(!!editing0);
+  const [head, setHead] = useState(editing0 ? headOf(editing0) : { dateKey: today, description: "", reference: "" });
+  const [lines, setLines] = useState<Line[]>(() => (editing0 ? linesOf(editing0) : [newLine(), newLine()]));
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [cancel, setCancel] = useState<Entry | null>(null);
   const [reason, setReason] = useState("");
@@ -47,15 +54,17 @@ export function ManualJournalPanel({ accounts, entries, today, canWrite }: { acc
   const canSave = filled.length >= 2 && !lineError && totalD > 0 && diff === 0 && head.description.trim().length >= 3;
 
   const setLine = (key: number, p: Partial<Line>) => setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...p } : l)));
-  function reset() { setHead({ dateKey: today, description: "", reference: "" }); setLines([newLine(), newLine()]); }
+  function reset() { setEditing(null); setHead({ dateKey: today, description: "", reference: "" }); setLines([newLine(), newLine()]); }
+  function startEdit(e: Entry) { setEditing(e); setHead(headOf(e)); setLines(linesOf(e)); setOpen(true); }
 
   function save() {
     start(async () => {
-      const res = await createManualJournalAction({
+      const input = {
         ...head,
         lines: filled.map((l) => ({ accountId: l.accountId, description: l.description, debit: l.debit || null, credit: l.credit || null })),
-      });
-      if (res.ok) { toast.success(`Jurnal manual ${res.number} diposting.`); setOpen(false); reset(); router.refresh(); }
+      };
+      const res = editing ? await updateManualJournalAction(editing.id, input) : await createManualJournalAction(input);
+      if (res.ok) { toast.success(editing ? "Jurnal diperbarui, nomor bukti tetap." : "Jurnal Umum diposting."); setOpen(false); reset(); router.replace("/accounting/manual-journal"); router.refresh(); }
       else toast.error(res.error);
     });
   }
@@ -71,11 +80,11 @@ export function ManualJournalPanel({ accounts, entries, today, canWrite }: { acc
   return (
     <div className="space-y-4">
       {canWrite && (
-        <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (v) reset(); }}>
-          <DialogTrigger asChild><Button><Plus /> Buat jurnal manual</Button></DialogTrigger>
+        <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (v) reset(); else setEditing(null); }}>
+          <DialogTrigger asChild><Button><Plus /> Buat Jurnal Umum</Button></DialogTrigger>
           <DialogContent className="max-h-[90vh] max-w-4xl overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>Jurnal manual</DialogTitle>
+              <DialogTitle>{editing ? `Edit ${editing.number}` : "Jurnal Umum"}</DialogTitle>
               <DialogDescription>
                 Untuk koreksi yang tidak bisa dicatat lewat modul lain. Piutang, hutang, dan rekening valas tidak tersedia di sini,
                 karena saldonya mengikuti invoice, bill, dan nilai valas.
@@ -96,10 +105,7 @@ export function ManualJournalPanel({ accounts, entries, today, canWrite }: { acc
                   {lines.map((l) => (
                     <TableRow key={l.key}>
                       <TableCell>
-                        <Select value={l.accountId} onValueChange={(v) => setLine(l.key, { accountId: v })}>
-                          <SelectTrigger aria-label="Akun"><SelectValue placeholder="Pilih akun" /></SelectTrigger>
-                          <SelectContent>{accounts.map((a) => <SelectItem key={a.id} value={a.id}>{a.label}</SelectItem>)}</SelectContent>
-                        </Select>
+                        <SearchableSelect value={l.accountId} onChange={(v) => setLine(l.key, { accountId: v })} options={accounts} placeholder="Pilih akun" ariaLabel="Akun" />
                       </TableCell>
                       <TableCell><Input aria-label="Keterangan baris" value={l.description} onChange={(e) => setLine(l.key, { description: e.target.value })} placeholder="opsional" /></TableCell>
                       <TableCell><Input aria-label="Debit" type="number" min={0} step="0.01" className="text-right" value={l.debit} onChange={(e) => setLine(l.key, { debit: e.target.value, credit: e.target.value ? "" : l.credit })} /></TableCell>
@@ -137,11 +143,11 @@ export function ManualJournalPanel({ accounts, entries, today, canWrite }: { acc
       <Card>
         <CardContent className="p-0">
           {entries.length === 0 ? (
-            <EmptyState title="Belum ada jurnal manual" className="border-0" />
+            <EmptyState title="Belum ada Jurnal Umum" className="border-0" />
           ) : (
             <Table>
               <TableHeader><TableRow>
-                <TableHead className="w-8" /><TableHead>Tanggal</TableHead><TableHead>No. Jurnal</TableHead><TableHead>Keterangan</TableHead>
+                <TableHead className="w-8" /><TableHead>Tanggal</TableHead><TableHead>No. Bukti</TableHead><TableHead>Keterangan</TableHead>
                 <TableHead className="text-right">Nilai</TableHead><TableHead>Dibuat oleh</TableHead><TableHead>Status</TableHead>
                 {canWrite && <TableHead className="text-right">Aksi</TableHead>}
               </TableRow></TableHeader>
@@ -155,7 +161,7 @@ export function ManualJournalPanel({ accounts, entries, today, canWrite }: { acc
                         </Button>
                       </TableCell>
                       <TableCell className="whitespace-nowrap">{formatDate(e.date)}</TableCell>
-                      <TableCell className="font-mono text-xs">{e.number}</TableCell>
+                      <TableCell className="whitespace-nowrap"><Link href={`/accounting/journal/${e.id}`} className="font-medium text-primary hover:underline">{e.number}</Link></TableCell>
                       <TableCell className="max-w-sm truncate" title={e.description}>{e.description}</TableCell>
                       <TableCell className="text-right tabular-nums">{formatIDR(e.total)}</TableCell>
                       <TableCell className="text-muted-foreground">{e.createdBy ?? "-"}</TableCell>
@@ -166,7 +172,11 @@ export function ManualJournalPanel({ accounts, entries, today, canWrite }: { acc
                       </TableCell>
                       {canWrite && (
                         <TableCell className="text-right">
-                          {!e.reversed && <Button size="sm" variant="ghost" className="text-destructive" onClick={() => { setCancel(e); setReason(""); setCancelDate(today); }}><Ban /> Batalkan</Button>}
+                          <span className="inline-flex gap-0.5">
+                            <Button asChild size="icon" variant="ghost" className="h-8 w-8"><a href={`/api/accounting/journals/${e.id}/pdf`} target="_blank" rel="noopener" aria-label="Print"><Printer /></a></Button>
+                            {!e.reversed && !e.reconciled && !(lockKey && dateKeyOf(e.date) <= lockKey) && <Button size="icon" variant="ghost" className="h-8 w-8" aria-label="Edit" onClick={() => startEdit(e)}><Pencil /></Button>}
+                            {!e.reversed && <Button size="sm" variant="ghost" className="text-destructive" onClick={() => { setCancel(e); setReason(""); setCancelDate(today); }}><Ban /> Batalkan</Button>}
+                          </span>
                         </TableCell>
                       )}
                     </TableRow>

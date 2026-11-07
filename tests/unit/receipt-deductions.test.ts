@@ -4,7 +4,7 @@ import { normalizeDeductions, suggestPph23 } from "@/lib/receipt-deductions";
 describe("normalizeDeductions", () => {
   it("nilai kosong dianggap nol dan total dijumlahkan", () => {
     const d = normalizeDeductions({ pph23: 20000, admin: "5000", other: undefined });
-    expect(d).toEqual({ pph23: 20000, admin: 5000, other: 0, total: 25000 });
+    expect(d).toEqual({ pph23: 20000, admin: 5000, other: 0, otherNote: null, total: 25000 });
   });
 
   it("tanpa potongan menghasilkan total nol", () => {

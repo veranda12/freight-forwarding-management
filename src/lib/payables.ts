@@ -1,30 +1,43 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { accountMap, ACC } from "./coa";
-import { jktKey, PPH23_RATE, PPN_RATE, pph26Of, r2 } from "./accounting-core";
+import { jktKey, r2 } from "./accounting-core";
 import { postJournal, type JournalLineInput } from "./journal";
-import { genDocNumber, SEQ } from "./sequence";
+import { cashProofCode, genDocNumber, genProofNumber, SEQ } from "./sequence";
 import { effectiveRate, IDR, latestRate } from "./fx";
 import { resolveCashAccount, assertCashCurrency } from "./cash-accounts";
 
-/** Vendor pelayaran dan maskapai (carrier asing) tidak dikenakan PPN masukan di sini. */
-const FOREIGN_CARRIER = ["SHIPPING_LINE", "AIRLINE"];
+export type BillOpts = {
+  currency?: string; rate?: number;
+  /** PPN masukan dan potongan PPh, diisi manual sesuai tagihan vendor. */
+  ppn?: number | null; pph23?: number | null; pph26?: number | null;
+  date?: string; dueDate?: string; vendorRef?: string | null;
+};
 
-export type BillOpts = { currency?: string; rate?: number; ppnOverride?: number };
+const money = (v: unknown, label: string) => {
+  const n = v === undefined || v === null || v === "" ? 0 : Number(v);
+  if (!Number.isFinite(n) || n < 0) throw new Error(`${label} harus angka nol atau lebih.`);
+  return r2(n);
+};
 
 /**
- * AP vendor bill dari biaya beli job untuk satu vendor.
- * Net payable = subtotal + PPN masukan - PPh 23 dipotong.
+ * AP vendor bill untuk satu vendor dari baris buying yang dipilih, boleh dari beberapa job.
+ * PPN dan PPh diisi manual. Net payable = subtotal + PPN masukan - PPh dipotong.
+ * Baris yang sudah di-bill, masuk voucher, atau dicatat sebagai beban armada tidak bisa dipilih.
  */
-export async function createBillFromJobCore(db: PrismaClient, jobId: string, vendorId: string, userId?: string, opts: BillOpts = {}): Promise<string> {
+export async function createBillCore(db: PrismaClient, vendorId: string, lineIds: string[], userId?: string, opts: BillOpts = {}): Promise<string> {
   const vendor = await db.vendor.findUnique({ where: { id: vendorId } });
   if (!vendor) throw new Error("Vendor tidak ditemukan.");
-  const job = await db.job.findUnique({
-    where: { id: jobId },
-    include: { costings: { where: { side: "BUYING", vendorId, billed: false }, include: { chargeCode: true } } },
+  if (lineIds.length === 0) throw new Error("Pilih minimal satu biaya.");
+  const lines = await db.costingLine.findMany({
+    where: { id: { in: lineIds }, side: "BUYING" },
+    include: { chargeCode: true, job: { select: { status: true } } },
+    orderBy: [{ jobId: "asc" }, { sortOrder: "asc" }],
   });
-  if (!job) throw new Error("Job tidak ditemukan.");
-  const lines = job.costings;
-  if (lines.length === 0) throw new Error("Tidak ada biaya beli untuk vendor ini yang belum di-bill.");
+  if (lines.length !== lineIds.length) throw new Error("Ada biaya yang tidak ditemukan. Muat ulang halaman.");
+  if (lines.some((l) => l.vendorId !== vendorId)) throw new Error("Satu bill hanya untuk satu vendor.");
+  if (lines.some((l) => l.billed || l.voucherId || l.recordedAt)) throw new Error("Ada biaya yang sudah di-bill atau masuk voucher. Muat ulang halaman.");
+  if (lines.some((l) => l.job.status === "CANCELLED")) throw new Error("Ada job yang sudah dibatalkan.");
+  const jobId = lines[0].jobId;
 
   const cur = (opts.currency || IDR).toUpperCase();
   let rate = 1;
@@ -34,49 +47,45 @@ export async function createBillFromJobCore(db: PrismaClient, jobId: string, ven
   }
 
   const subtotal = r2(lines.reduce((s, l) => s + Number(l.actualIdr), 0));
-  const local = !FOREIGN_CARRIER.includes(vendor.type);
-  const ppnCalc = local ? r2(lines.filter((l) => l.taxable).reduce((s, l) => s + Number(l.actualIdr), 0) * PPN_RATE) : 0;
-  const ppn = opts.ppnOverride !== undefined && opts.ppnOverride !== null ? r2(Number(opts.ppnOverride)) : ppnCalc;
-  // PPh 23 untuk vendor dalam negeri; PPh 26 untuk vendor luar negeri (baris dengan flag charge code).
-  const pph23Base = vendor.isForeign ? 0 : r2(lines.filter((l) => l.chargeCode.isPph23).reduce((s, l) => s + Number(l.actualIdr), 0));
-  const pph23 = r2(pph23Base * PPH23_RATE);
-  const pph26Lines = vendor.isForeign ? lines.filter((l) => l.chargeCode.isPph26) : [];
-  const pph26Base = r2(pph26Lines.reduce((s, l) => s + Number(l.actualIdr), 0));
-  const pph26 = r2(pph26Lines.reduce((s, l) => s + pph26Of(Number(l.actualIdr), Number(vendor.pph26Rate ?? l.chargeCode.pph26Rate)), 0));
+  const jasa = r2(lines.filter((l) => !l.asReceipt).reduce((s, l) => s + Number(l.actualIdr), 0));
+  const ppn = money(opts.ppn, "PPN");
+  const pph23 = money(opts.pph23, "PPh 23");
+  const pph26 = money(opts.pph26, "PPh 26");
   const total = r2(subtotal + ppn - pph23 - pph26);
+  if (!(total > 0)) throw new Error("Nilai bill harus lebih dari 0.");
   const foreignTotal = cur === IDR ? 0 : r2(total / rate);
   // kurs tercatat = IDR tercatat / nominal valas (konsisten dengan pembulatan nominal valas)
   const effRate = foreignTotal > 0 ? Number((total / foreignTotal).toFixed(6)) : 1;
 
   return db.$transaction(async (tx) => {
     const acc = await accountMap(tx);
-    const date = new Date();
-    const dueDate = new Date(date);
-    dueDate.setDate(dueDate.getDate() + 30);
+    const date = opts.date ? new Date(`${opts.date}T12:00:00+07:00`) : new Date();
+    const dueDate = opts.dueDate ? new Date(`${opts.dueDate}T12:00:00+07:00`) : new Date(date);
+    if (!opts.dueDate) dueDate.setDate(dueDate.getDate() + 30);
 
-    // Beban per akun (sesuai charge code), lalu PPN masukan dan PPh 23.
+    // Beban per akun (sesuai charge code), reimburse ke akun titipan, lalu PPN masukan dan PPh.
     const expByAccount: Record<string, number> = {};
     for (const l of lines) {
-      const accId = l.chargeCode.expenseAccountId ?? acc[ACC.EXP_OTHER];
+      const accId = l.asReceipt ? acc[ACC.REIMBURSE] : l.chargeCode.expenseAccountId ?? acc[ACC.EXP_OTHER];
       expByAccount[accId] = r2((expByAccount[accId] ?? 0) + Number(l.actualIdr));
     }
 
     const number = await genDocNumber(tx, SEQ.BILL, date);
     const bill = await tx.vendorBill.create({
       data: {
-        number, vendorId, jobId: job.id, date, dueDate,
+        number, vendorId, jobId, date, dueDate, vendorRef: (opts.vendorRef ?? "").trim() || null,
         currency: cur, exchangeRate: new Prisma.Decimal(effRate.toFixed(6)),
         amountForeign: new Prisma.Decimal(foreignTotal), amountPaidForeign: new Prisma.Decimal(0),
         subtotal: new Prisma.Decimal(subtotal),
-        pph23Base: new Prisma.Decimal(pph23Base), pph23Amount: new Prisma.Decimal(pph23),
-        pph26Base: new Prisma.Decimal(pph26Base), pph26Amount: new Prisma.Decimal(pph26),
+        pph23Base: new Prisma.Decimal(pph23 > 0 ? jasa : 0), pph23Amount: new Prisma.Decimal(pph23),
+        pph26Base: new Prisma.Decimal(pph26 > 0 ? jasa : 0), pph26Amount: new Prisma.Decimal(pph26),
         ppnAmount: new Prisma.Decimal(ppn),
         total: new Prisma.Decimal(total), amountPaid: new Prisma.Decimal(0), status: "UNPAID", postedAt: date,
         lines: {
           create: lines.map((l) => ({
             chargeCodeId: l.chargeCodeId, description: l.chargeCode.name,
             qty: l.qty, unitPrice: new Prisma.Decimal(Number(l.actualIdr) / (Number(l.qty) || 1)),
-            amount: new Prisma.Decimal(Number(l.actualIdr)), pph23: l.chargeCode.isPph23,
+            amount: new Prisma.Decimal(Number(l.actualIdr)), pph23: pph23 > 0 && !l.asReceipt, jobId: l.jobId,
           })),
         },
       },
@@ -90,9 +99,19 @@ export async function createBillFromJobCore(db: PrismaClient, jobId: string, ven
     if (pph26 > 0) jLines.push({ accountId: acc[ACC.PPH26], credit: pph26, description: "PPh 26 dipotong" });
     const jeId = await postJournal(tx, { date, description: `Vendor Bill ${number} - ${vendor.name}`, source: "BILL", sourceId: bill.id, lines: jLines, createdById: userId });
     await tx.vendorBill.update({ where: { id: bill.id }, data: { journalEntryId: jeId } });
-    await tx.costingLine.updateMany({ where: { id: { in: lines.map((l) => l.id) } }, data: { billed: true } });
+    const marked = await tx.costingLine.updateMany({ where: { id: { in: lineIds }, billed: false, voucherId: null }, data: { billed: true } });
+    if (marked.count !== lineIds.length) throw new Error("Biaya ini baru saja dipakai bill atau voucher lain. Muat ulang halaman.");
     return bill.id;
   });
+}
+
+/** Bill dari semua biaya vendor di satu job yang belum di-bill. */
+export async function createBillFromJobCore(db: PrismaClient, jobId: string, vendorId: string, userId?: string, opts: BillOpts = {}): Promise<string> {
+  const lines = await db.costingLine.findMany({
+    where: { jobId, side: "BUYING", vendorId, billed: false, voucherId: null, recordedAt: null }, select: { id: true },
+  });
+  if (lines.length === 0) throw new Error("Tidak ada biaya beli untuk vendor ini yang belum di-bill.");
+  return createBillCore(db, vendorId, lines.map((l) => l.id), userId, opts);
 }
 
 export type VendorPaymentInput = {
@@ -118,9 +137,9 @@ export async function recordVendorPaymentCore(db: PrismaClient, billId: string, 
 
   await db.$transaction(async (tx) => {
     const acc = await accountMap(tx);
-    const number = await genDocNumber(tx, SEQ.PAYMENT, date);
     const cash = await resolveCashAccount(tx, input.bankAccountId, "payment");
     assertCashCurrency(cash, bill.currency, "pembayaran bill");
+    const number = await genProofNumber(tx, cashProofCode(cash.kind, "OUT"), date);
     const outIdr = r2(Number(bill.total) - Number(bill.amountPaid));
 
     if (bill.currency === IDR) {
@@ -141,7 +160,7 @@ export async function recordVendorPaymentCore(db: PrismaClient, billId: string, 
           { accountId: acc[ACC.AP], debit: amount, description: `Pelunasan ${bill.number}` },
           { accountId: cash.coaId, credit: amount, description: `Pembayaran dari ${cash.name}` },
         ],
-        createdById: userId,
+        createdById: userId, number,
       });
       await tx.payment.update({ where: { id: pay.id }, data: { journalEntryId: jeId } });
       const newPaid = r2(Number(bill.amountPaid) + amount);
@@ -179,7 +198,7 @@ export async function recordVendorPaymentCore(db: PrismaClient, billId: string, 
     if (fx > 0) lines.push({ accountId: acc[ACC.FX], credit: fx, description: "Laba selisih kurs" });
     if (fx < 0) lines.push({ accountId: acc[ACC.FX], debit: -fx, description: "Rugi selisih kurs" });
     const jeId = await postJournal(tx, {
-      date, description: `Pembayaran ${number} - ${bill.vendor.name}`, source: "PAYMENT", sourceId: pay.id, lines, createdById: userId,
+      date, description: `Pembayaran ${number} - ${bill.vendor.name}`, source: "PAYMENT", sourceId: pay.id, lines, createdById: userId, number,
     });
     await tx.payment.update({ where: { id: pay.id }, data: { journalEntryId: jeId } });
     const newPaidIdr = r2(Number(bill.amountPaid) + bookedIdr);

@@ -70,7 +70,7 @@ export default async function BankAccountsPage() {
         Saldo buku dihitung dari jurnal. Untuk mencocokkan dengan rekening koran, buka{" "}
         <Link href="/accounting/bank-rec" className="text-primary hover:underline">Rekonsiliasi Bank</Link>.
         Transaksi yang hanya ada di bank, seperti biaya admin atau bunga, dicatat di{" "}
-        <Link href="/accounting/cash-entry" className="text-primary hover:underline">Kas Masuk / Keluar</Link>.
+        <Link href="/accounting/cash-entry" className="text-primary hover:underline">Jurnal Penerimaan & Pengeluaran</Link>.
       </p>
     </div>
   );

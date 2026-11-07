@@ -180,6 +180,7 @@ async function main() {
     ["1100", "Kas", "ASSET", "DEBIT", true],
     ["1200", "Bank BCA", "ASSET", "DEBIT", true],
     ["1300", "Piutang Usaha", "ASSET", "DEBIT", true],
+    ["1350", "Titipan Reimburse Customer", "ASSET", "DEBIT", true],
     ["1450", "PPh 23 Dibayar Dimuka", "ASSET", "DEBIT", true],
     ["1500", "Uang Muka / WIP", "ASSET", "DEBIT", true],
     ["2000", "Hutang Usaha", "LIABILITY", "CREDIT", true],

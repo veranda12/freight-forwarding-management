@@ -4,21 +4,21 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { assertCan } from "@/lib/auth-helpers";
 import { writeAudit } from "@/lib/audit";
-import { createBillFromJobCore, recordVendorPaymentCore, type BillOpts, type VendorPaymentInput } from "@/lib/payables";
+import { createBillCore, recordVendorPaymentCore, type BillOpts, type VendorPaymentInput } from "@/lib/payables";
 import { errorMessage } from "@/lib/action-error";
 
 type Result<T = object> = ({ ok: true } & T) | { ok: false; error: string };
 const fail = (e: unknown): { ok: false; error: string } => ({ ok: false, error: errorMessage(e, "Gagal.") });
 
-/** Membuat vendor bill dari biaya beli job untuk satu vendor. */
-export async function createBillFromJobAction(jobId: string, vendorId: string, opts: BillOpts = {}): Promise<Result<{ id: string }>> {
+/** Membuat vendor bill untuk satu vendor dari biaya yang dicentang, boleh dari beberapa job. */
+export async function createBillAction(vendorId: string, lineIds: string[], opts: BillOpts = {}): Promise<Result<{ id: string }>> {
   const user = await assertCan("bills", "write");
   try {
-    const id = await createBillFromJobCore(prisma, jobId, vendorId, user.id, opts);
+    const id = await createBillCore(prisma, vendorId, lineIds, user.id, opts);
     const bill = await prisma.vendorBill.findUnique({ where: { id }, select: { number: true } });
-    await writeAudit({ entity: "VendorBill", entityId: id, action: "CREATE_FROM_JOB", summary: bill?.number ?? id, userId: user.id });
-    revalidatePath(`/jobs/${jobId}`);
+    await writeAudit({ entity: "VendorBill", entityId: id, action: "CREATE", summary: `${bill?.number ?? id}: ${lineIds.length} biaya`, userId: user.id });
     revalidatePath("/bills");
+    revalidatePath("/costing");
     revalidatePath("/accounting");
     return { ok: true, id };
   } catch (e) { return fail(e); }

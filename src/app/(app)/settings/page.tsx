@@ -23,7 +23,7 @@ export default async function SettingsPage() {
           name: v(c?.name), legalName: v(c?.legalName), npwp: v(c?.npwp), address: v(c?.address), city: v(c?.city),
           phone: v(c?.phone), email: v(c?.email), website: v(c?.website),
           bankName: v(c?.bankName), bankAccount: v(c?.bankAccount), bankHolder: v(c?.bankHolder), bankBranch: v(c?.bankBranch),
-          signatoryName: v(c?.signatoryName), signatoryTitle: v(c?.signatoryTitle),
+          signatoryName: v(c?.signatoryName), signatoryTitle: v(c?.signatoryTitle), docCode: v(c?.docCode),
         }}
       />
       <Card className="max-w-xl">

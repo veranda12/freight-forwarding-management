@@ -1,4 +1,7 @@
+import Link from "next/link";
+import { Plus } from "lucide-react";
 import { requireCan } from "@/lib/auth-helpers";
+import { Button } from "@/components/ui/button";
 import { prisma } from "@/lib/prisma";
 import { can } from "@/lib/rbac";
 import { formatIDR } from "@/lib/format";
@@ -11,10 +14,21 @@ import { BillsTable, type BillRow } from "./bills-table";
 
 export const dynamic = "force-dynamic";
 
+const JOB_REF = { number: true, hblNo: true, mblNo: true, hawbNo: true, mawbNo: true } as const;
+type JobRef = { number: string; hblNo: string | null; mblNo: string | null; hawbNo: string | null; mawbNo: string | null };
+
+/** Job di bill: dari baris, atau dari kepala bill untuk data lama. */
+function jobsOf(b: { job: JobRef | null; lines: { job: JobRef | null }[] }): JobRef[] {
+  const m = new Map<string, JobRef>();
+  for (const l of b.lines) if (l.job) m.set(l.job.number, l.job);
+  if (m.size === 0 && b.job) m.set(b.job.number, b.job);
+  return [...m.values()];
+}
+
 export default async function BillsPage() {
   const user = await requireCan("bills", "read");
   const cash = await cashAccountOptions(prisma, "payment");
-  const bills = await prisma.vendorBill.findMany({ orderBy: { date: "desc" }, include: { vendor: { select: { name: true } } } });
+  const bills = await prisma.vendorBill.findMany({ orderBy: { date: "desc" }, include: { vendor: { select: { name: true } }, job: { select: JOB_REF }, lines: { select: { job: { select: JOB_REF } } } } });
   const today = new Date().toISOString().slice(0, 10);
   const rateCache = new Map<string, number | null>();
   const rateOf = async (cur: string) => {
@@ -26,7 +40,9 @@ export default async function BillsPage() {
   for (const b of bills) {
     const outstanding = r2(Number(b.total) - Number(b.amountPaid));
     rows.push({
-      id: b.id, number: b.number, vendor: b.vendor.name, date: b.date.toISOString(), dueDate: b.dueDate.toISOString(),
+      id: b.id, number: b.number, vendor: b.vendor.name, vendorRef: b.vendorRef ?? "",
+      job: jobsOf(b).map((j) => j.number).join(", "),
+      bl: jobsOf(b).flatMap((j) => [j.hblNo, j.mblNo, j.hawbNo, j.mawbNo]).filter(Boolean).join(", "), date: b.date.toISOString(), dueDate: b.dueDate.toISOString(),
       subtotal: Number(b.subtotal), pph23: Number(b.pph23Amount), total: Number(b.total), status: b.status,
       currency: b.currency,
       outstanding,
@@ -40,7 +56,9 @@ export default async function BillsPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Vendor Bill (AP)" description={`${rows.length} tagihan vendor`} />
+      <PageHeader title="Vendor Bill (AP)" description={`${rows.length} tagihan vendor`}>
+        {can(user.role, "bills", "write") && <Button asChild><Link href="/bills/new"><Plus /> Buat Bill</Link></Button>}
+      </PageHeader>
       <StatStrip items={[
         { label: "Total bill", value: rows.length },
         { label: "Outstanding AP", value: formatIDR(outstandingTotal), tone: "warning" },

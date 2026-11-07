@@ -15,7 +15,7 @@ import { formatIDR, formatDate } from "@/lib/format";
 
 export type InvoiceRow = {
   id: string; number: string; customer: string; date: string; dueDate: string;
-  total: number; paid: number; status: InvoiceStatus; job: string | null;
+  total: number; paid: number; status: InvoiceStatus; job: string; bl: string;
 };
 
 const FACETS: Facet[] = [
@@ -26,6 +26,8 @@ export function InvoicesTable({ data }: { data: InvoiceRow[] }) {
   const router = useRouter();
   const columns: ColumnDef<InvoiceRow>[] = [
     { accessorKey: "number", header: "No. Invoice", cell: ({ row }) => <span className="font-medium">{row.original.number}</span> },
+    { accessorKey: "job", header: "No. Job", cell: ({ row }) => <span className="block max-w-48 truncate text-muted-foreground" title={row.original.job}>{row.original.job || "-"}</span> },
+    { accessorKey: "bl", header: "No. B/L", cell: ({ row }) => <span className="block max-w-40 truncate text-muted-foreground" title={row.original.bl}>{row.original.bl || "-"}</span> },
     { accessorKey: "customer", header: "Customer" },
     { accessorKey: "date", header: "Tanggal", cell: ({ row }) => <span className="whitespace-nowrap">{formatDate(row.original.date)}</span> },
     { accessorKey: "dueDate", header: "Jatuh Tempo", cell: ({ row }) => <span className="whitespace-nowrap">{formatDate(row.original.dueDate)}</span> },
@@ -50,7 +52,7 @@ export function InvoicesTable({ data }: { data: InvoiceRow[] }) {
     },
   ];
   return (
-    <DataTable columns={columns} data={data} facets={FACETS} searchPlaceholder="Cari no. invoice / customer…"
-      searchKeys={["number", "customer"]} onRowClick={(r) => router.push(`/invoices/${r.id}`)} emptyTitle="Belum ada invoice" />
+    <DataTable columns={columns} data={data} facets={FACETS} searchPlaceholder="Cari no. invoice, no. job, no. B/L, atau customer…"
+      searchKeys={["number", "customer", "job", "bl"]} onRowClick={(r) => router.push(`/invoices/${r.id}`)} emptyTitle="Belum ada invoice" />
   );
 }

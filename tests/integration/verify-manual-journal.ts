@@ -62,7 +62,7 @@ async function main() {
   });
   const je = await db.journalEntry.findUniqueOrThrow({ where: { id: mj.journalEntryId }, include: { lines: true } });
   ok(je.source === "MANUAL" && je.sourceId === MANUAL_JOURNAL_TAG, "jurnal manual bersumber MANUAL dengan penanda MJ");
-  ok(/^JE\//.test(mj.number) && je.lines.length === 4, `nomor ${mj.number}, baris kosong diabaikan (4 baris)`);
+  ok(/\/JU\//.test(mj.number) && je.lines.length === 4, `nomor ${mj.number}, baris kosong diabaikan (4 baris)`);
   const sd = r2(je.lines.reduce((s, l) => s + Number(l.debit), 0)), sc = r2(je.lines.reduce((s, l) => s + Number(l.credit), 0));
   ok(sd === sc && sd === 2_200_000 && mj.total === 2_200_000, `jurnal seimbang: debit ${sd} = kredit ${sc}`);
   ok(await bal("6300") === r2(before.b6300 - 2_200_000) && await bal("6320") === r2(before.b6320 + 1_200_000)
