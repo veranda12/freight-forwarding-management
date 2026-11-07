@@ -30,12 +30,12 @@ export function SearchableSelect({ value, onChange, options, placeholder = "Pili
         </Button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-[var(--radix-popover-trigger-width)] min-w-64 p-2">
-        <Input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Ketik kode atau nama…" className="h-8" />
-        <div className="mt-2 max-h-60 overflow-y-auto">
+        <Input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Ketik kode atau nama…" className="h-8" aria-label="Cari" />
+        <div className="mt-2 max-h-60 overflow-y-auto" role="listbox" aria-label={ariaLabel}>
           {shown.length === 0 && <p className="px-2 py-3 text-sm text-muted-foreground">Tidak ditemukan.</p>}
           {shown.map((o) => (
             <button
-              key={o.id} type="button"
+              key={o.id} type="button" role="option" aria-selected={o.id === value}
               className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-muted"
               onClick={() => { onChange(o.id); setOpen(false); }}
             >
