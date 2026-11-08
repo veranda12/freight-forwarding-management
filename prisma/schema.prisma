@@ -194,6 +194,13 @@ enum VoucherStatus {
   CANCELLED
 }
 
+/// Jenis baris pajak yang diketik Finance: PPN masukan (Debet), PPh 23/26 dipotong (Kredit).
+enum TaxRowKind {
+  PPN_IN
+  PPH23
+  PPH26
+}
+
 enum CashAccountKind {
   BANK
   CASH
@@ -324,9 +331,18 @@ model CompanySetting {
   bankBranch  String?
   signatoryName  String?
   signatoryTitle String?
-  /// Kode perusahaan pada nomor bukti, misalnya SLG/BM/26/11/001.
+  /// Kode perusahaan pada nomor bukti, misalnya SLG/BK/26/11/06/0001.
   docCode     String   @default("SLG")
   updatedAt   DateTime @updatedAt
+}
+
+/// Kotak dokumen SOP pada cetakan bukti, per jenis formulir: BBM, BBK, BKM, BKK, JU, VC.
+model ProofForm {
+  code          String    @id
+  docNo         String?
+  revision      String?
+  effectiveDate DateTime? @db.Date
+  updatedAt     DateTime  @updatedAt
 }
 
 model Sequence {
@@ -942,10 +958,24 @@ model Voucher {
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
 
-  lines CostingLine[]
+  lines    CostingLine[]
+  taxLines VoucherTaxLine[]
 
   @@index([jobId])
   @@index([status])
+}
+
+/// Baris pajak voucher (diketik Finance). Total voucher = biaya + PPN - PPh = nilai yang dibayar.
+model VoucherTaxLine {
+  id          String     @id @default(cuid())
+  voucherId   String
+  voucher     Voucher    @relation(fields: [voucherId], references: [id], onDelete: Cascade)
+  kind        TaxRowKind
+  description String
+  amount      Decimal    @db.Decimal(18, 2)
+  sortOrder   Int        @default(0)
+
+  @@index([voucherId])
 }
 
 // ============================================================

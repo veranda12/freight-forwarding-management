@@ -11,10 +11,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/components/empty-state";
 import { formatIDR } from "@/lib/format";
 import { createVoucherAction } from "../actions";
+import { TaxRowsEditor, taxSummary, type TaxRowDraft } from "@/components/tax-rows-editor";
 
 export type VoucherJob = {
   id: string; number: string; bl: string; customer: string;
-  lines: { id: string; label: string; note: string | null; vendorId: string | null; vendor: string | null; amount: number }[];
+  lines: { id: string; label: string; note: string | null; vendorId: string | null; vendor: string | null; amount: number; reimburse: boolean }[];
 };
 
 export function VoucherBuilder({ jobs, today, lockKey }: { jobs: VoucherJob[]; today: string; lockKey: string | null }) {
@@ -26,6 +27,7 @@ export function VoucherBuilder({ jobs, today, lockKey }: { jobs: VoucherJob[]; t
   const [payee, setPayee] = useState("");
   const [dateKey, setDateKey] = useState(today);
   const [notes, setNotes] = useState("");
+  const [taxRows, setTaxRows] = useState<TaxRowDraft[]>([]);
 
   const shown = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -34,6 +36,9 @@ export function VoucherBuilder({ jobs, today, lockKey }: { jobs: VoucherJob[]; t
   const job = jobs.find((j) => j.id === jobId);
   const picked = job?.lines.filter((l) => selected.includes(l.id)) ?? [];
   const total = picked.reduce((s, l) => s + l.amount, 0);
+  const nonReimburse = picked.filter((l) => !l.reimburse).reduce((s, l) => s + l.amount, 0);
+  const tax = taxSummary(taxRows, total, nonReimburse);
+  const reimburseOnly = picked.length > 0 && nonReimburse === 0;
 
   function toggle(j: VoucherJob, lineId: string) {
     const line = j.lines.find((l) => l.id === lineId);
@@ -48,7 +53,10 @@ export function VoucherBuilder({ jobs, today, lockKey }: { jobs: VoucherJob[]; t
   function save() {
     if (!job) return;
     start(async () => {
-      const res = await createVoucherAction({ jobId: job.id, lineIds: selected, dateKey, payee, vendorId: picked.find((l) => l.vendorId)?.vendorId ?? null, notes });
+      const res = await createVoucherAction({
+        jobId: job.id, lineIds: selected, dateKey, payee, vendorId: picked.find((l) => l.vendorId)?.vendorId ?? null, notes,
+        taxRows: taxRows.map((r) => ({ kind: r.kind, amount: Number(r.amount), description: r.description })),
+      });
       if (res.ok) { toast.success("Voucher dibuat."); router.push("/vouchers"); router.refresh(); }
       else toast.error(res.error);
     });
@@ -76,7 +84,7 @@ export function VoucherBuilder({ jobs, today, lockKey }: { jobs: VoucherJob[]; t
                 <label key={l.id} className="flex cursor-pointer items-center gap-3 px-3 py-2 text-sm hover:bg-muted/30">
                   <input type="checkbox" className="h-4 w-4 accent-primary" checked={jobId === j.id && selected.includes(l.id)} onChange={() => toggle(j, l.id)} />
                   <span className="min-w-0 flex-1">
-                    {l.label}
+                    {l.label}{l.reimburse && <span className="ml-1.5 rounded border px-1 text-[10px] text-muted-foreground">Reimburse</span>}
                     <span className="block truncate text-xs text-muted-foreground">{[l.vendor, l.note].filter(Boolean).join(" · ") || "Tanpa vendor"}</span>
                   </span>
                   <span className="tabular-nums">{formatIDR(l.amount)}</span>
@@ -98,7 +106,9 @@ export function VoucherBuilder({ jobs, today, lockKey }: { jobs: VoucherJob[]; t
           </div>
           <div className="space-y-1.5"><Label>Catatan (opsional)</Label><Input value={notes} onChange={(e) => setNotes(e.target.value)} /></div>
           <div className="flex justify-between rounded-md bg-muted/40 px-3 py-2 font-semibold"><span>{picked.length} biaya</span><span className="tabular-nums">{formatIDR(total)}</span></div>
-          <Button className="w-full" onClick={save} disabled={pending || picked.length === 0 || payee.trim().length < 2 || (lockKey !== null && dateKey <= lockKey)}>{pending ? <Loader2 className="animate-spin" /> : <Save />} Buat Voucher</Button>
+          <TaxRowsEditor rows={taxRows} onChange={setTaxRows} base={total} nonReimburse={nonReimburse} format={formatIDR}
+            disabledReason={picked.length === 0 ? "Pilih biaya dulu." : reimburseOnly ? "Biaya reimburse tidak dikenai pajak." : null} />
+          <Button className="w-full" onClick={save} disabled={pending || picked.length === 0 || payee.trim().length < 2 || (lockKey !== null && dateKey <= lockKey) || !tax.ready}>{pending ? <Loader2 className="animate-spin" /> : <Save />} Buat Voucher</Button>
           <p className="text-xs text-muted-foreground">Setelah dibuat, biaya terkunci. Untuk koreksi, batalkan voucher lalu buat ulang.</p>
         </CardContent>
       </Card>

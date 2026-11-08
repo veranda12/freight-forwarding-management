@@ -22,7 +22,7 @@ export default async function NewVoucherPage() {
   for (const l of lines) {
     const j = l.job;
     const row = jobs.get(j.id) ?? { id: j.id, number: j.number, bl: [j.hblNo, j.mblNo, j.hawbNo, j.mawbNo].filter(Boolean).join(" / "), customer: j.customer.name, lines: [] };
-    row.lines.push({ id: l.id, label: `${l.chargeCode.code} ${l.chargeCode.name}`, note: l.description !== l.chargeCode.code ? l.description : null, vendorId: l.vendor?.id ?? null, vendor: l.vendor?.name ?? null, amount: Number(l.actualIdr) });
+    row.lines.push({ id: l.id, label: `${l.chargeCode.code} ${l.chargeCode.name}`, note: l.description !== l.chargeCode.code ? l.description : null, vendorId: l.vendor?.id ?? null, vendor: l.vendor?.name ?? null, amount: Number(l.actualIdr), reimburse: l.asReceipt });
     jobs.set(j.id, row);
   }
   return (

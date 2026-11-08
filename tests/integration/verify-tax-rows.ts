@@ -1,11 +1,12 @@
 /**
- * Uji baris pajak yang diketik Finance (PPN masukan Debet, PPh 23/26 Kredit) di Jurnal Pengeluaran:
+ * Uji baris pajak yang diketik Finance (PPN masukan Debet, PPh 23/26 Kredit) di Jurnal Pengeluaran dan voucher job:
  * contoh client (servis 2.600.000, PPh 23 52.000, bank 2.548.000), edit, rekap pajak = saldo akun, batal, valas,
- * dan input yang harus ditolak.
+ * reimburse tanpa pajak, dan input yang harus ditolak.
  * Hanya untuk database UJI: menolak "ffms" dan "ffms_pgcheck".
  * Jalankan: DATABASE_URL=.../ffms_part2 npx tsx tests/integration/verify-tax-rows.ts
  */
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
+import { cancelVoucher, createVoucher, payVoucher } from "../../src/lib/vouchers";
 import { cancelCashEntry, createCashEntry, listCashEntries, updateCashEntry, type CashEntryInput } from "../../src/lib/cash-entry";
 import { getTaxRecap } from "../../src/lib/tax";
 import { getLockKey, setLockKey } from "../../src/lib/period-lock";
@@ -114,6 +115,54 @@ async function main() {
       const lfx = (await listCashEntries(db)).find((x) => x.id === fx.journalEntryId)!;
       ok(lfx.taxRows[0]?.amount === 200 && lfx.rows[0]?.amount === 1_000, "valas: form edit membaca nominal dalam USD");
     }
+
+    // 9. Voucher job: biaya 1.000.000 + reimburse 500.000, PPN 11.000, PPh 23 20.000
+    const customer = await db.customer.findFirstOrThrow({ orderBy: { code: "asc" } });
+    const cc = await db.chargeCode.findFirstOrThrow({ where: { code: "HANDLING" } });
+    const kas = await db.bankAccount.findFirstOrThrow({ where: { kind: "CASH", isActive: true }, include: { coaAccount: true } });
+    const job = await db.job.create({ data: { number: `JOB/UJI-TAX/${Date.now()}`, mode: "SEA_FCL", direction: "IMPORT", status: "ARRIVED", customerId: customer.id } });
+    const buying = (amount: number, asReceipt = false) => db.costingLine.create({
+      data: {
+        jobId: job.id, side: "BUYING", chargeCodeId: cc.id, description: asReceipt ? "Reimburse" : "Jasa", asReceipt, qty: new Prisma.Decimal(1),
+        unitPrice: new Prisma.Decimal(amount), amountForeign: new Prisma.Decimal(amount), estimatedIdr: new Prisma.Decimal(amount), actualIdr: new Prisma.Decimal(amount),
+      },
+    });
+    const jasa = await buying(1_000_000);
+    const reimb = await buying(500_000, true);
+    const vInput = (lineIds: string[], taxRows?: CashEntryInput["taxRows"]) => ({ jobId: job.id, lineIds, dateKey: day, payee: "PT Trucking Uji", taxRows });
+    const vid = await createVoucher(db, vInput([jasa.id, reimb.id], [
+      { kind: "PPN_IN", amount: 11_000, description: "PPN Trucking" }, { kind: "PPH23", amount: 20_000, description: "PPh 23 PT Trucking Uji" },
+    ]));
+    const v = await db.voucher.findUniqueOrThrow({ where: { id: vid }, include: { taxLines: { orderBy: { sortOrder: "asc" } } } });
+    ok(Number(v.total) === 1_491_000, `voucher: total = 1.500.000 + 11.000 - 20.000 = 1.491.000 (${Number(v.total)})`);
+    ok(v.taxLines.length === 2 && v.taxLines[0].kind === "PPN_IN" && v.taxLines[1].kind === "PPH23", "voucher: baris pajak tersimpan berurutan");
+    const paid = await payVoucher(db, vid, { bankAccountId: kas.id, dateKey: day });
+    const vp = await db.voucher.findUniqueOrThrow({ where: { id: vid } });
+    const lv = await lines(vp.journalEntryId!);
+    ok(balanced(lv), `voucher dibayar ${paid.number}: jurnal seimbang`);
+    ok(lv.some((l) => l.code === ACC.REIMBURSE && l.debit === 500_000), "reimburse 500.000 tetap utuh di akun 1350");
+    ok(lv.some((l) => l.code === ACC.PPN_IN && l.debit === 11_000) && lv.some((l) => l.code === ACC.PPH23 && l.credit === 20_000), "PPN Debet 11.000, PPh 23 Kredit 20.000");
+    ok(lv.some((l) => l.code === kas.coaAccount.code && l.credit === 1_491_000), "kas Kredit 1.491.000");
+    const rv = await getTaxRecap(db, day, day);
+    ok(rv.pph23.some((r) => r.number === paid.number && r.pph === 20_000) && rv.ppnIn.some((r) => r.number === paid.number && r.ppn === 11_000), "rekap memuat pajak voucher dengan nomor bukti kas");
+
+    // 10. Voucher: reimburse saja dengan pajak, dan PPh melebihi biaya non-reimburse, ditolak tanpa jejak
+    const r2l = await buying(300_000, true);
+    const j2 = await buying(100_000);
+    const vcBefore = await db.sequence.findMany({ where: { key: "PROOF:VC" } });
+    await throws(() => createVoucher(db, vInput([r2l.id], [{ kind: "PPH23", amount: 6_000 }])), /reimburse tidak dikenai pajak/, "voucher reimburse saja + pajak ditolak");
+    await throws(() => createVoucher(db, vInput([r2l.id, j2.id], [{ kind: "PPH23", amount: 100_001 }])), /PPh dipotong melebihi/, "PPh melebihi biaya non-reimburse ditolak (reimburse tidak ikut dasar)");
+    ok(JSON.stringify(vcBefore) === JSON.stringify(await db.sequence.findMany({ where: { key: "PROOF:VC" } })), "nomor voucher tidak terpakai saat ditolak");
+    ok((await db.costingLine.count({ where: { id: { in: [r2l.id, j2.id] }, voucherId: { not: null } } })) === 0, "biaya tetap bebas setelah ditolak");
+
+    // 11. Voucher tanpa pajak tidak berubah; batal voucher berpajak sebelum dibayar
+    const plainV = await createVoucher(db, vInput([r2l.id]));
+    ok(Number((await db.voucher.findUniqueOrThrow({ where: { id: plainV } })).total) === 300_000, "voucher tanpa pajak: total = jumlah biaya");
+    const taxedV = await createVoucher(db, vInput([j2.id], [{ kind: "PPH23", amount: 2_000 }]));
+    await cancelVoucher(db, taxedV, "uji batal");
+    const tv = await db.voucher.findUniqueOrThrow({ where: { id: taxedV }, include: { taxLines: true } });
+    ok(tv.status === "CANCELLED" && !tv.journalEntryId && (await db.costingLine.findUniqueOrThrow({ where: { id: j2.id } })).voucherId === null,
+      "voucher berpajak dibatalkan sebelum dibayar: tanpa jurnal, biaya terbuka lagi");
 
     // 8. Entri lama tanpa pajak tetap terbaca seperti semula
     const plain = await createCashEntry(db, input(undefined, 150_000));
