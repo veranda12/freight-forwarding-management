@@ -448,3 +448,51 @@ aksesibilitas hanya 1 elemen); langkah uji menunggu `networkidle` dan memilih el
 | Typecheck / lint / build | lulus | — |
 | Integrasi (30 skrip) | 30/30, 481 PASS, 0 FAIL | 30/30, 481 PASS, 0 FAIL |
 | E2E penuh | 80/80 | 80/80 |
+
+### 16.6 Merge Super Admin dari `feat/slg-role-management-pg` (2026-11-08, ±20.10–21.10 WIB)
+
+Sesi PostgreSQL mem-port Role Management (dari branch ini) ke PostgreSQL dan menambah role sistem **Super Admin**
+(keputusan Andhika 2026-11-08). Branch itu di-merge ke `feat/mariadb-slg` dalam dua langkah:
+
+1. `git merge -s ours b850d4c`: port Role Management ke PostgreSQL berikut commit prasyaratnya (D-07, D-08..D-11,
+   perbaikan lint, D-08 versi PostgreSQL). Isinya sudah ada di sini, jadi isi branch tidak berubah dan hanya riwayatnya
+   yang tersambung.
+2. Merge biasa `75bb47e` (`559a92a` Super Admin, `a04abdc` SearchableSelect, `75bb47e` suite QA PostgreSQL + dokumen).
+
+| Porting | Isi |
+|---|---|
+| Aturan | Super Admin = semua izin; Admin = semua kecuali `roles.view`/`roles.manage` (`SUPER_ADMIN_ONLY`), yang juga tidak bisa diberikan ke role kustom. Izin role sistem dihitung dari kode (`permissionsOfRole`). |
+| `hasPerm` | Tanpa jalan pintas `isAdmin`, dan mendelegasikan ke `holderHasPerm`. Refaktor ini ada di `b850d4c` (yang di-merge `-s ours`), jadi dipasang ulang manual. Tanpa itu Admin masih memegang Role Management. |
+| User Management | Hanya Super Admin yang boleh memberi role Super Admin dan mengubah, mereset, atau menonaktifkan akun Super Admin. Minimal satu Super Admin aktif. UI menyembunyikan role dan tombol yang pasti ditolak. |
+| Migrasi `20261108100000_super_admin` | Versi MariaDB dibuat dari katalog (`Claude outputs/slg/gen-super-admin.ts`); versi PostgreSQL diarsipkan. `JSON_REMOVE`+`JSON_SEARCH` hanya pada baris yang memuat kuncinya. Admin lama dipilih lewat derived table ber-`LIMIT`, karena MariaDB menolak subquery ke tabel yang sedang di-UPDATE. |
+| `proof-search.ts` | `proofKindsFor(PermHolder)` lewat `holderHasAnyPerm`; tetap murni. |
+| Uji | `verify-users`/`verify-super-admin`: `DATABASE()` + READ COMMITTED. Suite QA versi MariaDB dipertahankan, ditambah skenario Super Admin dari PostgreSQL: QA-03/05 Role Management login Super Admin, QA-04 06b eskalasi Admin → Super Admin lewat replay, QA-06 matriks memakai `permissionsOfRole` + `superadmin@`. Plus `e2e/super-admin.spec.ts`. |
+
+**Migrasi pada data lama** (snapshot sebelum Super Admin, ditambah role kustom berisi `roles.*` dan Admin kedua yang lebih
+lama tetapi nonaktif):
+- Admin **aktif** yang paling lama (`admin@demo.com`) menjadi Super Admin; Admin nonaktif tetap Admin.
+- `roles.*` terbuang dari Admin, Management, dan role kustom; Management 62 → 61 izin, Admin 141 → 139.
+- `migrate diff` kosong.
+
+Hasilnya identik di 12.3 dan 10.11.
+
+**D-17 (cacat client yang ditemukan dari log, diperbaiki):**
+- **Gejala:** `/invoices/new` mencatat `Uncaught Error: Minified React error #90` ("Mixing React and non-React radio
+  inputs with the same name"). Tercatat 15 kali di run E2E pagi tadi dan 3 kali di run penuh malam ini, jadi sudah ada
+  sejak porting `3330c48`, bukan akibat merge ini.
+- **Penyebab:** salinan HTML streaming yang belum di-hydrate memuat radio `name="invoice-job"` yang sama.
+- **Perbaikan:** grup radio di `invoice-builder.tsx` dibungkus `<form>` sendiri. React hanya mencocokkan radio dalam form
+  yang sama, dan navigasi panah grup radio tetap berfungsi.
+- **Bukti:** sesudah build ulang, 23 skenario yang memakai builder (QA-01, demo, job-invoice-ui, QA-07) lulus tanpa
+  error #90 baru di log.
+- Dilaporkan ke sesi PostgreSQL.
+
+| Uji | MariaDB 12.3 | MariaDB 10.11 |
+|---|---|---|
+| Migrasi DB berisi data → `migrate diff` | kosong | kosong |
+| Migrasi + seed DB baru | lulus | lulus |
+| Unit | 245/245 | — |
+| Typecheck / lint / build | lulus | — |
+| Integrasi (31 skrip, + `verify-super-admin`) | 31/31, 519 PASS, 0 FAIL | 31/31, 519 PASS, 0 FAIL |
+| E2E penuh | 85/85 | 85/85 (build berisi perbaikan D-17; log klien tanpa error) |
+| Smoke 8 user × 49 halaman | 0 error HTTP; Super Admin 49 halaman, Admin 48 + `/roles` dialihkan | — |

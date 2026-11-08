@@ -87,6 +87,8 @@ lalu di-**merge** ke branch MariaDB (bukan cherry-pick, supaya commit `part2` be
   di-merge `-s ours` karena isinya berasal dari branch ini; commit Super Admin sesudahnya di-merge biasa. Migrasi MariaDB
   `20261108100000_super_admin` dibuat dari katalog (padanan PostgreSQL diarsipkan). Aturan lengkap di bagian Role
   Management di atas.
+- **D-17** (cacat builder invoice client, ditemukan dari log klien): radio `name="invoice-job"` bertabrakan dengan salinan
+  HTML streaming yang belum di-hydrate → React error #90 saat memilih job. Grup radio dibungkus `<form>` sendiri.
 
 ## Master & Seed
 

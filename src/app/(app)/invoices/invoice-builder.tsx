@@ -61,6 +61,9 @@ export function InvoiceBuilder({ candidates, currencies, ppnRate, today }: {
         </CardHeader>
         <CardContent className="p-0">
           {shown.length === 0 ? <EmptyState title="Tidak ada job yang siap ditagih" className="border-0" /> : (
+            // <form> sendiri untuk grup radio: React hanya mencocokkan radio ber-name sama di form yang sama. Tanpa ini,
+            // salinan HTML streaming yang belum di-hydrate (name sama) membuat klik radio melempar React error #90.
+            <form aria-label="Pilih job" onSubmit={(e) => e.preventDefault()}>
             <Table>
               <TableHeader><TableRow>
                 <TableHead className="w-10" /><TableHead>No. Job</TableHead><TableHead>No. B/L</TableHead><TableHead>Customer</TableHead>
@@ -86,6 +89,7 @@ export function InvoiceBuilder({ candidates, currencies, ppnRate, today }: {
                 })}
               </TableBody>
             </Table>
+            </form>
           )}
         </CardContent>
       </Card>
