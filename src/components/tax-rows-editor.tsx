@@ -55,7 +55,7 @@ export function TaxRowsEditor({ rows, onChange, base, nonReimburse = base, forma
       </div>
       {disabledReason && <p className="text-xs text-muted-foreground">{disabledReason}</p>}
       {rows.map((r) => (
-        <div key={r.key} className="grid gap-2 sm:grid-cols-[10rem_1fr_9rem_2.25rem]">
+        <div key={r.key} className="grid gap-2 sm:grid-cols-[12.5rem_1fr_9rem_2.25rem]">
           <Select value={r.kind} onValueChange={(v) => set(r.key, { kind: v })}>
             <SelectTrigger aria-label="Jenis pajak"><SelectValue /></SelectTrigger>
             <SelectContent>{TAX_ROW_KINDS.map((k) => <SelectItem key={k} value={k}>{TAX_ROW_LABEL[k]} ({SIDE[k]})</SelectItem>)}</SelectContent>

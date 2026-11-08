@@ -5,11 +5,12 @@ import { prisma } from "@/lib/prisma";
 import { can } from "@/lib/rbac";
 import { cashCoaIds } from "@/lib/cash-accounts";
 import { ProofDocument } from "@/lib/pdf/proof-document";
-import { proofCompany, terbilang } from "@/lib/pdf/proof-company";
+import { cashAccountLine, proofCompany } from "@/lib/pdf/proof-company";
+import { formOfNumber, proofFormBox } from "@/lib/proof-forms";
 
 export const runtime = "nodejs";
 
-/** Cetak bukti kas, bukti bank, atau Jurnal Umum. */
+/** Cetak bukti kas, bukti bank, atau Jurnal Umum dalam format formulir SOP. */
 export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -20,19 +21,19 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
 
   const cashIds = await cashCoaIds(prisma);
   const cashLine = e.lines.find((l) => cashIds.has(l.accountId));
-  const code = e.number.split("/")[1];
-  const inflow = !!cashLine && Number(cashLine.debit) > 0;
-  const title = cashLine
-    ? `BUKTI ${code === "KM" || code === "KK" ? "KAS" : "BANK"} ${inflow ? "MASUK" : "KELUAR"}`
-    : e.source === "MANUAL" ? "JURNAL UMUM" : "BUKTI JURNAL";
-  const total = e.lines.reduce((s, l) => s + Number(l.debit), 0);
+  // Bukti kas/bank bila nomornya BM/BK/KM/KK; jurnal lain (termasuk transfer bernomor JE) memakai formulir Jurnal Umum.
+  const form = formOfNumber(e.number);
+  const isJournal = form === "JU" || form === "VC";
+  const bank = cashLine && !isJournal ? await prisma.bankAccount.findUnique({ where: { coaAccountId: cashLine.accountId } }) : null;
   const buffer = await renderToBuffer(
     <ProofDocument doc={{
-      title, number: e.number, date: e.date, showBothSides: true,
-      info: [...(cashLine ? [[inflow ? "Diterima di" : "Dibayar dari", `${cashLine.account.code} ${cashLine.account.name}`] as [string, string]] : []), ["Keterangan", e.description]],
-      rows: e.lines.map((l) => ({ account: `${l.account.code} ${l.account.name}`, description: l.description ?? e.description, debit: Number(l.debit), credit: Number(l.credit) })),
-      words: terbilang(total), note: "Lampirkan bukti pendukung.",
-      signatures: ["Dibuat", "Diketahui", "Dibayarkan", "Disetujui"], company: await proofCompany(prisma),
+      form: isJournal ? "JU" : form,
+      title: isJournal && e.source !== "MANUAL" ? "BUKTI JURNAL" : undefined,
+      number: e.number, date: e.date,
+      account: cashAccountLine(bank),
+      info: isJournal ? [["Keterangan", e.description]] : [],
+      rows: e.lines.map((l) => ({ account: l.account.code, description: l.description ?? e.description, debit: Number(l.debit), credit: Number(l.credit) })),
+      box: await proofFormBox(prisma, isJournal ? "JU" : form), company: await proofCompany(prisma),
     }} />
   );
   return new NextResponse(buffer as any, { headers: { "Content-Type": "application/pdf", "Content-Disposition": `inline; filename="${e.number.replace(/\//g, "-")}.pdf"` } });
