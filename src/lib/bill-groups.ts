@@ -59,15 +59,22 @@ export type BillInput = {
   date: string; dueDate: string; currency: string; status: BillStatus;
   subtotal: number; total: number; amountPaid: number;
   amountForeign: number; amountPaidForeign: number; exchangeRate: number;
+  /** PPN masukan dan PPh yang dipotong di bill (IDR). Kosong = 0. */
+  ppn?: number; pph23?: number; pph26?: number;
   headerJob: JobInfo | null;
   lines: BillLineInput[];
 };
+
+/** Pajak bill yang tampil sebagai baris sendiri di porsi job kepala bill. */
+export type BillTax = { ppn: number; pph23: number; pph26: number };
 
 /** Bagian satu bill yang jatuh ke satu job. */
 export type BillPortion = {
   bill: Omit<BillInput, "lines" | "headerJob"> & { outstanding: number; jobCount: number };
   lines: BillLineInput[];
   lineAmount: number;
+  /** Diisi hanya di porsi yang membawa pajak bill (job kepala bill). */
+  tax: BillTax | null;
   total: number;
   paid: number;
   outstanding: number;
@@ -117,8 +124,9 @@ export const billOutstanding = (b: Pick<BillInput, "status" | "total" | "amountP
 
 /**
  * Bagi satu bill per job. Baris tanpa job ikut job di kepala bill (data lama), selain itu "Tanpa job".
- * Total dan pembayaran dibagi proporsional nilai baris, jadi PPN dan PPh ikut terbagi dan jumlah semua bagian
- * sama persis dengan nilai bill.
+ * Nilai per job = nilai baris job itu (reimburse tetap utuh). PPN dan PPh bill tidak disebar: seluruhnya menjadi
+ * baris sendiri di porsi job kepala bill (atau job baris pertama bila job kepala tidak punya baris), sehingga jumlah
+ * semua porsi tetap sama persis dengan nilai bill. Pembayaran dibagi sesuai nilai porsi.
  */
 export function splitBillByJob(b: BillInput): { key: string; job: JobInfo | null; portion: BillPortion }[] {
   const byJob = new Map<string, { job: JobInfo | null; lines: BillLineInput[] }>();
@@ -134,8 +142,13 @@ export function splitBillByJob(b: BillInput): { key: string; job: JobInfo | null
 
   const entries = [...byJob.entries()];
   const weights = entries.map(([, g]) => g.lines.reduce((s, l) => s + cents(l.amount), 0));
-  const totals = allocate(b.total, weights);
-  const paids = allocate(b.status === "CANCELLED" ? 0 : b.amountPaid, weights);
+  // Selisih nilai bill dengan jumlah baris = PPN - PPh (beserta pembulatan) masuk utuh ke satu porsi.
+  const taxIdx = Math.max(0, entries.findIndex(([key]) => key === (b.headerJob?.id ?? NO_JOB)));
+  const rest = cents(b.total) - weights.reduce((s, w) => s + w, 0);
+  const totals = weights.map((w, i) => (w + (i === taxIdx ? rest : 0)) / 100);
+  const paids = allocate(b.status === "CANCELLED" ? 0 : b.amountPaid, totals.map((x) => Math.max(0, cents(x))));
+  const tax: BillTax = { ppn: b.ppn ?? 0, pph23: b.pph23 ?? 0, pph26: b.pph26 ?? 0 };
+  const hasTax = tax.ppn > 0 || tax.pph23 > 0 || tax.pph26 > 0;
   const { lines: _l, headerJob: _h, ...meta } = b;
   const bill = { ...meta, outstanding: billOutstanding(b), jobCount: entries.length };
   return entries.map(([key, g], i) => ({
@@ -145,6 +158,7 @@ export function splitBillByJob(b: BillInput): { key: string; job: JobInfo | null
       bill,
       lines: g.lines,
       lineAmount: weights[i] / 100,
+      tax: hasTax && i === taxIdx ? tax : null,
       total: totals[i],
       paid: paids[i],
       outstanding: b.status === "CANCELLED" ? 0 : (cents(totals[i]) - cents(paids[i])) / 100,
@@ -262,6 +276,7 @@ export async function loadBillGroups(db: Db, f: BillFilter, today: string) {
     select: {
       id: true, number: true, vendorRef: true, date: true, dueDate: true, currency: true, status: true,
       subtotal: true, total: true, amountPaid: true, amountForeign: true, amountPaidForeign: true, exchangeRate: true,
+      ppnAmount: true, pph23Amount: true, pph26Amount: true,
       vendor: { select: { name: true } }, job: { select: JOB_SELECT },
       lines: { select: { id: true, description: true, amount: true, chargeCode: { select: { code: true, name: true } }, job: { select: JOB_SELECT } }, orderBy: { id: "asc" } },
     },
@@ -271,6 +286,7 @@ export async function loadBillGroups(db: Db, f: BillFilter, today: string) {
     date: b.date.toISOString(), dueDate: b.dueDate.toISOString(), currency: b.currency, status: b.status,
     subtotal: Number(b.subtotal), total: Number(b.total), amountPaid: Number(b.amountPaid),
     amountForeign: Number(b.amountForeign), amountPaidForeign: Number(b.amountPaidForeign), exchangeRate: Number(b.exchangeRate),
+    ppn: Number(b.ppnAmount), pph23: Number(b.pph23Amount), pph26: Number(b.pph26Amount),
     headerJob: toJob(b.job),
     lines: b.lines.map((l) => ({ id: l.id, charge: l.chargeCode.code, description: l.description ?? l.chargeCode.name, amount: Number(l.amount), job: toJob(l.job) })),
   }));

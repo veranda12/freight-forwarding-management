@@ -124,7 +124,7 @@ export function BillGroupsTable({
                                     )}
                                   </span>
                                 </div>
-                                {p.lines.length > 0 && (
+                                {(p.lines.length > 0 || p.tax) && (
                                   <ul className="mt-2 space-y-0.5 text-xs text-muted-foreground">
                                     {p.lines.map((l) => (
                                       <li key={l.id} className="flex justify-between gap-4">
@@ -132,6 +132,9 @@ export function BillGroupsTable({
                                         <span className="tabular-nums">{formatIDR(l.amount)}</span>
                                       </li>
                                     ))}
+                                    {p.tax && p.tax.ppn > 0 && <li className="flex justify-between gap-4"><span>PPN masukan (bill)</span><span className="tabular-nums">{formatIDR(p.tax.ppn)}</span></li>}
+                                    {p.tax && p.tax.pph23 > 0 && <li className="flex justify-between gap-4"><span>PPh 23 dipotong (bill)</span><span className="tabular-nums">-{formatIDR(p.tax.pph23)}</span></li>}
+                                    {p.tax && p.tax.pph26 > 0 && <li className="flex justify-between gap-4"><span>PPh 26 dipotong (bill)</span><span className="tabular-nums">-{formatIDR(p.tax.pph26)}</span></li>}
                                   </ul>
                                 )}
                               </div>

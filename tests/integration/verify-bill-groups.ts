@@ -78,6 +78,14 @@ async function main() {
   ok(c2(xA.total + xB.total + xC.total) === c2(Number(bx.total)), `porsi A ${xA.total} + B ${xB.total} + C ${xC.total} = total bill`);
   ok(c2(xA.paid + xB.paid + xC.paid) === 1_000_000_00, `pembayaran terbagi ${xA.paid} / ${xB.paid} / ${xC.paid}`);
   ok(xA.lineAmount === 1_000_000 && xB.lineAmount === 2_000_000 && xC.lineAmount === 333_333, "nilai baris per job sesuai");
+  // Pajak bill tidak disebar: baris sendiri di job kepala bill, job lain = nilai barisnya saja.
+  const portions = [xA, xB, xC];
+  const head = portions.find((p) => p.tax);
+  const headJob = [jA, jB, jC][portions.indexOf(head!)];
+  ok(!!head && headJob.id === bx.jobId && portions.filter((p) => p.tax).length === 1, "pajak bill hanya di porsi job kepala bill");
+  ok(!!head && head.tax!.ppn === 36_667 && head.tax!.pph23 === 66_667 && c2(head.total) === c2(head.lineAmount + 36_667 - 66_667),
+    `porsi job kepala = nilai baris + PPN - PPh (${head?.total})`);
+  ok(portions.filter((p) => !p.tax).every((p) => p.total === p.lineAmount), "job lain = nilai barisnya, tanpa porsi pajak");
   ok(gA.overdueDays === 1 && gA === r.groups[0], "job A lewat jatuh tempo 1 hari dan tampil paling atas");
   ok(c2(r.totals.overdueOutstanding) === c2(Number(bs.total)), "lewat jatuh tempo = sisa bill kemarin");
 
