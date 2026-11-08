@@ -17,7 +17,27 @@ Format: **Keputusan** — _alasan_.
 - **PPN keluaran 11%** otomatis pada baris invoice yang taxable. **PPh 23 2%** dipotong pada vendor bill untuk charge jasa (`isPph23`), mengurangi kas yang dibayar (utang PPh 23 dicatat).
 - **Jurnal tidak pernah dihapus.** Pembatalan dokumen membuat **jurnal reversal** (balik debit/kredit) yang menunjuk jurnal asal.
 - **Costing menyimpan estimated & actual (IDR)** per baris, plus detail valas (currency, rate, amountForeign) pada sisi actual. Profit job = Σ selling − Σ buying (actual).
-- **Penomoran dokumen** via tabel `Sequence` dengan unique `(key, year, month)` di dalam transaksi DB → aman dari race condition. Format: `JOB/SEA-EXP/2026/10/0001`, `QUO/2026/10/0001`, `INV/2026/10/0001`, `BILL/...`, `PAY-R/...`, `PAY-P/...`, `BKG/...`, `JE/...`, `DN/`, `CN/`.
+- **Penomoran dokumen** via tabel `Sequence` dengan unique `(key, year, month)` di dalam transaksi DB → aman dari race condition. Format: `JOB/SEA-EXP/2026/10/0001`, `QUO/2026/10/0001`, `INV/2026/10/0001`, `BILL/...`, `PAY-R/...`, `PAY-P/...`, `BKG/...`, `JE/...`, `DN/`, `CN/`. Bukti kas/bank, Jurnal Umum, dan voucher memakai format client (lihat bagian di bawah).
+
+## Bukti kas/bank, voucher, dan pajak (penyesuaian client SLG, 2026-11-08)
+
+- **Nomor bukti `SLG/BK/26/11/06/0258`** (kode perusahaan / jenis / tahun / bulan / tanggal / nomor urut 4 digit) untuk
+  BM, BK, KM, KK, JU, dan VC. _Mengikuti contoh formulir client._ Nomor urut **berjalan setahun per jenis bukti**
+  (`Sequence` dengan `month = 0`). Nomor lama (`SLG/BK/26/11/001`) tidak diubah.
+- **Edit bukti kas dan Jurnal Umum**: tanggal boleh diubah di bulan yang sama selama periode belum dikunci. Segmen
+  tanggal di nomor ikut tanggal baru, nomor urut tetap. Pindah bulan ditolak.
+- **Pajak = baris sendiri, diketik Finance** di voucher job dan Jurnal Pengeluaran. PPN masukan di Debet (1400),
+  PPh 23/26 dipotong di Kredit (2200/2250), kas/bank dikredit nilai bersih. _Client: "PPh dipisah per komponen
+  pembayaran"; pajak tidak disebar ke baris biaya._ Voucher menyimpan baris pajaknya di `VoucherTaxLine`; Jurnal
+  Pengeluaran langsung di jurnalnya. Total voucher = biaya + PPN − PPh = nilai yang dibayar.
+- **Reimburse tidak pernah kena pajak**: pajak ditolak bila tidak ada biaya non-reimburse, dan PPN/PPh tidak boleh
+  melebihi biaya non-reimburse. Jurnal Penerimaan tidak menerima baris pajak.
+- **Rekap pajak** membaca baris pajak voucher dan Jurnal Pengeluaran dari jurnalnya (pihak = keterangan baris, DPP
+  tidak tercatat), sehingga daftar rekap sama dengan saldo akun pajak.
+- **Vendor Bill per job**: PPN/PPh bill tidak disebar proporsional; tampil sebagai baris sendiri di job kepala bill.
+- **Cetak format formulir SOP** (A5 lanskap) untuk bukti kas/bank, jurnal, dan voucher, dengan kotak Doc. No /
+  Revision / Effective Date per formulir (`ProofForm`, diisi Admin di Setting Perusahaan). Nilainya milik SLG,
+  jadi tidak di-seed. Jurnal bernomor `JE/…` (transfer, setor pajak, aset, armada) dicetak dengan formulir Jurnal Umum.
 
 ## RBAC
 
