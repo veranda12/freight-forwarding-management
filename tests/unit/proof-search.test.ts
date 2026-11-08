@@ -17,7 +17,7 @@ describe("parseIdAmount — nominal format Indonesia", () => {
   ])("%s → %d", (s, n) => expect(parseIdAmount(s)).toBe(n));
 
   it.each([
-    "JOB/SEA-IMP/2026", "2026/11", "SLG/BM/26/11/001", "abc", "1.25.000", "1.2345", "1.250.000,505",
+    "JOB/SEA-IMP/2026", "2026/11", "SLG/BM/26/11/001", "SLG/BK/26/11/06/0258", "abc", "1.25.000", "1.2345", "1.250.000,505",
     "1.250.", "0", "001", "1,250.000,50", "",
   ])("%s → bukan nominal", (s) => expect(parseIdAmount(s)).toBeNull());
 });

@@ -2,7 +2,7 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 import { postJournal, replaceJournal, reverseJournal, type JournalLineInput } from "./journal";
 import { cashCoaIds, resolveCashAccount } from "./cash-accounts";
 import { jktKey } from "./accounting-core";
-import { cashProofCode, genProofNumber } from "./sequence";
+import { cashProofCode, genProofNumber, withProofDay } from "./sequence";
 import { latestRate } from "./fx";
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -85,7 +85,7 @@ export async function createCashEntry(db: PrismaClient, input: CashEntryInput, u
 }
 
 /**
- * Edit isi bukti kas, nomor tetap. Rekening boleh diganti antar bank.
+ * Edit isi bukti kas. Nomor urut tetap; segmen tanggal di nomor ikut tanggal baru. Rekening boleh diganti antar bank.
  * Kas ke bank atau sebaliknya, arah uang, dan pindah bulan tidak bisa, karena mengubah nomor bukti.
  */
 export async function updateCashEntry(db: PrismaClient, journalEntryId: string, input: CashEntryInput) {
@@ -101,7 +101,7 @@ export async function updateCashEntry(db: PrismaClient, journalEntryId: string, 
     if (inflow !== (v.direction === "IN")) throw new Error("Arah uang tidak bisa diubah.");
     const date = new Date(`${v.dateKey}T12:00:00+07:00`);
     if (jktKey(date).slice(0, 7) !== jktKey(e.date).slice(0, 7)) throw new Error("Tanggal tidak bisa pindah bulan, karena bulan ada di nomor bukti.");
-    return replaceJournal(tx, journalEntryId, { date, description: desc, lines, sourceId: cash.bankAccountId ?? undefined });
+    return replaceJournal(tx, journalEntryId, { date, description: desc, lines, sourceId: cash.bankAccountId ?? undefined, number: withProofDay(e.number, date) });
   });
 }
 

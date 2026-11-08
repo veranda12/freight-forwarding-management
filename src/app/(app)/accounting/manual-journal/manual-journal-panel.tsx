@@ -64,7 +64,7 @@ export function ManualJournalPanel({ accounts, entries, today, canWrite, lockKey
         lines: filled.map((l) => ({ accountId: l.accountId, description: l.description, debit: l.debit || null, credit: l.credit || null })),
       };
       const res = editing ? await updateManualJournalAction(editing.id, input) : await createManualJournalAction(input);
-      if (res.ok) { toast.success(editing ? "Jurnal diperbarui, nomor bukti tetap." : "Jurnal Umum diposting."); setOpen(false); reset(); router.replace("/accounting/manual-journal"); router.refresh(); }
+      if (res.ok) { toast.success(editing ? "Jurnal diperbarui. Nomor urut bukti tetap." : "Jurnal Umum diposting."); setOpen(false); reset(); router.replace("/accounting/manual-journal"); router.refresh(); }
       else toast.error(res.error);
     });
   }

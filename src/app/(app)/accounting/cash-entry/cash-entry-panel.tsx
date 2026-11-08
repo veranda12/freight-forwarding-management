@@ -83,7 +83,7 @@ export function CashEntryPanel({ cashAccounts, defaultCashId, inAccounts, outAcc
         rows: rows.map((r) => ({ counterAccountId: r.counterAccountId, amount: Number(r.amount), description: r.description })),
       };
       const res = editing ? await updateCashEntryAction(editing.id, input) : await createCashEntryAction(input);
-      if (res.ok) { toast.success(editing ? "Transaksi diperbarui, nomor bukti tetap." : `${LABEL[f.direction]} dicatat.`); setOpen(false); setEditing(null); setF(blank); setRows([newRow()]); router.replace("/accounting/cash-entry"); router.refresh(); }
+      if (res.ok) { toast.success(editing ? "Transaksi diperbarui. Nomor urut bukti tetap." : `${LABEL[f.direction]} dicatat.`); setOpen(false); setEditing(null); setF(blank); setRows([newRow()]); router.replace("/accounting/cash-entry"); router.refresh(); }
       else toast.error(res.error);
     });
   }
@@ -105,7 +105,7 @@ export function CashEntryPanel({ cashAccounts, defaultCashId, inAccounts, outAcc
           <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
             <DialogHeader>
               <DialogTitle>{editing ? `Edit ${editing.number}` : LABEL[f.direction]}</DialogTitle>
-              <DialogDescription>{editing ? "Nomor bukti tetap, dan isi sebelumnya tersimpan di riwayat perubahan." : "Untuk transaksi di luar invoice dan bill. Satu nomor bukti bisa berisi beberapa baris."}</DialogDescription>
+              <DialogDescription>{editing ? "Nomor urut tetap; tanggal di nomor ikut tanggal baru (hanya di bulan yang sama). Isi sebelumnya tersimpan di riwayat perubahan." : "Untuk transaksi di luar invoice dan bill. Satu nomor bukti bisa berisi beberapa baris."}</DialogDescription>
             </DialogHeader>
             <div className="grid gap-3 text-sm sm:grid-cols-2">
               {!editing && (
