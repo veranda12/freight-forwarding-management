@@ -114,9 +114,10 @@ test.describe.serial("QA-05 Anomali", () => {
     await page.goto("/customers/new");
     const name = `QA <img src=x onerror="window.__xss=1"> 🚢 中文 ${Date.now()}`;
     const address = "Jl. Pelabuhan Raya No. 12, Marunda — ".repeat(30).slice(0, 1000);
-    await page.locator('input[name="name"]').fill(name);
-    await page.locator('input[name="address"]').fill(address);
-    await page.locator('input[name="city"]').fill("Jakarta Utara");
+    // Dibatasi ke <main>: selama streaming Next.js ada salinan form tersembunyi yang ikut terhitung.
+    await page.locator('main input[name="name"]').fill(name);
+    await page.locator('main input[name="address"]').fill(address);
+    await page.locator('main input[name="city"]').fill("Jakarta Utara");
     await page.getByRole("button", { name: "Simpan" }).click();
     await page.waitForURL(/\/customers\/(?!new)[^/]+$/);
     const id = page.url().split("/").pop()!;
@@ -169,6 +170,8 @@ test.describe.serial("QA-05 Anomali", () => {
     await expect(page.getByText(/sudah terdaftar/)).toBeVisible();
     expect(await db.user.count()).toBe(usersBefore);
 
+    // Role Management khusus Super Admin
+    await login(page, "superadmin@demo.com");
     const rolesBefore = await db.appRole.count();
     await page.goto("/roles/new");
     await expect(page.getByRole("button", { name: /Simpan role/ })).toBeDisabled();

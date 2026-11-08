@@ -2,7 +2,7 @@ import Link from "next/link";
 import { Copy, Lock, Pencil, Plus } from "lucide-react";
 import { requirePerm, hasPerm } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
-import { ALL_PERMISSION_KEYS, normalizePermissions } from "@/lib/permissions";
+import { ALL_PERMISSION_KEYS, permissionsOfRole } from "@/lib/permissions";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -30,7 +30,7 @@ export default async function RolesPage() {
             </TableRow></TableHeader>
             <TableBody>
               {roles.map((r) => {
-                const count = r.isSystem ? ALL_PERMISSION_KEYS.length : normalizePermissions(r.permissions).length;
+                const count = permissionsOfRole(r).length;
                 return (
                   <TableRow key={r.id}>
                     <TableCell className="font-medium">

@@ -109,7 +109,7 @@ test.describe.serial("QA-04 Keamanan & otorisasi", () => {
 
   test("06 Eskalasi hak: Finance me-replay simpan role, Sales me-replay ubah user dirinya jadi Admin → ditolak", async ({ browser }) => {
     const admin = await (await browser.newContext()).newPage();
-    await login(admin, "admin@demo.com");
+    await login(admin, "superadmin@demo.com");
     const fin = await db.appRole.findUniqueOrThrow({ where: { key: "FINANCE" } });
     await admin.goto(`/roles/${fin.id}`);
     const saveRole = await captureAction(admin, () => admin.getByRole("button", { name: /Simpan role/ }).click());
@@ -135,6 +135,42 @@ test.describe.serial("QA-04 Keamanan & otorisasi", () => {
     expectRejected(await replayAction(salesPage, saveUser, [salesUser.id, { name: salesUser.name, phone: "", roleId: "role_admin", isActive: true }]), /izin/);
     expect((await db.user.findUniqueOrThrow({ where: { id: salesUser.id } })).roleId).toBe("role_sales");
     await salesPage.context().close();
+  });
+
+  test("06b Eskalasi Admin → Super Admin: replay simpan role, naikkan diri / user lain ke Super Admin, ubah akun Super Admin → ditolak", async ({ browser }) => {
+    // Rekam aksi dari Super Admin (pemegang Role Management)
+    const sup = await (await browser.newContext()).newPage();
+    await login(sup, "superadmin@demo.com");
+    const fin = await db.appRole.findUniqueOrThrow({ where: { key: "FINANCE" } });
+    await sup.goto(`/roles/${fin.id}`);
+    const saveRole = await captureAction(sup, () => sup.getByRole("button", { name: /Simpan role/ }).click());
+    await sup.waitForURL("**/roles");
+    const salesUser = await db.user.findUniqueOrThrow({ where: { email: "sales@demo.com" } });
+    await sup.goto(`/users/${salesUser.id}/edit`);
+    const saveUser = await captureAction(sup, () => sup.getByRole("button", { name: /Simpan perubahan/ }).click());
+    await sup.waitForURL("**/users");
+    await sup.context().close();
+
+    const me = await db.user.findUniqueOrThrow({ where: { email: "admin@demo.com" } });
+    const superUser = await db.user.findUniqueOrThrow({ where: { email: "superadmin@demo.com" } });
+    const adm = await (await browser.newContext()).newPage();
+    await login(adm, "admin@demo.com");
+    await adm.goto("/dashboard");
+    // a) Admin me-replay simpan role (izin roles.manage khusus Super Admin)
+    expectRejected(await replayAction(adm, saveRole, [fin.id, { name: "Finance", description: null, permissions: ["roles.manage", "roles.view"] }]), /izin/);
+    expect((await db.appRole.findUniqueOrThrow({ where: { id: fin.id } })).permissions).toEqual(fin.permissions);
+    // b) Admin menaikkan dirinya sendiri menjadi Super Admin
+    expectRejected(await replayAction(adm, saveUser, [me.id, { name: me.name, phone: "", roleId: "role_super_admin", isActive: true }]), /Super Admin/);
+    expect((await db.user.findUniqueOrThrow({ where: { id: me.id } })).roleId).toBe("role_admin");
+    // c) Admin menaikkan user lain menjadi Super Admin
+    expectRejected(await replayAction(adm, saveUser, [salesUser.id, { name: salesUser.name, phone: "", roleId: "role_super_admin", isActive: true }]), /Super Admin/);
+    expect((await db.user.findUniqueOrThrow({ where: { id: salesUser.id } })).roleId).toBe("role_sales");
+    // d) Admin menurunkan / menonaktifkan akun Super Admin
+    expectRejected(await replayAction(adm, saveUser, [superUser.id, { name: superUser.name, phone: "", roleId: "role_sales", isActive: false }]), /Super Admin/);
+    const after = await db.user.findUniqueOrThrow({ where: { id: superUser.id } });
+    expect(after.roleId).toBe("role_super_admin");
+    expect(after.isActive).toBe(true);
+    await adm.context().close();
   });
 
   test("07 Operation me-replay batal invoice & catat pembayaran (direkam dari Finance) → ditolak", async ({ browser }) => {

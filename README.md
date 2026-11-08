@@ -65,14 +65,15 @@ Password semua akun: **`demo123`**
 
 | Role | Email | Akses |
 |---|---|---|
-| Admin | admin@demo.com | Semua modul + Role/User Management + setting + audit (role sistem) |
+| Super Admin | superadmin@demo.com | Semua modul + **Role Management** + User Management + setting + audit (role sistem) |
+| Admin | admin@demo.com | Semua modul + User Management + setting + audit, **tanpa** Role Management (role sistem) |
 | Sales | sales@demo.com | Buat & **ajukan** quotation, customer, rate — hanya data miliknya sendiri |
 | Operation | ops@demo.com, ops2@demo.com | Review/kirim/kembalikan, terima/tolak, convert quotation; job, booking, container, tracking, dokumen, domestik |
 | Documentation | docs@demo.com | Dokumen B/L/AWB/SI/DO, tracking |
 | Finance | finance@demo.com | Costing, invoice, bill, payment, accounting, laporan |
 | Management | manager@demo.com | Read-only semua modul + dashboard & laporan |
 
-Hak akses diatur di menu **Sistem → Role Management**: admin membuat/mengubah role dengan daftar centang izin per
+Hak akses diatur di menu **Sistem → Role Management** (khusus **Super Admin**): Super Admin membuat/mengubah role dengan daftar centang izin per
 menu → tombol/aksi → persetujuan → "boleh dokumen sendiri" (maker-checker) → "lihat semua data" (batas data). Izin
 dibaca dari database setiap request, jadi perubahan role dan penonaktifan user langsung berlaku tanpa login ulang, dan
 ditegakkan di server (`requirePerm`/`assertPerm`), bukan sekadar menyembunyikan tombol. Katalog izin:
@@ -129,12 +130,12 @@ npm run test:e2e     # end-to-end test (Playwright)
 
 ## 8. Testing
 
-- **Unit (Vitest)** — `npm run test`: katalog izin & role awal, format mata uang/tanggal, enum, check digit ISO 6346, perhitungan berat kena biaya, dll.
+- **Unit (Vitest)** — `npm run test`: katalog izin & role awal (termasuk Super Admin vs Admin), format mata uang/tanggal, enum, check digit ISO 6346, perhitungan berat kena biaya, dll.
 - **Integrasi** — skrip `tests/integration/*.ts` dijalankan dengan `tsx` terhadap database **uji** (salinan, mis.
   `ffms_test`), bukan database demo: `DATABASE_URL=mysql://ffms:ffms123@127.0.0.1:3306/ffms_test node node_modules/tsx/dist/cli.mjs tests/integration/verify-mariadb.ts`.
   `verify-mariadb.ts` menguji risiko khusus MariaDB (teks panjang, pencarian, penomoran & setor pajak paralel, zona
   waktu, presisi Decimal, utf8mb4). Laporan uji perpindahan database: `docs/qa/mariadb-migration-report.md`.
-- **E2E (Playwright)** — `npm run test:e2e` (sekali pasang browser: `npx playwright install chromium`): 80 skenario, termasuk alur Domestik & Aturan Berat (`e2e/domestic.spec.ts`), quotation & maker-checker (`e2e/quotation-flow.spec.ts`), Role Management (`e2e/role-management.spec.ts`), dan suite QA `e2e/qa/` (alur per role, keamanan & replay server action, anomali, matriks izin, fitur client SLG: voucher, edit bukti, kunci job, builder invoice/bill, Cari Bukti, Vendor Bill per job; butuh `DATABASE_URL` database uji yang sama dengan server) menelusuri UI nyata (dashboard, RBAC, Job+PDF, Accounting balance, buat Invoice→bayar, tracking publik, CRUD Vendor/Commodity, form Quotation & Job). Detail & flow demo ada di `DEMO.md`.
+- **E2E (Playwright)** — `npm run test:e2e` (sekali pasang browser: `npx playwright install chromium`): 80 skenario, termasuk alur Domestik & Aturan Berat (`e2e/domestic.spec.ts`), quotation & maker-checker (`e2e/quotation-flow.spec.ts`), Role Management (`e2e/role-management.spec.ts`), Super Admin vs Admin (`e2e/super-admin.spec.ts`), dan suite QA `e2e/qa/` (alur per role, keamanan & replay server action, anomali, matriks izin, fitur client SLG: voucher, edit bukti, kunci job, builder invoice/bill, Cari Bukti, Vendor Bill per job; butuh `DATABASE_URL` database uji yang sama dengan server) menelusuri UI nyata (dashboard, RBAC, Job+PDF, Accounting balance, buat Invoice→bayar, tracking publik, CRUD Vendor/Commodity, form Quotation & Job). Detail & flow demo ada di `DEMO.md`.
 
 ## 9. CRUD & Form Manual
 

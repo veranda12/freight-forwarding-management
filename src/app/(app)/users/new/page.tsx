@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { requirePerm } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
+import { assignableRoleWhere } from "@/lib/roles";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { UserForm } from "./user-form";
@@ -9,8 +10,8 @@ import { UserForm } from "./user-form";
 export const dynamic = "force-dynamic";
 
 export default async function NewUserPage() {
-  await requirePerm("users.manage", { redirectTo: "/users" });
-  const roles = (await prisma.appRole.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } })).map((r) => ({ value: r.id, label: r.name }));
+  const actor = await requirePerm("users.manage", { redirectTo: "/users" });
+  const roles = (await prisma.appRole.findMany({ where: assignableRoleWhere(actor), orderBy: { name: "asc" }, select: { id: true, name: true } })).map((r) => ({ value: r.id, label: r.name }));
   return (
     <div className="space-y-6">
       <div>

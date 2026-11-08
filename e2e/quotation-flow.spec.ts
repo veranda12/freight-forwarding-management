@@ -7,8 +7,14 @@ import { test, expect, type Page } from "@playwright/test";
  */
 
 async function login(page: Page, email: string) {
-  await page.context().clearCookies();
-  await page.goto("/login");
+  // Sama seperti e2e/qa/qa-helpers.ts: hentikan dulu request halaman sebelumnya, karena responsnya bisa memasang ulang
+  // cookie sesi setelah dihapus (lalu /login langsung dialihkan ke dashboard).
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await page.goto("about:blank");
+    await page.context().clearCookies();
+    await page.goto("/login");
+    if (await page.locator("#email").count()) break;
+  }
   await page.fill("#email", email);
   await page.fill("#password", "demo123");
   await page.getByRole("button", { name: "Masuk" }).click();

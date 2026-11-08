@@ -325,9 +325,51 @@ export function normalizePermissions(keys: unknown): PermissionKey[] {
   return ALL_PERMISSION_KEYS.filter((k) => out.has(k));
 }
 
-// ---------------------------------------------------------------- role awal
+/** Pemegang izin (SessionUser atau tiruannya di uji). Murni, tanpa impor server, supaya bisa dipakai lib & unit test. */
+export type PermHolder = { permissions: ReadonlySet<PermissionKey> };
+
+/**
+ * Satu-satunya aturan "punya izin". `hasPerm` di auth-helpers mendelegasikan ke sini. Tidak ada jalan pintas untuk role
+ * sistem: Admin dan Super Admin memegang izin lewat `permissionsOfRole`, sehingga Admin benar-benar tanpa `roles.*`.
+ */
+export function holderHasPerm(user: PermHolder | null | undefined, key: PermissionKey): boolean {
+  return !!user && user.permissions.has(key);
+}
+
+export function holderHasAnyPerm(user: PermHolder | null | undefined, keys: PermissionKey[]): boolean {
+  return keys.some((k) => holderHasPerm(user, k));
+}
+
+// ---------------------------------------------------------------- role sistem
 
 export const ADMIN_ROLE_KEY = "ADMIN";
+export const SUPER_ADMIN_ROLE_KEY = "SUPER_ADMIN";
+
+/** Izin yang hanya dipegang Super Admin: tidak dimiliki Admin dan tidak bisa diberikan ke role kustom. */
+export const SUPER_ADMIN_ONLY: readonly PermissionKey[] = ["roles.view", "roles.manage"];
+const RESERVED = new Set<string>(SUPER_ADMIN_ONLY);
+
+/** Normalisasi izin role kustom: seperti normalizePermissions, tanpa izin khusus Super Admin. */
+export function normalizeCustomPermissions(keys: unknown): PermissionKey[] {
+  return normalizePermissions(keys).filter((k) => !RESERVED.has(k));
+}
+
+/** Kelompok izin yang boleh dipilih di editor role kustom (tanpa modul Role Management). */
+export const EDITABLE_PERMISSION_GROUPS: GroupDef[] = PERMISSION_GROUPS
+  .map((g) => ({ ...g, modules: g.modules.filter((m) => m.perms.every((p) => !RESERVED.has(p.key))) }))
+  .filter((g) => g.modules.length > 0);
+
+/**
+ * Izin efektif sebuah role. Role sistem dihitung dari kode (kolom `permissions` diabaikan): Super Admin = semua izin,
+ * Admin = semua kecuali izin khusus Super Admin. Role kustom = isi kolomnya, tanpa izin khusus Super Admin.
+ */
+export function permissionsOfRole(role: { key: string; isSystem: boolean; permissions: unknown }): PermissionKey[] {
+  if (role.isSystem && role.key === SUPER_ADMIN_ROLE_KEY) return [...ALL_PERMISSION_KEYS];
+  if (role.isSystem) return ALL_PERMISSION_KEYS.filter((k) => !RESERVED.has(k));
+  return normalizeCustomPermissions(role.permissions);
+}
+
+// ---------------------------------------------------------------- role awal
 
 const views = (...mods: ModuleKey[]) => mods.map((m) => `${m}.view`);
 

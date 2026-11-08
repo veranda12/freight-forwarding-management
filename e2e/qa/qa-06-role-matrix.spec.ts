@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { db, login } from "./qa-helpers";
+import { permissionsOfRole } from "../../src/lib/permissions";
 
 /**
  * QA-06 — Matriks role × halaman × tombol. Untuk setiap role bawaan, harapan dihitung dari izin role itu DI DATABASE
@@ -30,14 +31,15 @@ const PAGES: { path: string; view: string; button: string; action: string }[] = 
   { path: "/proofs", view: "proofs.view", button: "", action: "" },
 ];
 
-const USERS = ["admin@demo.com", "sales@demo.com", "ops@demo.com", "docs@demo.com", "finance@demo.com", "manager@demo.com"];
+const USERS = ["superadmin@demo.com", "admin@demo.com", "sales@demo.com", "ops@demo.com", "docs@demo.com", "finance@demo.com", "manager@demo.com"];
 const TAB_BAR = 'nav[aria-label="Halaman terbuka"]';
 
 for (const email of USERS) {
   test(`Matriks izin: ${email}`, async ({ page }) => {
     const u = await db.user.findUniqueOrThrow({ where: { email }, include: { appRole: true } });
-    const perms = new Set(u.appRole.permissions as string[]);
-    const has = (k: string) => u.appRole.key === "ADMIN" || perms.has(k);
+    // Harapan dihitung dari aturan yang sama dengan aplikasi (role sistem dari kode, role kustom tanpa roles.*)
+    const perms = new Set<string>(permissionsOfRole(u.appRole));
+    const has = (k: string) => perms.has(k);
     await login(page, email);
     const mismatches: string[] = [];
 
@@ -104,7 +106,7 @@ test("Tidak ada error JavaScript/hydration di halaman Role, User, dan detail uta
   const inv = await db.invoice.findFirstOrThrow();
   const quo = await db.quotation.findFirstOrThrow();
   const fin = await db.appRole.findUniqueOrThrow({ where: { key: "FINANCE" } });
-  await login(page, "admin@demo.com");
+  await login(page, "superadmin@demo.com");
   for (const p of ["/dashboard", "/roles", "/roles/new", `/roles/${fin.id}`, "/users", "/users/new", `/customers/${cust.id}`, `/jobs/${job.id}`, `/invoices/${inv.id}`, `/quotations/${quo.id}`]) {
     await page.goto(p);
     await page.waitForLoadState("networkidle");

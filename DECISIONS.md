@@ -34,7 +34,13 @@ Format: **Keputusan** — _alasan_.
 ## Role Management (sejak 2026-11-06, menggantikan RBAC 6 role tetap)
 
 - **Role kustom (tabel `AppRole`) berisi daftar kunci izin; tiap user satu role** — _admin perlu membuat/mengubah role tanpa mengubah kode._ Katalog izin satu-satunya di `src/lib/permissions.ts` (124 izin per grup menu → modul). Jenis: `view` (menu), `action` (tombol), `approve` (kirim/terima/batal/posting), `own` (maker-checker), `scope` (lihat semua data). Izin aksi apa pun menyiratkan `view` modulnya (`normalizePermissions`). Kunci tak dikenal diabaikan.
-- **Admin = role sistem** (`isSystem`): selalu semua izin, tidak bisa diubah/dihapus; sistem selalu menyisakan minimal satu Admin aktif; user tidak bisa menonaktifkan dirinya sendiri.
+- **Dua role sistem** (`isSystem`, tidak bisa diubah/dihapus; izinnya dihitung dari kode oleh `permissionsOfRole`, kolom `permissions` hanya catatan) — _keputusan Andhika 2026-11-08, di-merge dari `feat/slg-role-management-pg`:_
+  - **Super Admin** = semua izin, satu-satunya pemegang **Role Management** (`roles.view`, `roles.manage`).
+  - **Admin** = semua izin **kecuali** Role Management; tetap memegang User Management, setting, audit, dll.
+  - `roles.*` tidak bisa diberikan ke role kustom (`normalizeCustomPermissions` membuangnya; editor tidak menampilkannya), jadi Management (semua `view`) pun tanpa Role Management.
+  - `hasPerm` hanya membaca set izin (tanpa jalan pintas `isAdmin`), supaya batas Admin benar-benar ditegakkan.
+- **Pengaman User Management** (di server, `src/lib/users.ts`): hanya Super Admin yang boleh memberi/mencabut role Super Admin dan mengubah/mereset/menonaktifkan akun Super Admin; sistem selalu menyisakan minimal satu **Super Admin** aktif; user tidak bisa menonaktifkan dirinya sendiri. UI menyembunyikan opsi/tombol yang pasti ditolak.
+- **Migrasi `20261108100000_super_admin`**: membuat role Super Admin, membuang `roles.*` dari role lain, dan menjadikan **tepat satu** Admin lama Super Admin — Admin aktif yang paling lama dibuat (bila tidak ada yang aktif: Admin paling lama dibuat). Admin lain tetap Admin. Seed demo: `superadmin@demo.com`.
 - **Izin dibaca dari DB setiap request** (`getCurrentUser`, `react` `cache`); token login hanya menyimpan id — _perubahan role dan penonaktifan user langsung berlaku; middleware edge tidak bisa membaca DB, jadi middleware hanya cek login._ Halaman: `requirePerm` (redirect ke dashboard atau `/no-access`); server action/route: `assertPerm` (ForbiddenError berpesan jelas). Semua server action wajib memanggil `assertPerm` (kecuali login/logout).
 - **Batas data** (`src/lib/data-scope.ts`): tanpa `<modul>.viewAll`, user hanya melihat data yang ia **Sales PIC atau pembuatnya** (`createdById`, kolom baru; data lama tanpa pembuat dinilai dari Sales PIC). Dokumen turunan ikut pemilik job/STT/customer. Diterapkan di daftar, detail (`findFirst` id + scope → 404), aksi berbasis id, pencarian, dashboard, laporan, Excel, PDF. **Akuntansi & master data tidak dibatasi** (tidak bermakna per orang).
 - **Alur quotation sesuai bisnis**: Draft → **Diajukan** (Sales, `submit`) → Kirim (`send`, margin < 10% butuh `sendLowMargin`) atau Kembalikan + catatan (`return`) → Terima/Tolak (`decide`) → Convert (`convert`). Transisi status atomik (`updateMany` dengan status asal).
@@ -77,6 +83,10 @@ lalu di-**merge** ke branch MariaDB (bukan cherry-pick, supaya commit `part2` be
   mengikuti izin modulnya (`PROOF_KIND_PERMS`), hasil mengikuti batas data modulnya (dikirim halaman sebagai `scopes`,
   sehingga `proof-search.ts` tetap murni dan ber-unit-test), tombol Cetak mengikuti izin cetak; `loadBillGroups` menerima
   `billScope`. Migrasi data `20261108090000_proof_search_permission`.
+- **Super Admin** (`feat/slg-role-management-pg`, di-merge 2026-11-08): port Role Management ke PostgreSQL (`b850d4c`)
+  di-merge `-s ours` karena isinya berasal dari branch ini; commit Super Admin sesudahnya di-merge biasa. Migrasi MariaDB
+  `20261108100000_super_admin` dibuat dari katalog (padanan PostgreSQL diarsipkan). Aturan lengkap di bagian Role
+  Management di atas.
 
 ## Master & Seed
 

@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { ALL_PERMISSIONS, ALL_PERMISSION_KEYS, DEFAULT_ROLES, PERMISSION_GROUPS, isPermissionKey, normalizePermissions } from "@/lib/permissions";
+import {
+  ALL_PERMISSIONS, ALL_PERMISSION_KEYS, DEFAULT_ROLES, EDITABLE_PERMISSION_GROUPS, PERMISSION_GROUPS, SUPER_ADMIN_ONLY,
+  holderHasPerm, isPermissionKey, normalizeCustomPermissions, normalizePermissions, permissionsOfRole,
+} from "@/lib/permissions";
 import { NAV } from "@/config/nav";
 
 describe("katalog izin", () => {
@@ -70,5 +73,50 @@ describe("role awal", () => {
     // Pembatalan dokumen keuangan/STT buatan sendiri tetap boleh seperti sebelumnya (bisa dicabut admin).
     expect(role("FINANCE").has("invoices.cancelOwn" as never)).toBe(true);
     expect(role("OPERATION").has("domestic.cancelOwn" as never)).toBe(true);
+  });
+});
+
+describe("Super Admin vs Admin", () => {
+  const sys = (key: string) => new Set(permissionsOfRole({ key, isSystem: true, permissions: [] }));
+
+  it("Super Admin memegang semua izin, termasuk Role Management", () => {
+    const s = sys("SUPER_ADMIN");
+    expect(s.size).toBe(ALL_PERMISSION_KEYS.length);
+    for (const k of SUPER_ADMIN_ONLY) expect(s.has(k)).toBe(true);
+  });
+
+  it("Admin memegang semua izin kecuali Role Management", () => {
+    const a = sys("ADMIN");
+    expect(a.size).toBe(ALL_PERMISSION_KEYS.length - SUPER_ADMIN_ONLY.length);
+    for (const k of SUPER_ADMIN_ONLY) expect(a.has(k)).toBe(false);
+    expect(a.has("users.manage")).toBe(true);
+    expect(a.has("closing.lockPeriod")).toBe(true);
+  });
+
+  it("izin role sistem tidak terpengaruh isi kolom permissions di DB", () => {
+    expect(permissionsOfRole({ key: "ADMIN", isSystem: true, permissions: ["roles.manage"] })).not.toContain("roles.manage");
+    expect(permissionsOfRole({ key: "SUPER_ADMIN", isSystem: true, permissions: [] })).toContain("roles.manage");
+  });
+
+  it("role kustom bernama SUPER_ADMIN tanpa isSystem tidak mendapat Role Management", () => {
+    expect(permissionsOfRole({ key: "SUPER_ADMIN", isSystem: false, permissions: ["roles.manage", "roles.view"] })).toEqual([]);
+  });
+
+  it("role kustom tidak bisa memegang roles.view / roles.manage", () => {
+    expect(normalizeCustomPermissions(["roles.manage", "roles.view", "dashboard.view"])).toEqual(["dashboard.view"]);
+    for (const r of DEFAULT_ROLES) for (const k of SUPER_ADMIN_ONLY) expect(normalizeCustomPermissions(r.permissions)).not.toContain(k);
+  });
+
+  it("editor role kustom tidak menampilkan modul Role Management", () => {
+    const keys = EDITABLE_PERMISSION_GROUPS.flatMap((g) => g.modules.flatMap((m) => m.perms.map((p) => p.key)));
+    for (const k of SUPER_ADMIN_ONLY) expect(keys).not.toContain(k);
+    expect(keys.length).toBe(ALL_PERMISSION_KEYS.length - SUPER_ADMIN_ONLY.length);
+    expect(PERMISSION_GROUPS.flatMap((g) => g.modules).some((m) => m.key === "roles")).toBe(true);
+  });
+
+  it("holderHasPerm tidak punya jalan pintas: hanya set izin yang dihitung", () => {
+    expect(holderHasPerm({ permissions: sys("ADMIN") }, "roles.view")).toBe(false);
+    expect(holderHasPerm({ permissions: sys("SUPER_ADMIN") }, "roles.view")).toBe(true);
+    expect(holderHasPerm(null, "dashboard.view")).toBe(false);
   });
 });

@@ -235,7 +235,8 @@ test.describe.serial("QA-01 Alur Ekspor-Impor lintas role", () => {
   test("09 Sales melihat job & invoice miliknya; Management melihat di laporan; Excel memuat job", async ({ page }) => {
     await login(page, "sales@demo.com");
     await page.goto("/jobs");
-    await expect(page.getByText(S.jobNumber!, { exact: true })).toBeVisible();
+    // Dibatasi ke tabel: selama streaming Next.js ada salinan tersembunyi (div#S:n[hidden]) yang ikut terhitung.
+    await expect(page.getByRole("table").getByText(S.jobNumber!, { exact: true })).toBeVisible();
     await page.goto(`/invoices/${S.invoiceId}`);
     await expect(page.getByText("Paid", { exact: true }).first()).toBeVisible();
 

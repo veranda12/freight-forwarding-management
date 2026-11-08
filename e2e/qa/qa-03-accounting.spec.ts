@@ -98,7 +98,7 @@ test.describe.serial("QA-03 Akuntansi", () => {
     await expectLedgerBalanced();
   });
 
-  test("04 Maker-checker diatur admin: izin 'batal jurnal manual sendiri' dicabut → Finance ditolak; dikembalikan → boleh", async ({ browser }) => {
+  test("04 Maker-checker diatur Super Admin: izin 'batal jurnal manual sendiri' dicabut → Finance ditolak; dikembalikan → boleh", async ({ browser }) => {
     const admin = await (await browser.newContext()).newPage();
     const fin = await (await browser.newContext()).newPage();
     const setOwn = async (on: boolean) => {
@@ -110,7 +110,8 @@ test.describe.serial("QA-03 Akuntansi", () => {
       await admin.waitForURL("**/roles");
     };
     try {
-      await login(admin, "admin@demo.com");
+      // Role Management khusus Super Admin
+      await login(admin, "superadmin@demo.com");
       await setOwn(false);
       const role = await db.appRole.findUniqueOrThrow({ where: { key: "FINANCE" } });
       expect((role.permissions as string[]).includes("manualJournal.cancelOwn")).toBe(false);

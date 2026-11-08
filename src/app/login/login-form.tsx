@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { loginAction, type LoginState } from "./actions";
 
 const DEMO = [
+  { role: "Super Admin", email: "superadmin@demo.com" },
   { role: "Admin", email: "admin@demo.com" },
   { role: "Sales", email: "sales@demo.com" },
   { role: "Operation", email: "ops@demo.com" },

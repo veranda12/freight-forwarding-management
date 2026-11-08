@@ -12,7 +12,7 @@ type Result = { ok: true } | { ok: false; error: string };
 export async function createUserAction(input: UserInput): Promise<Result> {
   try {
     const actor = await assertPerm("users.manage");
-    const u = await createUser(prisma, input);
+    const u = await createUser(prisma, input, actor);
     const role = await prisma.appRole.findUnique({ where: { id: u.roleId }, select: { name: true } });
     await writeAudit({ entity: "User", entityId: u.id, action: "CREATE", summary: `${u.email} (${role?.name ?? u.roleId})`, userId: actor.id });
     revalidatePath("/users");
@@ -26,7 +26,7 @@ export async function updateUserAction(id: string, input: UserUpdateInput): Prom
   try {
     const actor = await assertPerm("users.manage");
     const before = await prisma.user.findUnique({ where: { id }, select: { name: true, phone: true, isActive: true, appRole: { select: { name: true } } } });
-    const u = await updateUser(prisma, id, input, actor.id);
+    const u = await updateUser(prisma, id, input, actor);
     const role = await prisma.appRole.findUnique({ where: { id: u.roleId }, select: { name: true } });
     await writeAudit({
       entity: "User", entityId: id, action: "UPDATE", summary: `${u.email}: role ${role?.name}, ${u.isActive ? "aktif" : "nonaktif"}`,
@@ -44,7 +44,7 @@ export async function updateUserAction(id: string, input: UserUpdateInput): Prom
 export async function resetPasswordAction(id: string, password: string, confirm: string): Promise<Result> {
   try {
     const actor = await assertPerm("users.manage");
-    const u = await resetUserPassword(prisma, id, password, confirm);
+    const u = await resetUserPassword(prisma, id, password, confirm, actor);
     await writeAudit({ entity: "User", entityId: id, action: "RESET_PASSWORD", summary: u.email, userId: actor.id });
     return { ok: true };
   } catch (e) {

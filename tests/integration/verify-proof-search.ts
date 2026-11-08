@@ -6,7 +6,7 @@
  */
 import { PrismaClient, Prisma } from "@prisma/client";
 import { PRISMA_CLIENT_OPTIONS } from "../../src/lib/prisma-options";
-import { ALL_PERMISSION_KEYS, DEFAULT_ROLES, normalizePermissions } from "../../src/lib/permissions";
+import { DEFAULT_ROLES, permissionsOfRole } from "../../src/lib/permissions";
 import type { SessionUser } from "../../src/lib/auth-helpers";
 import { invoiceScope } from "../../src/lib/data-scope";
 import { createBillCore, recordVendorPaymentCore } from "../../src/lib/payables";
@@ -32,8 +32,10 @@ async function line(jobId: string, side: "SELLING" | "BUYING", chargeCodeId: str
 
 // Branch MariaDB: role bawaan dari katalog Role Management.
 const roleUser = (key: string, id = key): SessionUser => {
-  const perms = key === "ADMIN" ? ALL_PERMISSION_KEYS : normalizePermissions(DEFAULT_ROLES.find((r) => r.key === key)!.permissions);
-  return { id, name: key, email: key, roleId: key, roleKey: key, roleName: key, isAdmin: key === "ADMIN", permissions: new Set(perms) };
+  // role sistem (ADMIN/SUPER_ADMIN) dihitung dari kode, role bawaan dari katalog — sama dengan getCurrentUser
+  const role = DEFAULT_ROLES.find((r) => r.key === key);
+  const perms = permissionsOfRole({ key, isSystem: !role, permissions: role?.permissions ?? [] });
+  return { id, name: key, email: key, roleId: key, roleKey: key, roleName: key, isAdmin: !role, isSuperAdmin: key === "SUPER_ADMIN", permissions: new Set(perms) };
 };
 const FINANCE = proofKindsFor(roleUser("FINANCE"));
 async function find(text: string, kinds: readonly ProofKind[] = FINANCE): Promise<ProofResult[]> {

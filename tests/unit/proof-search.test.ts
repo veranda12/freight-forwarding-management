@@ -1,12 +1,14 @@
 import { describe, it, expect } from "vitest";
 import { parseIdAmount, parseProofQuery, proofKindsFor } from "@/lib/proof-search";
-import { ALL_PERMISSION_KEYS, DEFAULT_ROLES, normalizePermissions } from "@/lib/permissions";
+import { DEFAULT_ROLES, permissionsOfRole } from "@/lib/permissions";
 import type { SessionUser } from "@/lib/auth-helpers";
 
 // Branch MariaDB: role bawaan dari katalog Role Management (pengganti rbac.ts client).
 const roleUser = (key: string): SessionUser => {
-  const perms = key === "ADMIN" ? ALL_PERMISSION_KEYS : normalizePermissions(DEFAULT_ROLES.find((r) => r.key === key)!.permissions);
-  return { id: key, name: key, email: key, roleId: key, roleKey: key, roleName: key, isAdmin: key === "ADMIN", permissions: new Set(perms) };
+  // role sistem (ADMIN/SUPER_ADMIN) dihitung dari kode, role bawaan dari katalog — sama dengan getCurrentUser
+  const role = DEFAULT_ROLES.find((r) => r.key === key);
+  const perms = permissionsOfRole({ key, isSystem: !role, permissions: role?.permissions ?? [] });
+  return { id: key, name: key, email: key, roleId: key, roleKey: key, roleName: key, isAdmin: !role, isSuperAdmin: key === "SUPER_ADMIN", permissions: new Set(perms) };
 };
 
 describe("parseIdAmount — nominal format Indonesia", () => {
@@ -54,5 +56,8 @@ describe("proofKindsFor — jenis bukti mengikuti izin modul", () => {
   it("OPERATION tidak mendapat apa pun", () => {
     expect(proofKindsFor(roleUser("OPERATION"))).toEqual([]);
     expect(proofKindsFor(null)).toEqual([]);
+  });
+  it("jurnal cukup dengan Kasir All, tanpa accounting.view", () => {
+    expect(proofKindsFor({ permissions: new Set(["kasir.view" as const]) })).toEqual(["journal"]);
   });
 });

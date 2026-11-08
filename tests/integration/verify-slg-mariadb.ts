@@ -25,7 +25,7 @@ const D = (n: number) => new Prisma.Decimal(n);
 
 /** User tiruan untuk fungsi batas data (izin tanpa *.viewAll = hanya data miliknya). */
 const userWith = (id: string, perms: PermissionKey[]): SessionUser => ({
-  id, name: "uji", email: `${id}@uji`, roleId: "x", roleKey: "X", roleName: "Uji", isAdmin: false, permissions: new Set(perms),
+  id, name: "uji", email: `${id}@uji`, roleId: "x", roleKey: "X", roleName: "Uji", isAdmin: false, isSuperAdmin: false, permissions: new Set(perms),
 });
 
 async function line(jobId: string, side: "SELLING" | "BUYING", chargeCodeId: string, amount: number, asReceipt = false, vendorId?: string) {

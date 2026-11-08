@@ -1,7 +1,6 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 // Modul ini murni (tanpa next-auth) supaya bisa di-unit-test: izin dibaca dari objek user, batas data dikirim pemanggil.
-import type { SessionUser } from "./auth-helpers";
-import type { PermissionKey } from "./permissions";
+import { holderHasAnyPerm, type PermHolder, type PermissionKey } from "./permissions";
 import { BILL_STATUS_LABELS, INV_STATUS_LABELS, NOTE_STATUS_LABELS } from "./enums";
 import { SOURCE_LABEL } from "./journal-filter";
 
@@ -33,11 +32,8 @@ export const PROOF_KIND_PERMS: Record<ProofKind, PermissionKey[]> = {
   tax: ["tax.view"],
 };
 
-type PermUser = Pick<SessionUser, "isAdmin" | "permissions">;
-
-export function proofKindsFor(user: PermUser | null | undefined): ProofKind[] {
-  if (!user) return [];
-  return PROOF_KINDS.filter((k) => user.isAdmin || PROOF_KIND_PERMS[k].some((p) => user.permissions.has(p)));
+export function proofKindsFor(user: PermHolder | null | undefined): ProofKind[] {
+  return PROOF_KINDS.filter((k) => holderHasAnyPerm(user, PROOF_KIND_PERMS[k]));
 }
 
 /** Batas data per jenis bukti (filter Prisma dari data-scope.ts). Jenis yang tidak disebut = tanpa batas. */

@@ -1,5 +1,7 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
-import { ADMIN_ROLE_KEY, ALL_PERMISSION_KEYS, DEFAULT_ROLES, normalizePermissions, type PermissionKey } from "./permissions";
+import {
+  ADMIN_ROLE_KEY, DEFAULT_ROLES, SUPER_ADMIN_ROLE_KEY, normalizeCustomPermissions, permissionsOfRole, type PermissionKey,
+} from "./permissions";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
@@ -7,12 +9,21 @@ type Db = PrismaClient | Prisma.TransactionClient;
 export const roleIdOf = (key: string) => `role_${key.toLowerCase()}`;
 
 export const ADMIN_ROLE_ID = roleIdOf(ADMIN_ROLE_KEY);
+export const SUPER_ADMIN_ROLE_ID = roleIdOf(SUPER_ADMIN_ROLE_KEY);
+
+const SYSTEM_DESC: Record<string, { name: string; description: string }> = {
+  [SUPER_ADMIN_ROLE_KEY]: { name: "Super Admin", description: "Akses penuh ke seluruh modul termasuk Role Management (role sistem, tidak bisa diubah)." },
+  [ADMIN_ROLE_KEY]: { name: "Admin", description: "Akses penuh ke seluruh modul kecuali Role Management (role sistem, tidak bisa diubah)." },
+};
 
 /** Membuat role awal bila belum ada (seed & instalasi baru). Role yang sudah ada tidak diubah. */
 export async function ensureDefaultRoles(db: Db) {
   const defs = [
-    { key: ADMIN_ROLE_KEY, name: "Admin", description: "Akses penuh ke seluruh modul (role sistem, tidak bisa diubah).", isSystem: true, permissions: [...ALL_PERMISSION_KEYS] as string[] },
-    ...DEFAULT_ROLES.map((r) => ({ ...r, isSystem: false, permissions: normalizePermissions(r.permissions) as string[] })),
+    // Role sistem: kolom permissions hanya catatan; izin efektif dihitung permissionsOfRole() dari kode.
+    ...[SUPER_ADMIN_ROLE_KEY, ADMIN_ROLE_KEY].map((key) => ({
+      key, ...SYSTEM_DESC[key], isSystem: true, permissions: permissionsOfRole({ key, isSystem: true, permissions: [] }) as string[],
+    })),
+    ...DEFAULT_ROLES.map((r) => ({ ...r, isSystem: false, permissions: normalizeCustomPermissions(r.permissions) as string[] })),
   ];
   for (const d of defs) {
     await db.appRole.upsert({
@@ -31,7 +42,7 @@ export function validateRoleInput(input: RoleInput) {
   if (name.length < 2 || name.length > 60) throw new Error("Nama role wajib diisi, 2 sampai 60 karakter.");
   const description = (input.description ?? "").trim() || null;
   if (description && description.length > 500) throw new Error("Deskripsi maksimal 500 karakter.");
-  const permissions = normalizePermissions(input.permissions);
+  const permissions = normalizeCustomPermissions(input.permissions);
   const key = name.toUpperCase().normalize("NFKD").replace(/[^A-Z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 60);
   if (!key) throw new Error("Nama role harus memuat huruf atau angka.");
   return { name, description, permissions, key };
@@ -48,11 +59,11 @@ export async function createRole(db: Db, input: RoleInput) {
 export async function updateRole(db: Db, id: string, input: RoleInput) {
   const role = await db.appRole.findUnique({ where: { id } });
   if (!role) throw new Error("Role tidak ditemukan.");
-  if (role.isSystem) throw new Error("Role sistem (Admin) tidak bisa diubah.");
+  if (role.isSystem) throw new Error("Role sistem (Super Admin/Admin) tidak bisa diubah.");
   const v = validateRoleInput(input);
   const dup = await db.appRole.findFirst({ where: { name: v.name, id: { not: id } }, select: { id: true } });
   if (dup) throw new Error(`Role "${v.name}" sudah ada.`);
-  const before = normalizePermissions(role.permissions);
+  const before = normalizeCustomPermissions(role.permissions);
   const updated = await db.appRole.update({ where: { id }, data: { name: v.name, description: v.description, permissions: v.permissions } });
   return { updated, added: v.permissions.filter((k) => !before.includes(k)), removed: before.filter((k) => !v.permissions.includes(k as PermissionKey)) };
 }
@@ -60,8 +71,18 @@ export async function updateRole(db: Db, id: string, input: RoleInput) {
 export async function deleteRole(db: Db, id: string) {
   const role = await db.appRole.findUnique({ where: { id }, include: { _count: { select: { users: true } } } });
   if (!role) throw new Error("Role tidak ditemukan.");
-  if (role.isSystem) throw new Error("Role sistem (Admin) tidak bisa dihapus.");
+  if (role.isSystem) throw new Error("Role sistem (Super Admin/Admin) tidak bisa dihapus.");
   if (role._count.users > 0) throw new Error(`Role masih dipakai ${role._count.users} user. Pindahkan user ke role lain dulu.`);
   await db.appRole.delete({ where: { id } });
   return role;
+}
+
+/** Filter role yang boleh dipilih pelaku saat membuat/mengubah user: role Super Admin hanya untuk Super Admin. */
+export function assignableRoleWhere(actor: { isSuperAdmin: boolean }): Prisma.AppRoleWhereInput {
+  return actor.isSuperAdmin ? {} : { NOT: { key: SUPER_ADMIN_ROLE_KEY, isSystem: true } };
+}
+
+/** Akun ber-role Super Admin hanya boleh dibuka untuk diubah oleh Super Admin (selaras dengan pengaman di users.ts). */
+export function canTouchUser(actor: { isSuperAdmin: boolean }, target: { key: string; isSystem: boolean }): boolean {
+  return actor.isSuperAdmin || !(target.isSystem && target.key === SUPER_ADMIN_ROLE_KEY);
 }
