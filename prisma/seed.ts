@@ -79,55 +79,16 @@ async function main() {
   faker.seed(20261002);
   console.log("🌱 Seeding Freight Forwarding Management System…");
 
-  // ---------- Clean (order matters for FKs) ----------
+  // ---------- Clean: kosongkan semua tabel (kecuali riwayat migrasi) ----------
+  // TRUNCATE ... CASCADE agar tabel baru ikut bersih tanpa perlu urutan FK manual.
   console.log("  • Membersihkan data lama…");
-  await prisma.$transaction([
-    prisma.paymentAllocation.deleteMany(),
-    prisma.payment.deleteMany(),
-    prisma.journalLine.deleteMany(),
-    prisma.note.deleteMany(),
-    prisma.invoiceLine.deleteMany(),
-    prisma.invoice.deleteMany(),
-    prisma.billLine.deleteMany(),
-    prisma.vendorBill.deleteMany(),
-    prisma.journalEntry.deleteMany(),
-    prisma.costingLine.deleteMany(),
-    prisma.milestone.deleteMany(),
-    prisma.jobDocument.deleteMany(),
-    prisma.jobContainer.deleteMany(),
-    prisma.booking.deleteMany(),
-  ]);
-  await prisma.$transaction([
-    prisma.job.deleteMany(),
-    prisma.quotationLine.deleteMany(),
-    prisma.quotation.deleteMany(),
-    prisma.rate.deleteMany(),
-  ]);
-  await prisma.$transaction([
-    prisma.customerContact.deleteMany(),
-    prisma.customer.deleteMany(),
-    prisma.vendor.deleteMany(),
-    prisma.overseasAgent.deleteMany(),
-    prisma.commodity.deleteMany(),
-    prisma.containerType.deleteMany(),
-    prisma.chargeCode.deleteMany(),
-    prisma.exchangeRate.deleteMany(),
-    prisma.currency.deleteMany(),
-    prisma.port.deleteMany(),
-    prisma.airport.deleteMany(),
-    prisma.taxRate.deleteMany(),
-  ]);
-  await prisma.$transaction([
-    prisma.taxRemittance.deleteMany(),
-    prisma.bankAccount.deleteMany(),
-    prisma.coaAccount.deleteMany(),
-    prisma.auditLog.deleteMany(),
-    prisma.sequence.deleteMany(),
-    prisma.companySetting.deleteMany(),
-    prisma.session.deleteMany(),
-    prisma.account.deleteMany(),
-    prisma.user.deleteMany(),
-  ]);
+  const tables = await prisma.$queryRaw<{ tablename: string }[]>`
+    SELECT tablename FROM pg_tables
+    WHERE schemaname = current_schema() AND tablename <> '_prisma_migrations'`;
+  if (tables.length) {
+    const list = tables.map((t) => `"${t.tablename}"`).join(", ");
+    await prisma.$executeRawUnsafe(`TRUNCATE TABLE ${list} RESTART IDENTITY CASCADE`);
+  }
 
   // ---------- Company ----------
   await prisma.companySetting.create({
