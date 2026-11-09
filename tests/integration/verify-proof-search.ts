@@ -9,7 +9,7 @@ import { createBillCore, recordVendorPaymentCore } from "../../src/lib/payables"
 import { createInvoiceCore } from "../../src/lib/receivables";
 import { recalcJobTotals } from "../../src/lib/job-charges";
 import { setLockKey } from "../../src/lib/period-lock";
-import { parseProofQuery, proofKindsFor, searchProofs, type ProofKind, type ProofResult } from "../../src/lib/proof-search";
+import { parseProofQuery, proofJournals, proofKindsFor, searchProofs, type ProofKind, type ProofResult } from "../../src/lib/proof-search";
 
 const db = new PrismaClient();
 let failures = 0;
@@ -102,6 +102,25 @@ async function main() {
   ok(r.every((x) => x.kind === "invoice") && ids(r, "invoice").includes(invId), "role SALES: hanya invoice yang dicari");
   r = await find("zz-tidak-ada-xx");
   ok(r.every((x) => x.hits.length === 0), "kata acak → kosong");
+
+  // Periode tanggal tanpa kata kunci (zona Jakarta), dan gabungan kata kunci + periode.
+  const day = new Date(bill.date.getTime() + 7 * 3600 * 1000).toISOString().slice(0, 10);
+  const nextDay = new Date(bill.date.getTime() + 31 * 3600 * 1000).toISOString().slice(0, 10);
+  r = await searchProofs(db, null, ["bill"], { limit: 1000, from: day, to: day });
+  ok(ids(r, "bill").includes(billId), `periode ${day} saja → bill hari itu`);
+  ok((r[0]?.hits ?? []).every((h) => new Date(new Date(h.date).getTime() + 7 * 3600 * 1000).toISOString().slice(0, 10) === day), "periode saja → semua hasil di tanggal itu");
+  r = await searchProofs(db, parseProofQuery(vendorRef), FINANCE, { limit: 20, from: nextDay, to: nextDay });
+  ok(!ids(r, "bill").includes(billId), "ref vendor + periode hari berikutnya → bill tidak ikut");
+  r = await searchProofs(db, parseProofQuery(vendorRef), FINANCE, { limit: 20, from: day });
+  ok(ids(r, "bill").includes(billId), "ref vendor + periode mulai hari itu → bill ikut");
+
+  // Alur jurnal: baris Debit/Kredit seimbang.
+  const trail = await proofJournals(db, [bill.journalEntryId!, pay.journalEntryId!]);
+  const balanced = (id: string) => {
+    const j = trail[id]?.[0];
+    return !!j && j.lines.length >= 2 && Math.abs(j.lines.reduce((s, l) => s + l.debit - l.credit, 0)) < 0.005;
+  };
+  ok(balanced(bill.journalEntryId!) && balanced(pay.journalEntryId!), "jurnal bill & pembayaran: baris Debit = Kredit");
 
   const t0 = Date.now();
   await find("2026");

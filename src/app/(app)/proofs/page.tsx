@@ -1,22 +1,24 @@
 import Link from "next/link";
-import { ExternalLink, Printer, SearchX } from "lucide-react";
+import { SearchX } from "lucide-react";
 import { requireCan } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
 import { can } from "@/lib/rbac";
 import { formatDate, formatIDR } from "@/lib/format";
 import {
-  PROOF_KIND_LABEL, PROOF_MIN_QUERY, parseProofQuery, proofKindsFor, searchProofs, type ProofHit,
+  PROOF_KIND_LABEL, PROOF_MIN_QUERY, parseProofFilter, proofJournals, proofKindsFor, searchProofs, type ProofHit,
 } from "@/lib/proof-search";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ProofSearchBox } from "./proof-search-box";
+import { ProofRow } from "./proof-row";
 
 export const dynamic = "force-dynamic";
 
+/** Per jenis bukti. Satu jenis saja dipilih → daftar lebih panjang. */
 const LIMIT = 20;
+const LIMIT_ONE_KIND = 100;
 
 /** Halaman tujuan "Buka". Voucher, note, dan setoran pajak belum punya halaman detail: diarahkan ke daftarnya. */
 function openHref(h: ProofHit): string {
@@ -38,40 +40,62 @@ function printHref(h: ProofHit, canJournal: boolean): string | null {
   return h.journalEntryId && canJournal ? `/api/accounting/journals/${h.journalEntryId}/pdf` : null;
 }
 
-export default async function ProofsPage({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
+export default async function ProofsPage({ searchParams }: { searchParams: Promise<{ q?: string; from?: string; to?: string; kind?: string }> }) {
   const user = await requireCan("proofs", "read");
   const sp = await searchParams;
-  const query = parseProofQuery(sp.q);
-  const kinds = proofKindsFor(user.role);
+  const filter = parseProofFilter(sp);
+  const allowed = proofKindsFor(user.role);
+  const kinds = filter?.kind && allowed.includes(filter.kind) ? [filter.kind] : allowed;
+  const limit = kinds.length === 1 ? LIMIT_ONE_KIND : LIMIT;
   const canJournal = can(user.role, "accounting", "read");
-  const results = query ? (await searchProofs(prisma, query, kinds, { limit: LIMIT })).filter((r) => r.hits.length > 0) : [];
+  const results = filter
+    ? (await searchProofs(prisma, filter.query, kinds, { limit, from: filter.from, to: filter.to })).filter((r) => r.hits.length > 0)
+    : [];
   const total = results.reduce((s, r) => s + r.hits.length, 0);
+  // Alur jurnal hanya untuk yang boleh membaca accounting, sama seperti PDF jurnal.
+  const journals = canJournal
+    ? await proofJournals(prisma, results.flatMap((r) => r.hits.map((h) => h.journalEntryId).filter((id): id is string => !!id)))
+    : {};
+  const period = filter && (filter.from || filter.to)
+    ? `${filter.from ? formatDate(filter.from) : "awal"} s/d ${filter.to ? formatDate(filter.to) : "hari ini"}`
+    : null;
+  const label = [filter?.query && `“${filter.query.text}”`, period && `periode ${period}`, filter?.kind && kinds.length === 1 && PROOF_KIND_LABEL[kinds[0]]]
+    .filter(Boolean).join(", ");
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Cari Bukti"
-        description={`Satu pencarian untuk semua bukti: ${kinds.map((k) => PROOF_KIND_LABEL[k]).join(", ")}.`}
+        description={`Satu pencarian untuk semua bukti: ${allowed.map((k) => PROOF_KIND_LABEL[k]).join(", ")}.`}
       />
-      <ProofSearchBox initial={sp.q ?? ""} />
+      <ProofSearchBox
+        initial={{ q: sp.q ?? "", from: filter?.from ?? "", to: filter?.to ?? "", kind: filter?.kind ?? "" }}
+        kinds={allowed.map((k) => ({ value: k, label: PROOF_KIND_LABEL[k] }))}
+      />
 
-      {!query ? (
-        <p className="text-sm text-muted-foreground">
-          Ketik minimal {PROOF_MIN_QUERY} karakter. Beberapa kata dipisah spasi harus cocok semua (mis. <code>maersk 2026/11</code>).
-          Nominal boleh ditulis <code>1.250.000</code>, <code>1250000</code>, atau <code>1.250.000,50</code> dan dicocokkan persis.
-        </p>
+      {!filter ? (
+        <div className="space-y-1 text-sm text-muted-foreground">
+          <p>
+            Ketik minimal {PROOF_MIN_QUERY} karakter, <b>atau</b> pilih periode tanggal saja bila no. buktinya tidak diketahui.
+            Sebagian nomor sudah cukup (mis. <code>BK/26/11</code>). Beberapa kata dipisah spasi harus cocok semua (mis. <code>maersk 2026/11</code>).
+          </p>
+          <p>
+            Nominal boleh ditulis <code>1.250.000</code>, <code>1250000</code>, atau <code>1.250.000,50</code> dan dicocokkan persis.
+            {canJournal && <> Klik <b>Jurnal</b> di tiap bukti untuk melihat akun Debit dan Kredit-nya.</>}
+          </p>
+        </div>
       ) : results.length === 0 ? (
-        <EmptyState icon={SearchX} title="Tidak ada bukti yang cocok" description={`Tidak ditemukan bukti untuk "${query.text}". Coba kata kunci lain atau sebagian nomor saja.`} />
+        <EmptyState icon={SearchX} title="Tidak ada bukti yang cocok" description={`Tidak ditemukan bukti untuk ${label}. Coba kata kunci lain, sebagian nomor saja, atau perlebar periode.`} />
       ) : (
         <>
           <p className="text-sm text-muted-foreground">
-            {total} bukti untuk “{query.text}”{query.amount !== null && <> · termasuk nominal {formatIDR(query.amount, { decimals: query.amount % 1 ? 2 : 0 })}</>}
+            {total} bukti untuk {label}{filter.query?.amount != null && <> · termasuk nominal {formatIDR(filter.query.amount, { decimals: filter.query.amount % 1 ? 2 : 0 })}</>}
           </p>
           {results.map((r) => (
             <Card key={r.kind}>
               <CardHeader className="flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-base">{PROOF_KIND_LABEL[r.kind]} <span className="font-normal text-muted-foreground">({r.hits.length}{r.truncated ? "+" : ""})</span></CardTitle>
-                {r.truncated && <span className="text-xs text-warning">Menampilkan {LIMIT} teratas, persempit kata kunci.</span>}
+                {r.truncated && <span className="text-xs text-warning">Menampilkan {limit} terbaru, persempit kata kunci atau periode, atau pilih satu jenis bukti.</span>}
               </CardHeader>
               <CardContent className="p-0">
                 <Table>
@@ -87,32 +111,15 @@ export default async function ProofsPage({ searchParams }: { searchParams: Promi
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {r.hits.map((h) => {
-                      const print = printHref(h, canJournal);
-                      return (
-                        <TableRow key={h.id}>
-                          <TableCell>
-                            <Link href={openHref(h)} className="font-medium text-primary hover:underline">{h.number}</Link>
-                            {h.proofNumber && <div className="text-xs text-muted-foreground">{h.kind === "bill" ? "Ref vendor " : h.kind === "payment" ? "Ref " : "Bukti "}{h.proofNumber}</div>}
-                            {h.description && <div className="max-w-72 truncate text-xs text-muted-foreground" title={h.description}>{h.description}</div>}
-                          </TableCell>
-                          <TableCell className="whitespace-nowrap">{formatDate(h.date)}</TableCell>
-                          <TableCell className="max-w-48 truncate" title={h.party}>{h.party || "-"}</TableCell>
-                          <TableCell className="max-w-56 text-xs text-muted-foreground">
-                            <div className="truncate" title={h.jobs}>{h.jobs || "-"}</div>
-                            {h.bls && <div className="truncate" title={h.bls}>{h.bls}</div>}
-                          </TableCell>
-                          <TableCell className="whitespace-nowrap text-right tabular-nums">{formatIDR(h.amount, { decimals: h.amount % 1 ? 2 : 0 })}</TableCell>
-                          <TableCell className="whitespace-nowrap text-sm">{h.status}</TableCell>
-                          <TableCell className="whitespace-nowrap">
-                            <div className="flex gap-1">
-                              <Button asChild size="sm" variant="ghost"><Link href={openHref(h)}><ExternalLink /> Buka</Link></Button>
-                              {print && <Button asChild size="sm" variant="ghost"><a href={print} target="_blank" rel="noopener"><Printer /> Cetak</a></Button>}
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
+                    {r.hits.map((h) => (
+                      <ProofRow
+                        key={h.id}
+                        hit={h}
+                        openHref={openHref(h)}
+                        printHref={printHref(h, canJournal)}
+                        journals={canJournal && h.journalEntryId ? journals[h.journalEntryId] ?? [] : null}
+                      />
+                    ))}
                   </TableBody>
                 </Table>
               </CardContent>

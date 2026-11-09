@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseIdAmount, parseProofQuery, proofKindsFor } from "@/lib/proof-search";
+import { parseIdAmount, parseProofFilter, parseProofQuery, proofKindsFor } from "@/lib/proof-search";
 
 describe("parseIdAmount — nominal format Indonesia", () => {
   it.each([
@@ -33,6 +33,26 @@ describe("parseProofQuery", () => {
   });
   it("maksimal 6 kata", () => {
     expect(parseProofQuery("a1 b2 c3 d4 e5 f6 g7 h8")?.terms).toHaveLength(6);
+  });
+});
+
+describe("parseProofFilter", () => {
+  it("tanpa kata kunci dan tanpa periode → null", () => {
+    expect(parseProofFilter({})).toBeNull();
+    expect(parseProofFilter({ q: "a", kind: "bill" })).toBeNull();
+  });
+  it("periode saja sudah cukup", () => {
+    expect(parseProofFilter({ from: "2026-11-01", to: "2026-11-30" })).toEqual({ query: null, from: "2026-11-01", to: "2026-11-30", kind: null });
+    expect(parseProofFilter({ to: "2026-11-30" })?.from).toBeNull();
+  });
+  it("tanggal terbalik ditukar, tanggal & jenis tidak sah diabaikan", () => {
+    expect(parseProofFilter({ from: "2026-11-30", to: "2026-11-01" })).toMatchObject({ from: "2026-11-01", to: "2026-11-30" });
+    expect(parseProofFilter({ q: "BK/26", from: "30/11/2026", kind: "xx" })).toMatchObject({ from: null, kind: null });
+  });
+  it("kata kunci + periode + jenis", () => {
+    const f = parseProofFilter({ q: "BK/26/11", from: "2026-11-01", kind: "payment" });
+    expect(f?.query?.text).toBe("BK/26/11");
+    expect(f).toMatchObject({ from: "2026-11-01", to: null, kind: "payment" });
   });
 });
 
