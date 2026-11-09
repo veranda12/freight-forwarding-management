@@ -7,6 +7,7 @@ import { resolveCashAccount, assertCashCurrency } from "./cash-accounts";
 import { cashProofCode, genInvoiceNumber, genProofNumber } from "./sequence";
 import { closeJobsOfInvoice } from "./job-lock";
 import { effectiveRate, IDR, latestRate } from "./fx";
+import type { PaymentRecorded } from "./payables";
 
 export type InvoiceOpts = { currency?: string; rate?: number; date?: string; dueDate?: string; notes?: string | null };
 
@@ -210,102 +211,106 @@ export type ReceiptInput = {
  * Penerimaan pembayaran invoice. Invoice valas: selisih antara IDR yang diterima
  * (nominal x kurs bayar) dan IDR yang tercatat (nominal x kurs tagihan) masuk ke 7100.
  */
-export async function recordReceiptCore(db: PrismaClient, invoiceId: string, input: ReceiptInput, userId?: string): Promise<void> {
-  const inv = await db.invoice.findUnique({ where: { id: invoiceId }, include: { customer: true } });
+export async function recordReceiptTx(tx: Tx, invoiceId: string, input: ReceiptInput, userId?: string): Promise<PaymentRecorded> {
+  const inv = await tx.invoice.findUnique({ where: { id: invoiceId }, include: { customer: true } });
   if (!inv) throw new Error("Invoice tidak ditemukan.");
   if (inv.status === "CANCELLED") throw new Error("Invoice sudah dibatalkan.");
   const date = input.date ? new Date(`${input.date}T12:00:00+07:00`) : new Date();
   const ded = normalizeDeductions(input.deductions);
   if (ded.total > 0 && inv.currency !== IDR) throw new Error("Potongan hanya bisa dicatat untuk invoice IDR.");
 
-  await db.$transaction(async (tx) => {
-    const acc = await accountMap(tx);
-    const cash = await resolveCashAccount(tx, input.bankAccountId, "receipt");
-    assertCashCurrency(cash, inv.currency, "penerimaan invoice");
-    const number = await genProofNumber(tx, cashProofCode(cash.kind, "IN"), date);
+  const acc = await accountMap(tx);
+  const cash = await resolveCashAccount(tx, input.bankAccountId, "receipt");
+  assertCashCurrency(cash, inv.currency, "penerimaan invoice");
+  const number = await genProofNumber(tx, cashProofCode(cash.kind, "IN"), date);
 
-    if (inv.currency === IDR) {
-      const amount = r2(Number(input.amount));
-      if (!(amount > 0)) throw new Error("Nominal harus lebih dari 0.");
-      const outstanding = r2(Number(inv.total) - Number(inv.amountPaid));
-      const applied = r2(amount + ded.total); // yang melunasi tagihan: uang masuk + potongan
-      if (applied > outstanding + 0.5) throw new Error(`Penerimaan dan potongan melebihi sisa tagihan (${outstanding}).`);
-      if (ded.pph23 > 0 && !acc[ACC.PPH23_CLAIM]) throw new Error(`Akun PPh 23 dibayar dimuka (${ACC.PPH23_CLAIM}) belum ada di COA.`);
-      if (ded.admin > 0 && !acc[ACC.EXP_BANK]) throw new Error(`Akun beban administrasi bank (${ACC.EXP_BANK}) belum ada di COA.`);
-      if (ded.other > 0 && !acc[ACC.EXP_OPS_OTHER]) throw new Error(`Akun beban operasional lain (${ACC.EXP_OPS_OTHER}) belum ada di COA.`);
-      const pay = await tx.payment.create({
-        data: {
-          number, direction: "RECEIPT", date, customerId: inv.customerId,
-          method: (input.method as any) ?? "TRANSFER", reference: input.reference, currency: IDR, bankAccountId: cash.bankAccountId,
-          amount: new Prisma.Decimal(amount),
-          allocations: { create: [{ invoiceId: inv.id, amount: new Prisma.Decimal(applied) }] },
-        },
-      });
-      const lines: JournalLineInput[] = [
-        { accountId: cash.coaId, debit: amount, description: `Penerimaan ${cash.name}` },
-      ];
-      if (ded.pph23 > 0) lines.push({ accountId: acc[ACC.PPH23_CLAIM], debit: ded.pph23, description: "PPh 23 dipotong pelanggan" });
-      if (ded.admin > 0) lines.push({ accountId: acc[ACC.EXP_BANK], debit: ded.admin, description: "Biaya admin bank" });
-      if (ded.other > 0) lines.push({ accountId: acc[ACC.EXP_OPS_OTHER], debit: ded.other, description: ded.otherNote ?? "Potongan / biaya lain" });
-      lines.push({ accountId: acc[ACC.AR], credit: applied, description: `Pelunasan ${inv.number}` });
-      const jeId = await postJournal(tx, {
-        date, description: `Receipt ${number} - ${inv.customer.name}`, source: "RECEIPT", sourceId: pay.id,
-        lines, createdById: userId, number,
-      });
-      await tx.payment.update({ where: { id: pay.id }, data: { journalEntryId: jeId } });
-      const newPaid = r2(Number(inv.amountPaid) + applied);
-      await tx.invoice.update({
-        where: { id: inv.id },
-        data: { amountPaid: new Prisma.Decimal(newPaid), status: newPaid >= Number(inv.total) - 0.5 ? "PAID" : "PARTIAL" },
-      });
-      await closeJobsOfInvoice(tx, inv.id);
-      return;
-    }
-
-    // Invoice valas
-    const aF = r2(Number(input.amountForeign));
-    if (!(aF > 0)) throw new Error(`Nominal ${inv.currency} harus lebih dari 0.`);
-    const outF = r2(Number(inv.amountForeign) - Number(inv.amountPaidForeign));
-    if (aF > outF + 0.01) throw new Error(`Melebihi sisa tagihan ${inv.currency} (${outF}).`);
-    const isFull = aF >= outF - 0.005;
-    const outIdr = r2(Number(inv.total) - Number(inv.amountPaid));
-    const bookedIdr = isFull ? outIdr : r2(aF * Number(inv.exchangeRate));
-    const payRate = Number(input.paymentRate) > 0 ? Number(input.paymentRate) : await latestRate(tx, inv.currency, jktKey(date));
-    if (!(payRate && payRate > 0)) throw new Error(`Kurs ${inv.currency} untuk tanggal ini belum ada. Isi kurs pembayaran.`);
-    const cashIdr = r2(aF * payRate);
-    const fx = r2(cashIdr - bookedIdr);
-
+  if (inv.currency === IDR) {
+    const amount = r2(Number(input.amount));
+    if (!(amount > 0)) throw new Error("Nominal harus lebih dari 0.");
+    const outstanding = r2(Number(inv.total) - Number(inv.amountPaid));
+    const applied = r2(amount + ded.total); // yang melunasi tagihan: uang masuk + potongan
+    if (applied > outstanding + 0.5) throw new Error(`Penerimaan dan potongan melebihi sisa tagihan (${outstanding}).`);
+    if (ded.pph23 > 0 && !acc[ACC.PPH23_CLAIM]) throw new Error(`Akun PPh 23 dibayar dimuka (${ACC.PPH23_CLAIM}) belum ada di COA.`);
+    if (ded.admin > 0 && !acc[ACC.EXP_BANK]) throw new Error(`Akun beban administrasi bank (${ACC.EXP_BANK}) belum ada di COA.`);
+    if (ded.other > 0 && !acc[ACC.EXP_OPS_OTHER]) throw new Error(`Akun beban operasional lain (${ACC.EXP_OPS_OTHER}) belum ada di COA.`);
     const pay = await tx.payment.create({
       data: {
         number, direction: "RECEIPT", date, customerId: inv.customerId,
-        method: (input.method as any) ?? "TRANSFER", reference: input.reference, bankAccountId: cash.bankAccountId,
-        currency: inv.currency, exchangeRate: new Prisma.Decimal(payRate.toFixed(6)),
-        amount: new Prisma.Decimal(cashIdr),
-        allocations: { create: [{ invoiceId: inv.id, amount: new Prisma.Decimal(bookedIdr), amountForeign: new Prisma.Decimal(aF) }] },
+        method: (input.method as any) ?? "TRANSFER", reference: input.reference, currency: IDR, bankAccountId: cash.bankAccountId,
+        amount: new Prisma.Decimal(amount),
+        allocations: { create: [{ invoiceId: inv.id, amount: new Prisma.Decimal(applied) }] },
       },
     });
     const lines: JournalLineInput[] = [
-      { accountId: cash.coaId, debit: cashIdr, description: `Penerimaan ${cash.name} ${inv.currency} ${aF}`, amountForeign: cash.currency === inv.currency ? aF : null },
-      { accountId: acc[ACC.AR], credit: bookedIdr, description: `Pelunasan ${inv.number}` },
+      { accountId: cash.coaId, debit: amount, description: `Penerimaan ${cash.name}` },
     ];
-    if (fx > 0) lines.push({ accountId: acc[ACC.FX], credit: fx, description: "Laba selisih kurs" });
-    if (fx < 0) lines.push({ accountId: acc[ACC.FX], debit: -fx, description: "Rugi selisih kurs" });
+    if (ded.pph23 > 0) lines.push({ accountId: acc[ACC.PPH23_CLAIM], debit: ded.pph23, description: "PPh 23 dipotong pelanggan" });
+    if (ded.admin > 0) lines.push({ accountId: acc[ACC.EXP_BANK], debit: ded.admin, description: "Biaya admin bank" });
+    if (ded.other > 0) lines.push({ accountId: acc[ACC.EXP_OPS_OTHER], debit: ded.other, description: ded.otherNote ?? "Potongan / biaya lain" });
+    lines.push({ accountId: acc[ACC.AR], credit: applied, description: `Pelunasan ${inv.number}` });
     const jeId = await postJournal(tx, {
-      date, description: `Receipt ${number} - ${inv.customer.name}`, source: "RECEIPT", sourceId: pay.id, lines, createdById: userId, number,
+      date, description: `Receipt ${number} - ${inv.customer.name}`, source: "RECEIPT", sourceId: pay.id,
+      lines, createdById: userId, number,
     });
     await tx.payment.update({ where: { id: pay.id }, data: { journalEntryId: jeId } });
-    const newPaidIdr = r2(Number(inv.amountPaid) + bookedIdr);
-    const newPaidF = r2(Number(inv.amountPaidForeign) + aF);
+    const newPaid = r2(Number(inv.amountPaid) + applied);
     await tx.invoice.update({
       where: { id: inv.id },
-      data: {
-        amountPaid: new Prisma.Decimal(newPaidIdr),
-        amountPaidForeign: new Prisma.Decimal(newPaidF),
-        status: isFull || newPaidIdr >= Number(inv.total) - 0.5 ? "PAID" : "PARTIAL",
-      },
+      data: { amountPaid: new Prisma.Decimal(newPaid), status: newPaid >= Number(inv.total) - 0.5 ? "PAID" : "PARTIAL" },
     });
     await closeJobsOfInvoice(tx, inv.id);
+    return { paymentId: pay.id, number, journalEntryId: jeId };
+  }
+
+  // Invoice valas
+  const aF = r2(Number(input.amountForeign));
+  if (!(aF > 0)) throw new Error(`Nominal ${inv.currency} harus lebih dari 0.`);
+  const outF = r2(Number(inv.amountForeign) - Number(inv.amountPaidForeign));
+  if (aF > outF + 0.01) throw new Error(`Melebihi sisa tagihan ${inv.currency} (${outF}).`);
+  const isFull = aF >= outF - 0.005;
+  const outIdr = r2(Number(inv.total) - Number(inv.amountPaid));
+  const bookedIdr = isFull ? outIdr : r2(aF * Number(inv.exchangeRate));
+  const payRate = Number(input.paymentRate) > 0 ? Number(input.paymentRate) : await latestRate(tx, inv.currency, jktKey(date));
+  if (!(payRate && payRate > 0)) throw new Error(`Kurs ${inv.currency} untuk tanggal ini belum ada. Isi kurs pembayaran.`);
+  const cashIdr = r2(aF * payRate);
+  const fx = r2(cashIdr - bookedIdr);
+
+  const pay = await tx.payment.create({
+    data: {
+      number, direction: "RECEIPT", date, customerId: inv.customerId,
+      method: (input.method as any) ?? "TRANSFER", reference: input.reference, bankAccountId: cash.bankAccountId,
+      currency: inv.currency, exchangeRate: new Prisma.Decimal(payRate.toFixed(6)),
+      amount: new Prisma.Decimal(cashIdr),
+      allocations: { create: [{ invoiceId: inv.id, amount: new Prisma.Decimal(bookedIdr), amountForeign: new Prisma.Decimal(aF) }] },
+    },
   });
+  const lines: JournalLineInput[] = [
+    { accountId: cash.coaId, debit: cashIdr, description: `Penerimaan ${cash.name} ${inv.currency} ${aF}`, amountForeign: cash.currency === inv.currency ? aF : null },
+    { accountId: acc[ACC.AR], credit: bookedIdr, description: `Pelunasan ${inv.number}` },
+  ];
+  if (fx > 0) lines.push({ accountId: acc[ACC.FX], credit: fx, description: "Laba selisih kurs" });
+  if (fx < 0) lines.push({ accountId: acc[ACC.FX], debit: -fx, description: "Rugi selisih kurs" });
+  const jeId = await postJournal(tx, {
+    date, description: `Receipt ${number} - ${inv.customer.name}`, source: "RECEIPT", sourceId: pay.id, lines, createdById: userId, number,
+  });
+  await tx.payment.update({ where: { id: pay.id }, data: { journalEntryId: jeId } });
+  const newPaidIdr = r2(Number(inv.amountPaid) + bookedIdr);
+  const newPaidF = r2(Number(inv.amountPaidForeign) + aF);
+  await tx.invoice.update({
+    where: { id: inv.id },
+    data: {
+      amountPaid: new Prisma.Decimal(newPaidIdr),
+      amountPaidForeign: new Prisma.Decimal(newPaidF),
+      status: isFull || newPaidIdr >= Number(inv.total) - 0.5 ? "PAID" : "PARTIAL",
+    },
+  });
+  await closeJobsOfInvoice(tx, inv.id);
+  return { paymentId: pay.id, number, journalEntryId: jeId };
+}
+
+/** Penerimaan pembayaran invoice dalam transaksinya sendiri. */
+export async function recordReceiptCore(db: PrismaClient, invoiceId: string, input: ReceiptInput, userId?: string): Promise<void> {
+  await db.$transaction((tx) => recordReceiptTx(tx, invoiceId, input, userId));
 }
 
 /**
