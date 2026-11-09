@@ -103,7 +103,8 @@ test.describe("Baris pajak, nomor bukti, dan cetak SOP", () => {
     await line(500_000, true, `E2E THC reimburse ${ts}`);
 
     await login(page, "finance@demo.com");
-    await page.goto("/vouchers/new");
+    // Form Buat Voucher sekarang bertab; tab bawaan = Invoice, voucher biaya job di tab Biaya job.
+    await page.goto("/vouchers/new?tab=job");
     await page.getByPlaceholder("Cari no. job, no. B/L, atau customer…").fill(job.number);
     const pick = (text: string) => page.locator("main label", { hasText: text }).locator("input[type=checkbox]");
     await pick(`E2E THC reimburse ${ts}`).check();

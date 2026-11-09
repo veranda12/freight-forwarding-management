@@ -65,6 +65,7 @@ RBAC ditegakkan di server (`requireCan`/`assertCan`) — bukan sekadar menyembun
    - **Costing**: profitability per job (margin diberi warna; merah bila <10%).
    - **Invoice (AR)**: buka invoice → subtotal, PPN 11%, jurnal otomatis, alokasi pembayaran.
    - **Vendor Bill (AP)**: PPN/PPh diisi sesuai tagihan vendor; menu Vendor Bill per job menampilkan pajak bill sebagai baris sendiri.
+   - **Voucher dari invoice / vendor bill**: dari detail dokumen klik **Buat Voucher**, centang baris (mis. per job), simpan → pembayarannya langsung tercatat; status Lunas / Belum lunas. Form Buat Voucher punya tab Invoice, Vendor Bill, dan Biaya job.
    - **Voucher** dan **Jurnal Pengeluaran**: tambah **baris pajak** (PPN masukan di Debet, PPh 23/26 di Kredit); biaya reimburse tidak dikenai pajak. Cetak bukti dalam format formulir SOP (nomor `SLG/BK/26/11/06/0001`).
    - **Receipt & Payment**: penerimaan/pembayaran dengan alokasi.
    - **Accounting**: **Trial Balance (balance ✓)**, **Laba Rugi**, **Neraca**, **Jurnal**. _(±4 mnt)_

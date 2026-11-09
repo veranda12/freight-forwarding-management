@@ -39,6 +39,22 @@ Format: **Keputusan** — _alasan_.
   Revision / Effective Date per formulir (`ProofForm`, diisi Admin di Setting Perusahaan). Nilainya milik SLG,
   jadi tidak di-seed. Jurnal bernomor `JE/…` (transfer, setor pajak, aset, armada) dicetak dengan formulir Jurnal Umum.
 
+## Voucher dari invoice dan vendor bill (2026-11-09)
+
+- **Voucher selalu menempel** ke invoice, vendor bill, atau biaya job (`VoucherKind`); tidak ada voucher berdiri sendiri.
+  _Keputusan client._
+- **Voucher invoice/bill = pembayaran**: menyimpan voucher sekaligus mencatat penerimaan (BM/KM) atau pembayaran (BK/KK)
+  lewat `recordReceiptTx` / `recordVendorPaymentTx` dalam satu transaksi, sehingga voucher dan pembayarannya tidak bisa
+  terpisah. Tidak ada status Terbit/Bayar; status yang tampil = status pelunasan dokumen (Lunas / Belum lunas).
+- **Isi voucher = baris yang dicentang** (mis. per job); satu baris hanya di satu voucher (unique `VoucherDocLine`, aman
+  terhadap dua penyimpanan bersamaan). Pajak dokumen (PPN, PPh bill) ikut **di voucher yang memuat baris pertama
+  dokumen**, jadi Σ voucher = nilai dokumen. Potongan saat terima invoice seperti Catat Pembayaran.
+- **Dibatasi**: hanya dokumen IDR; nilai voucher ≤ sisa dokumen (pembayaran lewat tombol lama bisa membuat voucher baris
+  sisanya ditolak); voucher invoice/bill tidak bisa dibatalkan (sama dengan pembayaran lain), koreksi lewat Jurnal Umum.
+- **Voucher biaya job tetap** seperti sebelumnya (terbit lalu dibayar). Tombol Catat Pembayaran / Bayar tetap ada.
+- Baris invoice/bill tanpa job (data lama) **ikut job kepala dokumen** di form, kartu, daftar, dan cetakan.
+- Cetak: Voucher Pengeluaran (bill, formulir VC) dan Voucher Penerimaan (invoice, formulir baru VM) dalam format SOP.
+
 ## RBAC
 
 - Pembatasan ditegakkan **di server**: helper `requireRole()` dipanggil di setiap server action & route handler, bukan sekadar sembunyikan menu.
