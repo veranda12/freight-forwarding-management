@@ -8,8 +8,10 @@ import { InvoiceBuilder } from "../invoice-builder";
 
 export const dynamic = "force-dynamic";
 
-export default async function NewInvoicePage() {
+/** `?job=<id>`: jalan pintas dari Costing, job itu langsung terpilih. */
+export default async function NewInvoicePage({ searchParams }: { searchParams: Promise<{ job?: string }> }) {
   await requireCan("invoices", "write", { redirectTo: "/invoices" });
+  const { job } = await searchParams;
   const today = new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10);
   const [candidates, currencies, ppnRate] = await Promise.all([
     invoiceCandidates(prisma),
@@ -22,7 +24,7 @@ export default async function NewInvoicePage() {
         <Breadcrumbs items={[{ label: "Invoice (AR)", href: "/invoices" }, { label: "Buat Invoice" }]} />
         <PageHeader title="Buat Invoice" description="Cari job atau B/L, lalu pilih satu job yang ditagih" />
       </div>
-      <InvoiceBuilder candidates={candidates} currencies={currencies} ppnRate={ppnRate} today={today} />
+      <InvoiceBuilder candidates={candidates} currencies={currencies} ppnRate={ppnRate} today={today} initialJobId={job} />
     </div>
   );
 }

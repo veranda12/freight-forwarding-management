@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Briefcase } from "lucide-react";
+import { Briefcase, Receipt } from "lucide-react";
 import { requireCan } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
 import { can } from "@/lib/rbac";
@@ -42,6 +42,8 @@ export default async function JobCostingPage({ params }: { params: Promise<{ id:
   const selling = job.costings.filter((c) => c.side === "SELLING");
   const buying = job.costings.filter((c) => c.side === "BUYING");
   const canBill = can(user.role, "bills", "write");
+  // Jalan pintas ke Buat Invoice dengan job ini terpilih, selama masih ada selling yang belum ditagih.
+  const canInvoice = can(user.role, "invoices", "write") && job.status !== "CANCELLED" && selling.some((c) => !c.invoiced);
   const canCosting = can(user.role, "costing", "write") && job.status !== "CANCELLED" && job.status !== "CLOSED";
   let chargeOptions: ChargeFormOptions | null = null;
   if (canCosting) {
@@ -77,6 +79,7 @@ export default async function JobCostingPage({ params }: { params: Promise<{ id:
         <PageHeader title={job.number} description={`${job.customer.name}${bl ? ` · B/L ${bl}` : ""}`}>
           <JobStatusBadge status={job.status} />
           <Button asChild variant="outline"><Link href={`/jobs/${job.id}`}><Briefcase /> Buka Job</Link></Button>
+          {canInvoice && <Button asChild><Link href={`/invoices/new?job=${job.id}`}><Receipt /> Buat Invoice</Link></Button>}
         </PageHeader>
       </div>
       <div className="space-y-4">
