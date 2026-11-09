@@ -64,7 +64,35 @@ describe("Jurnal Pengeluaran dengan baris pajak", () => {
     expect(v.amount).toBe(2_600_000);
     expect(v.net).toBe(2_548_000);
   });
-  it("Jurnal Penerimaan tidak menerima baris pajak", () => {
-    expect(() => validateCashEntry({ ...input, direction: "IN", taxRows: [{ kind: "PPH23", amount: 1 }] })).toThrow(/hanya untuk Jurnal Pengeluaran/);
+  it("jenis pajak penerimaan ditolak di Jurnal Pengeluaran", () => {
+    expect(() => validateCashEntry({ ...input, taxRows: [{ kind: "PPN_OUT", amount: 1 }] })).toThrow(/PPN Keluaran hanya untuk penerimaan/);
+  });
+});
+
+describe("Jurnal Penerimaan dengan baris pajak (sisi dibalik)", () => {
+  const input = { direction: "IN" as const, bankAccountId: "b", dateKey: "2026-11-06", description: "Jasa konsultasi", rows: [{ counterAccountId: "c", amount: 10_000_000 }] };
+  it("contoh: jasa 10.000.000 + PPN Keluaran 1.100.000 - PPh 23 dipotong customer 200.000 = diterima 10.900.000", () => {
+    const v = validateCashEntry({ ...input, taxRows: [{ kind: "PPN_OUT", amount: 1_100_000 }, { kind: "PPH23_CLAIM", amount: 200_000 }] });
+    expect(v.net).toBe(10_900_000);
+    expect(v.taxRows.map((r) => r.description)).toEqual(["PPN Keluaran", "PPh 23 dipotong customer"]);
+  });
+  it("jenis pajak pengeluaran ditolak di Jurnal Penerimaan", () => {
+    expect(() => validateCashEntry({ ...input, taxRows: [{ kind: "PPH23", amount: 1 }] })).toThrow(/PPh 23 dipotong hanya untuk pengeluaran/);
+    expect(() => validateCashEntry({ ...input, taxRows: [{ kind: "PPN_IN", amount: 1 }] })).toThrow(/PPN Masukan hanya untuk pengeluaran/);
+  });
+  it("batas: PPh / PPN melebihi nilai penerimaan, dan nilai diterima harus > 0", () => {
+    expect(() => validateCashEntry({ ...input, taxRows: [{ kind: "PPH23_CLAIM", amount: 10_000_001 }] })).toThrow(/PPh dipotong melebihi nilai penerimaan/);
+    expect(() => validateCashEntry({ ...input, taxRows: [{ kind: "PPN_OUT", amount: 10_000_001 }] })).toThrow(/PPN melebihi nilai penerimaan/);
+    expect(() => validateCashEntry({ ...input, taxRows: [{ kind: "PPH23_CLAIM", amount: 10_000_000 }] })).toThrow(/Nilai yang diterima harus lebih dari 0/);
+  });
+  it("jurnal: PPN Keluaran di Kredit 2100, PPh 23 dibayar dimuka di Debet 1450", () => {
+    const rows = validateTaxRows([{ kind: "PPN_OUT", amount: 110 }, { kind: "PPH23_CLAIM", amount: 20 }], base(1_000), "IN").rows;
+    expect(taxJournalLines(rows, { "2100": "ppnOut", "1450": "claim" })).toEqual([
+      { accountId: "ppnOut", credit: 110, description: "PPN Keluaran" },
+      { accountId: "claim", debit: 20, description: "PPh 23 dipotong customer" },
+    ]);
+  });
+  it("arah bawaan validateTaxRows tetap pengeluaran (voucher biaya job)", () => {
+    expect(() => validateTaxRows([{ kind: "PPN_OUT", amount: 1 }], base(100))).toThrow(/hanya untuk penerimaan/);
   });
 });

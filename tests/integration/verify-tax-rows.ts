@@ -1,7 +1,8 @@
 /**
  * Uji baris pajak yang diketik Finance (PPN masukan Debet, PPh 23/26 Kredit) di Jurnal Pengeluaran dan voucher job:
  * contoh client (servis 2.600.000, PPh 23 52.000, bank 2.548.000), edit, rekap pajak = saldo akun, batal, valas,
- * reimburse tanpa pajak, dan input yang harus ditolak.
+ * reimburse tanpa pajak, dan input yang harus ditolak. Ditambah Jurnal Penerimaan (sisi dibalik, 2026-11-09):
+ * PPN Keluaran Kredit 2100, PPh 23 dipotong customer Debet 1450, bank = penerimaan + PPN - PPh.
  * Hanya untuk database UJI: menolak "ffms" dan "ffms_pgcheck".
  * Jalankan: DATABASE_URL=.../ffms_part2 npx tsx tests/integration/verify-tax-rows.ts
  */
@@ -93,7 +94,7 @@ async function main() {
 
     // 6. Input yang harus ditolak (tidak ada jurnal yang terbentuk)
     const count = await db.journalEntry.count();
-    await throws(() => createCashEntry(db, { ...input([{ kind: "PPH23", amount: 1_000 }]), direction: "IN" }), /hanya untuk Jurnal Pengeluaran/, "Jurnal Penerimaan dengan baris pajak ditolak");
+    await throws(() => createCashEntry(db, { ...input([{ kind: "PPH23", amount: 1_000 }]), direction: "IN" }), /PPh 23 dipotong hanya untuk pengeluaran/, "Jurnal Penerimaan dengan jenis pajak pengeluaran ditolak");
     await throws(() => createCashEntry(db, input([{ kind: "PPH23", amount: 2_600_001 }])), /PPh dipotong melebihi/, "PPh melebihi biaya ditolak");
     await throws(() => createCashEntry(db, input([{ kind: "PPH23", amount: 0 }])), /nominal/, "nominal pajak 0 ditolak");
     await throws(() => createCashEntry(db, input([{ kind: "PPH21", amount: 10 }])), /jenis pajak/, "jenis pajak tidak dikenal ditolak");
@@ -115,6 +116,44 @@ async function main() {
       const lfx = (await listCashEntries(db)).find((x) => x.id === fx.journalEntryId)!;
       ok(lfx.taxRows[0]?.amount === 200 && lfx.rows[0]?.amount === 1_000, "valas: form edit membaca nominal dalam USD");
     }
+
+    // 8. Jurnal Penerimaan: jasa 10.000.000 + PPN Keluaran 1.100.000 - PPh 23 dipotong customer 200.000 = bank 10.900.000
+    const revenue = await db.coaAccount.findFirstOrThrow({ where: { type: "REVENUE", isPostable: true, isActive: true, code: { not: ACC.REV_OTHER } }, orderBy: { code: "asc" } });
+    const inInput = (taxRows: CashEntryInput["taxRows"]): CashEntryInput => ({
+      direction: "IN", bankAccountId: bank.id, dateKey: day, description: "Penerimaan jasa konsultasi kepabeanan",
+      rows: [{ counterAccountId: revenue.id, amount: 10_000_000 }], taxRows,
+    });
+    const ppnOutBefore = await balance(ACC.PPN_OUT);
+    const claimBefore = await balance(ACC.PPH23_CLAIM);
+    const r1 = await createCashEntry(db, inInput([
+      { kind: "PPN_OUT", amount: 1_100_000, description: "PPN Keluaran PT Pelanggan Uji" }, { kind: "PPH23_CLAIM", amount: 200_000, description: "PPh 23 dipotong PT Pelanggan Uji" },
+    ]));
+    const li = await lines(r1.journalEntryId);
+    ok(r1.amount === 10_900_000 && /^SLG\/BM\//.test(r1.number), `penerimaan: bank Debet 10.900.000, nomor ${r1.number}`);
+    ok(balanced(li) && li.length === 4, "penerimaan: jurnal seimbang, 4 baris");
+    ok(li.some((l) => l.code === revenue.code && l.credit === 10_000_000) && li.some((l) => l.code === bank.coaAccount.code && l.debit === 10_900_000),
+      "penerimaan: pendapatan Kredit 10.000.000, bank Debet 10.900.000");
+    ok(li.some((l) => l.code === ACC.PPN_OUT && l.credit === 1_100_000) && li.some((l) => l.code === ACC.PPH23_CLAIM && l.debit === 200_000),
+      "penerimaan: PPN Keluaran 2100 Kredit 1.100.000, PPh 23 dibayar dimuka 1450 Debet 200.000");
+    ok(Math.abs((await balance(ACC.PPN_OUT)) - ppnOutBefore - 1_100_000) < 0.005 && Math.abs(claimBefore - (await balance(ACC.PPH23_CLAIM)) - 200_000) < 0.005,
+      "saldo PPN Keluaran naik 1.100.000, PPh 23 dibayar dimuka naik 200.000");
+    const lin = (await listCashEntries(db)).find((x) => x.id === r1.journalEntryId)!;
+    ok(lin.direction === "IN" && lin.rows.length === 1 && lin.rows[0].amount === 10_000_000 && lin.amount === 10_900_000, "daftar penerimaan: baris pendapatan 10.000.000, masuk 10.900.000");
+    ok(lin.taxRows.map((x) => `${x.kind}:${x.amount}`).join() === "PPN_OUT:1100000,PPH23_CLAIM:200000" || lin.taxRows.map((x) => `${x.kind}:${x.amount}`).sort().join() === "PPH23_CLAIM:200000,PPN_OUT:1100000",
+      "daftar penerimaan: baris pajak terbaca (form edit)");
+    const recapIn = await getTaxRecap(db, day, day);
+    ok(recapIn.ppnOut.some((x) => x.number === r1.number && x.ppn === 1_100_000 && x.dpp === null), "rekap PPN Keluaran memuat baris PPN Jurnal Penerimaan");
+    await updateCashEntry(db, r1.journalEntryId, inInput([{ kind: "PPN_OUT", amount: 550_000, description: "PPN Keluaran (koreksi)" }]));
+    const li2 = await lines(r1.journalEntryId);
+    ok(balanced(li2) && li2.length === 3 && li2.some((l) => l.code === bank.coaAccount.code && l.debit === 10_550_000) && !li2.some((l) => l.code === ACC.PPH23_CLAIM),
+      "edit penerimaan: PPN 550.000 saja, bank 10.550.000, PPh 23 hilang");
+    const countIn = await db.journalEntry.count();
+    await throws(() => createCashEntry(db, inInput([{ kind: "PPN_IN", amount: 1 }])), /PPN Masukan hanya untuk pengeluaran/, "penerimaan dengan PPN Masukan ditolak");
+    await throws(() => createCashEntry(db, inInput([{ kind: "PPH23_CLAIM", amount: 10_000_000 }])), /Nilai yang diterima harus lebih dari 0/, "penerimaan bersih 0 ditolak");
+    await throws(() => createCashEntry(db, { ...input([{ kind: "PPN_OUT", amount: 1 }]) }), /PPN Keluaran hanya untuk penerimaan/, "pengeluaran dengan PPN Keluaran ditolak");
+    ok((await db.journalEntry.count()) === countIn, "tidak ada jurnal dari input penerimaan yang ditolak");
+    await cancelCashEntry(db, r1.journalEntryId, "uji batal penerimaan");
+    ok(!(await getTaxRecap(db, day, day)).ppnOut.some((x) => x.number === r1.number), "batal penerimaan: rekap tidak lagi memuat bukti itu");
 
     // 9. Voucher job: biaya 1.000.000 + reimburse 500.000, PPN 11.000, PPh 23 20.000
     const customer = await db.customer.findFirstOrThrow({ orderBy: { code: "asc" } });

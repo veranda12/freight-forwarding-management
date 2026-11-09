@@ -5,7 +5,7 @@ import { postJournal } from "./journal";
 import { assertCashCurrency, resolveCashAccount } from "./cash-accounts";
 import { cashProofCode, genProofNumber } from "./sequence";
 import { getLockKey } from "./period-lock";
-import { taxJournalLines, validateTaxRows, type TaxRowInput } from "./tax-rows";
+import { taxJournalLines, validateTaxRows, type OutTaxRowKind, type TaxRowInput } from "./tax-rows";
 
 export type VoucherInput = {
   jobId: string; lineIds: string[]; dateKey: string; payee: string; vendorId?: string | null; notes?: string | null;
@@ -43,7 +43,7 @@ export async function createVoucher(db: PrismaClient, input: VoucherInput, userI
     const cost = r2(lines.reduce((s, l) => s + Number(l.actualIdr), 0));
     if (!(cost > 0)) throw new Error("Nilai voucher harus lebih dari 0.");
     const nonReimburse = r2(lines.filter((l) => !l.asReceipt).reduce((s, l) => s + Number(l.actualIdr), 0));
-    const tax = validateTaxRows(v.taxRows, { total: cost, nonReimburse });
+    const tax = validateTaxRows(v.taxRows, { total: cost, nonReimburse }, "OUT");
     const total = tax.net;
     const date = dateOf(v.dateKey);
     const number = await genProofNumber(tx, "VC", date);
@@ -51,7 +51,7 @@ export async function createVoucher(db: PrismaClient, input: VoucherInput, userI
       data: {
         number, jobId: v.jobId, date, payee: v.payee, vendorId: v.vendorId || null, notes: v.notes,
         total: new Prisma.Decimal(total), createdById: userId,
-        taxLines: { create: tax.rows.map((r, i) => ({ kind: r.kind, description: r.description, amount: new Prisma.Decimal(r.amount), sortOrder: i })) },
+        taxLines: { create: tax.rows.map((r, i) => ({ kind: r.kind as OutTaxRowKind, description: r.description, amount: new Prisma.Decimal(r.amount), sortOrder: i })) },
       },
     });
     const marked = await tx.costingLine.updateMany({ where: { id: { in: v.lineIds }, voucherId: null, billed: false }, data: { voucherId: voucher.id } });

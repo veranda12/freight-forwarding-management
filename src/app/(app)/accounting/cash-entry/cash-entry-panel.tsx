@@ -64,7 +64,7 @@ export function CashEntryPanel({ cashAccounts, defaultCashId, inAccounts, outAcc
   const isFx = cur !== "IDR";
   const rateNum = Number(f.rate) || rates[cur] || 0;
   const total = rows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
-  const tax = taxSummary(f.direction === "OUT" ? taxRows : [], total);
+  const tax = taxSummary(taxRows, total, total, f.direction);
   const rowsReady = rows.length > 0 && rows.every((r) => r.counterAccountId && Number(r.amount) > 0) && tax.ready;
   // Saat edit, rekening hanya bisa diganti ke jenis yang sama, karena kodenya ada di nomor bukti.
   const editKind = editing ? cashAccounts.find((a) => a.id === editing.bankAccountId)?.kind : null;
@@ -86,7 +86,7 @@ export function CashEntryPanel({ cashAccounts, defaultCashId, inAccounts, outAcc
       const input = {
         direction: f.direction, bankAccountId: f.bankAccountId, dateKey: f.dateKey, description: f.description, reference: f.reference, rate: isFx ? rateNum : null,
         rows: rows.map((r) => ({ counterAccountId: r.counterAccountId, amount: Number(r.amount), description: r.description })),
-        taxRows: f.direction === "OUT" ? taxRows.map((r) => ({ kind: r.kind, amount: Number(r.amount), description: r.description })) : [],
+        taxRows: taxRows.map((r) => ({ kind: r.kind, amount: Number(r.amount), description: r.description })),
       };
       const res = editing ? await updateCashEntryAction(editing.id, input) : await createCashEntryAction(input);
       if (res.ok) { toast.success(editing ? "Transaksi diperbarui. Nomor urut bukti tetap." : `${LABEL[f.direction]} dicatat.`); setOpen(false); setEditing(null); setF(blank); setRows([newRow()]); setTaxRows([]); router.replace("/accounting/cash-entry"); router.refresh(); }
@@ -154,11 +154,10 @@ export function CashEntryPanel({ cashAccounts, defaultCashId, inAccounts, outAcc
                 </div>
                 {isFx && <p className="text-xs text-muted-foreground">Dicatat di buku: {formatIDR(Math.round(total * rateNum * 100) / 100)}</p>}
               </div>
-              {f.direction === "OUT" && (
-                <div className="sm:col-span-2">
-                  <TaxRowsEditor rows={taxRows} onChange={setTaxRows} base={total} format={(n) => (isFx ? formatMoney(n, cur, 2) : formatIDR(n))} />
-                </div>
-              )}
+              {/* Baris pajak di kedua arah; jenis dan sisinya mengikuti arah (penerimaan: PPN Keluaran Kredit, PPh 23 Debet). */}
+              <div className="sm:col-span-2">
+                <TaxRowsEditor key={f.direction} flow={f.direction} rows={taxRows} onChange={setTaxRows} base={total} format={(n) => (isFx ? formatMoney(n, cur, 2) : formatIDR(n))} />
+              </div>
               <div className="space-y-1.5 sm:col-span-2"><Label>Referensi (opsional)</Label><Input value={f.reference} onChange={(e) => set({ reference: e.target.value })} placeholder="No. mutasi rekening koran" /></div>
             </div>
             <DialogFooter>
