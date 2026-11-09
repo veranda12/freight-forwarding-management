@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { requireCan } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
-import { can } from "@/lib/rbac";
 import { getLockKey } from "@/lib/period-lock";
 import { cashAccountOptions } from "@/lib/cash-accounts";
 import { billsForVoucher, invoicesForVoucher } from "@/lib/doc-vouchers";
@@ -14,8 +13,8 @@ import { DocVoucherBuilder } from "./doc-voucher-builder";
 export const dynamic = "force-dynamic";
 
 const TABS = [
-  { key: "invoice", label: "Invoice", hint: "Centang baris invoice (mis. per job). Voucher sekaligus mencatat penerimaan dari customer" },
-  { key: "bill", label: "Vendor Bill", hint: "Centang baris bill (mis. per job). Voucher sekaligus mencatat pembayaran ke vendor" },
+  { key: "invoice", label: "Invoice", hint: "Centang baris invoice (mis. per job). Voucher penerimaan hanya catatan: tanpa jurnal, status invoice tidak berubah" },
+  { key: "bill", label: "Vendor Bill", hint: "Centang baris bill (mis. per job). Voucher pengeluaran hanya catatan: tanpa jurnal, status bill tidak berubah" },
   { key: "job", label: "Biaya job", hint: "Biaya job tanpa tagihan vendor (nota Ops). Voucher terbit dulu, lalu dibayar" },
 ] as const;
 type Tab = (typeof TABS)[number]["key"];
@@ -27,7 +26,7 @@ const one = (sp: Params, k: string) => {
 };
 
 export default async function NewVoucherPage({ searchParams }: { searchParams: Promise<Params> }) {
-  const user = await requireCan("vouchers", "write", { redirectTo: "/vouchers" });
+  await requireCan("vouchers", "write", { redirectTo: "/vouchers" });
   const sp = await searchParams;
   const invoiceId = one(sp, "invoice") || null;
   const billId = one(sp, "bill") || null;
@@ -59,7 +58,6 @@ export default async function NewVoucherPage({ searchParams }: { searchParams: P
           focusId={tab === "invoice" ? invoiceId : billId}
           q={q} today={today} lockKey={lockKey}
           {...await cashOptions(tab === "invoice" ? "receipt" : "payment")}
-          canPay={can(user.role, "payments", "write")}
         />
       )}
     </div>

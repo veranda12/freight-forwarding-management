@@ -47,8 +47,8 @@ export default async function BillDetail({ params }: { params: Promise<{ id: str
   const defaultPaymentRate = isFx ? await latestRate(prisma, bill.currency, new Date().toISOString().slice(0, 10)) : 1;
   const payable = bill.status !== "PAID" && bill.status !== "CANCELLED";
   const vouchers = await vouchersOfDoc(prisma, { billId: bill.id });
-  // Voucher bill sekaligus mencatat pembayaran: hanya bill IDR yang masih punya sisa.
-  const canVoucher = canPay && can(user.role, "vouchers", "write") && !isFx && payable && outstanding > 0.5;
+  // Voucher bill hanya catatan (tanpa jurnal): bill IDR yang tidak dibatalkan, lunas atau belum.
+  const canVoucher = can(user.role, "vouchers", "write") && !isFx && bill.status !== "CANCELLED";
   const cash = await cashAccountOptions(prisma, "payment");
   const jobs = [...new Map(bill.lines.flatMap((l) => (l.job ? [[l.job.id, l.job] as const] : []))).values()];
   if (jobs.length === 0 && bill.job) jobs.push({ ...bill.job, hblNo: null, mblNo: null });
@@ -151,7 +151,7 @@ export default async function BillDetail({ params }: { params: Promise<{ id: str
               </CardContent>
             </Card>
           )}
-          <DocVouchersCard vouchers={vouchers} settled={bill.status === "PAID"} />
+          <DocVouchersCard vouchers={vouchers} />
           {journal && (
             <Card>
               <CardHeader><CardTitle className="text-base">Jurnal {journal.number}</CardTitle></CardHeader>

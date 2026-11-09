@@ -69,7 +69,7 @@ export async function payVoucher(db: PrismaClient, voucherId: string, input: Vou
       include: { lines: { include: { chargeCode: true } }, taxLines: { orderBy: { sortOrder: "asc" } }, job: { select: { number: true } } },
     });
     if (!voucher) throw new Error("Voucher tidak ditemukan.");
-    if (voucher.kind !== "JOB") throw new Error("Voucher invoice/bill sudah tercatat sebagai pembayaran saat dibuat.");
+    if (voucher.kind !== "JOB") throw new Error("Voucher invoice/bill hanya catatan. Pembayarannya dicatat lewat Catat Pembayaran / Bayar di dokumennya.");
     if (voucher.status !== "ISSUED") throw new Error(voucher.status === "PAID" ? "Voucher sudah dibayar." : "Voucher sudah dibatalkan.");
     const cash = await resolveCashAccount(tx, input.bankAccountId, "payment");
     assertCashCurrency(cash, "IDR", "pembayaran voucher");
@@ -104,7 +104,10 @@ export async function payVoucher(db: PrismaClient, voucherId: string, input: Vou
 }
 
 /**
- * Batalkan voucher yang belum dibayar. Nomornya tidak dipakai ulang, baris biaya terbuka lagi.
+ * Batalkan voucher yang belum punya jurnal. Nomornya tidak dipakai ulang, baris terbuka lagi.
+ * - Voucher biaya job: hanya selama belum dibayar; baris biaya dilepas.
+ * - Voucher invoice/bill (dokumen saja): baris invoice/bill dilepas supaya bisa masuk voucher baru.
+ *   Voucher invoice/bill lama yang sudah mencatat pembayaran tidak bisa dibatalkan di sini.
  * Tetap boleh di periode terkunci: belum ada jurnal, dan biaya voucher lama yang tak jadi dibayar harus bisa dilepas.
  */
 export async function cancelVoucher(db: PrismaClient, voucherId: string, reason: string) {
@@ -113,11 +116,12 @@ export async function cancelVoucher(db: PrismaClient, voucherId: string, reason:
   return db.$transaction(async (tx) => {
     const voucher = await tx.voucher.findUnique({ where: { id: voucherId } });
     if (!voucher) throw new Error("Voucher tidak ditemukan.");
-    if (voucher.kind !== "JOB") throw new Error("Voucher invoice/bill sudah tercatat sebagai pembayaran. Koreksi lewat Jurnal Umum.");
+    if (voucher.kind !== "JOB" && voucher.paymentId) throw new Error("Voucher ini sudah mencatat pembayaran. Koreksi lewat Jurnal Umum.");
     if (voucher.status === "PAID") throw new Error("Voucher sudah dibayar. Koreksi lewat Jurnal Umum.");
     if (voucher.status === "CANCELLED") throw new Error("Voucher sudah dibatalkan.");
-    await tx.costingLine.updateMany({ where: { voucherId }, data: { voucherId: null } });
+    if (voucher.kind === "JOB") await tx.costingLine.updateMany({ where: { voucherId }, data: { voucherId: null } });
+    else await tx.voucherDocLine.deleteMany({ where: { voucherId } });
     await tx.voucher.update({ where: { id: voucherId }, data: { status: "CANCELLED", cancelReason: why } });
-    return { jobId: voucher.jobId, number: voucher.number };
+    return { jobId: voucher.jobId, invoiceId: voucher.invoiceId, billId: voucher.billId, number: voucher.number };
   });
 }

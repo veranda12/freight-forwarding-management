@@ -9,19 +9,18 @@ import { proofFormBox } from "@/lib/proof-forms";
 import { ACC } from "@/lib/coa";
 import { TAX_ROW_ACCOUNT } from "@/lib/tax-rows";
 import { docLineJobs } from "@/lib/doc-vouchers";
+import { billLineAccount, docLineLabel, docVoucherRows, invoiceLineAccount } from "@/lib/doc-voucher-rows";
 
 export const runtime = "nodejs";
 
 const METHOD: Record<string, string> = { TRANSFER: "Transfer", CASH: "Tunai", CHEQUE: "Cek/Giro", CLEARING: "Kliring" };
-// Keterangan baris: nama charge (+ keterangan bila bukan sekadar nama/kode charge) dan job-nya.
-const withJob = (cc: { code: string; name: string }, desc: string | null, job: string | null | undefined) =>
-  [desc && desc !== cc.name && desc !== cc.code ? `${cc.name}: ${desc}` : cc.name, job].filter(Boolean).join(" – ");
+// Catatan baris: keterangan bila bukan sekadar nama/kode charge.
+const noteOf = (cc: { code: string; name: string }, desc: string | null) => (desc && desc !== cc.name && desc !== cc.code ? desc : null);
 
 /**
- * Cetak voucher dalam format formulir SOP.
+ * Cetak voucher (Receipt / Payment Voucher).
  * - Voucher biaya job: biaya dan PPN di Debet, PPh dan nilai dibayar di Kredit.
- * - Voucher bill (pengeluaran): beban per baris (dengan job) dan PPN di Debet, PPh dan kas/bank di Kredit.
- * - Voucher invoice (penerimaan): kas/bank dan potongan di Debet, pendapatan per baris (dengan job) dan PPN di Kredit.
+ * - Voucher bill / invoice: baris dari `docVoucherRows` (akun COA charge + rekening), voucher ini tidak punya jurnal.
  */
 export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const session = await auth();
@@ -43,7 +42,6 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
         },
         orderBy: { id: "asc" },
       },
-      payment: { select: { amount: true, journalEntryId: true } },
     },
   });
   if (!v) return NextResponse.json({ error: "voucher not found" }, { status: 404 });
@@ -58,44 +56,35 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
   let info: [string, string][];
   let form: "VC" | "VM" = "VC";
 
-  if (v.kind === "BILL" && v.bill) {
+  if ((v.kind === "BILL" && v.bill) || (v.kind === "INVOICE" && v.invoice)) {
+    // Voucher invoice/bill: baris Kode COA dari akun charge tiap baris + rekening, sama dengan pratinjau di form.
+    const isBill = v.kind === "BILL";
+    const doc = (isBill ? v.bill : v.invoice)!;
+    const head = doc.job?.number ?? null;
+    const lines = v.docLines.flatMap((d) => {
+      if (d.billLine) {
+        const l = d.billLine;
+        return [{ label: docLineLabel(`${l.chargeCode.code} ${l.chargeCode.name}`, noteOf(l.chargeCode, l.description), l.job?.number ?? head), account: billLineAccount(l), amount: Number(d.amount) }];
+      }
+      if (d.invoiceLine) {
+        const l = d.invoiceLine;
+        return [{ label: docLineLabel(`${l.chargeCode.code} ${l.chargeCode.name}`, noteOf(l.chargeCode, l.description), l.job?.number ?? head), account: invoiceLineAccount(l), amount: Number(d.amount) }];
+      }
+      return [];
+    });
     const b = v.bill;
+    const tax = v.carriesTax
+      ? { ppn: Number(doc.ppnAmount), pph23: b ? Number(b.pph23Amount) : 0, pph26: b ? Number(b.pph26Amount) : 0 }
+      : { ppn: 0, pph23: 0, pph26: 0 };
+    rows = docVoucherRows({ kind: isBill ? "BILL" : "INVOICE", lines, party: v.payee, bankCode: bank?.coaAccount.code ?? "", docNumber: doc.number, ...tax });
+    if (!isBill) form = "VM";
     const jobs = docLineJobs(v);
-    rows = [
-      ...v.docLines.flatMap((d) => (d.billLine ? [{
-        account: d.billLine.chargeCode.asReceipt ? ACC.REIMBURSE : d.billLine.chargeCode.expenseAccount?.code ?? ACC.EXP_OTHER,
-        description: withJob(d.billLine.chargeCode, d.billLine.description, d.billLine.job?.number ?? b.job?.number), debit: Number(d.amount), credit: 0,
-      }] : [])),
-      ...(v.carriesTax && Number(b.ppnAmount) > 0 ? [{ account: ACC.PPN_IN, description: `PPN Masukan ${b.number}`, debit: Number(b.ppnAmount), credit: 0 }] : []),
-      ...(v.carriesTax && Number(b.pph23Amount) > 0 ? [{ account: ACC.PPH23, description: `PPh 23 dipotong ${b.vendor.name}`, debit: 0, credit: Number(b.pph23Amount) }] : []),
-      ...(v.carriesTax && Number(b.pph26Amount) > 0 ? [{ account: ACC.PPH26, description: `PPh 26 dipotong ${b.vendor.name}`, debit: 0, credit: Number(b.pph26Amount) }] : []),
-      { account: bank?.coaAccount.code ?? "", description: `Dibayar kepada ${v.payee}`, debit: 0, credit: Number(v.total) },
-    ];
     info = [
-      ["Dibayar kepada", v.payee], ["No. Bill", b.vendorRef ? `${b.number} (${b.vendorRef})` : b.number],
-      ["Job", jobs || "-"], ["No. Bukti Bayar", `${v.proofNumber ?? "-"} (${method})`],
-      ["Status bill", b.status === "PAID" ? "Lunas" : "Belum lunas"], ...extra,
-    ];
-  } else if (v.kind === "INVOICE" && v.invoice) {
-    form = "VM";
-    const inv = v.invoice;
-    const jobs = docLineJobs(v);
-    // Potongan (PPh 23 customer, admin bank, lain) dibaca dari jurnal penerimaannya: baris Debet selain kas/bank.
-    const deductions = v.payment?.journalEntryId
-      ? await prisma.journalLine.findMany({ where: { entryId: v.payment.journalEntryId, debit: { gt: 0 }, accountId: { not: bank?.coaAccountId ?? "" } }, include: { account: { select: { code: true } } } })
-      : [];
-    rows = [
-      { account: bank?.coaAccount.code ?? "", description: `Diterima dari ${v.payee}`, debit: Number(v.payment?.amount ?? 0), credit: 0 },
-      ...deductions.map((l) => ({ account: l.account.code, description: l.description ?? "Potongan", debit: Number(l.debit), credit: 0 })),
-      ...v.docLines.flatMap((d) => (d.invoiceLine ? [{
-        account: d.invoiceLine.asReceipt ? ACC.REIMBURSE : d.invoiceLine.chargeCode.revenueAccount?.code ?? ACC.REV_OTHER,
-        description: withJob(d.invoiceLine.chargeCode, d.invoiceLine.description, d.invoiceLine.job?.number ?? inv.job?.number), debit: 0, credit: Number(d.amount),
-      }] : [])),
-      ...(v.carriesTax && Number(inv.ppnAmount) > 0 ? [{ account: ACC.PPN_OUT, description: `PPN Keluaran ${inv.number}`, debit: 0, credit: Number(inv.ppnAmount) }] : []),
-    ];
-    info = [
-      ["Diterima dari", v.payee], ["No. Invoice", inv.number], ["Job", jobs || "-"],
-      ["No. Bukti Terima", `${v.proofNumber ?? "-"} (${method})`], ["Status invoice", inv.status === "PAID" ? "Lunas" : "Belum lunas"], ...extra,
+      [isBill ? "Dibayar kepada" : "Diterima dari", v.payee],
+      [isBill ? "No. Bill" : "No. Invoice", b?.vendorRef ? `${doc.number} (${b.vendorRef})` : doc.number],
+      ...(jobs ? [["Job", jobs] as [string, string]] : []),
+      ...(v.reference ? [["Referensi", v.reference] as [string, string]] : []),
+      ...extra,
     ];
   } else {
     const bl = v.job ? [v.job.hblNo, v.job.mblNo, v.job.hawbNo, v.job.mawbNo].filter(Boolean).join(" / ") : "";
@@ -120,7 +109,7 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
 
   const buffer = await renderToBuffer(
     <ProofDocument doc={{
-      form, number: v.number, date: v.date, account: v.status === "PAID" ? cashAccountLine(bank) : null,
+      form, number: v.number, date: v.date, account: cashAccountLine(bank), cancelled: v.status === "CANCELLED",
       info, rows, box: await proofFormBox(prisma, form), company: await proofCompany(prisma),
     }} />
   );
