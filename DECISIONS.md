@@ -31,29 +31,47 @@ Format: **Keputusan** — _alasan_.
   pembayaran"; pajak tidak disebar ke baris biaya._ Voucher menyimpan baris pajaknya di `VoucherTaxLine`; Jurnal
   Pengeluaran langsung di jurnalnya. Total voucher = biaya + PPN − PPh = nilai yang dibayar.
 - **Reimburse tidak pernah kena pajak**: pajak ditolak bila tidak ada biaya non-reimburse, dan PPN/PPh tidak boleh
-  melebihi biaya non-reimburse. Jurnal Penerimaan tidak menerima baris pajak.
-- **Rekap pajak** membaca baris pajak voucher dan Jurnal Pengeluaran dari jurnalnya (pihak = keterangan baris, DPP
-  tidak tercatat), sehingga daftar rekap sama dengan saldo akun pajak.
+  melebihi biaya non-reimburse.
+- **Jurnal Penerimaan juga punya baris pajak, sisinya dibalik** (2026-11-09): PPN Keluaran di Kredit (2100), PPh 23 yang
+  dipotong customer di Debet (1450 PPh 23 dibayar dimuka). Bank = penerimaan + PPN − PPh. _Andhika sempat memilih "sama
+  persis dengan pengeluaran"; diubah sesudah contoh angka (jasa 10 jt + PPN 1,1 jt − PPh 200 rb: bank 9,1 jt vs 10,9 jt
+  dan PPN tercatat sebagai PPN Masukan)._ Jenis pajak dibatasi per arah (`TAX_KINDS_BY_FLOW`); voucher biaya job tetap
+  hanya jenis pengeluaran, sehingga enum `TaxRowKind` di database tidak berubah.
+- **Rekap pajak** membaca baris pajak voucher, Jurnal Pengeluaran, dan Jurnal Penerimaan (PPN Keluaran) dari jurnalnya
+  (pihak = keterangan baris, DPP tidak tercatat), sehingga daftar rekap sama dengan saldo akun pajak.
 - **Vendor Bill per job**: PPN/PPh bill tidak disebar proporsional; tampil sebagai baris sendiri di job kepala bill.
-- **Cetak format formulir SOP** (A5 lanskap) untuk bukti kas/bank, jurnal, dan voucher, dengan kotak Doc. No /
-  Revision / Effective Date per formulir (`ProofForm`, diisi Admin di Setting Perusahaan). Nilainya milik SLG,
-  jadi tidak di-seed. Jurnal bernomor `JE/…` (transfer, setor pajak, aset, armada) dicetak dengan formulir Jurnal Umum.
+- **Cetak (diperbarui 2026-11-09, template client baru)**: semua bukti uang masuk/keluar (BM/BK/KM/KK dari Jurnal
+  Penerimaan/Pengeluaran, Catat Pembayaran, Bayar) dan semua voucher memakai template **RECEIPT VOUCHER (Voucher
+  Penerimaan) / PAYMENT VOUCHER (Voucher Pengeluaran)**: kop logo + nama PT (alamat di bawahnya, karena belum ada kolom
+  tagline), No. Voucher = nomor SLG (format RV-YYYY-MMDD-NNN dari contoh client ditolak), tanggal, baris rekening
+  `BCA - 0881234567`, tabel Keterangan | Kode COA | Debit (Rp) | Kredit (Rp) | Total, dan tanda tangan Diajukan
+  (Operasional) / Diketahui (Manager Ops) / Disetujui (Direktur) / Diterima (Finance) untuk keduanya. **Jurnal Umum
+  tetap format SOP** (A5 lanskap) dengan kotak Doc. No / Revision / Effective Date (`ProofForm`; di Setting Perusahaan
+  kini hanya baris JU, isian formulir lain tetap tersimpan tetapi tidak tercetak). Nilainya milik SLG, jadi tidak
+  di-seed. Jurnal bernomor `JE/…` (transfer, setor pajak, aset, armada) dicetak dengan formulir Jurnal Umum.
 
-## Voucher dari invoice dan vendor bill (2026-11-09)
+## Voucher dari invoice dan vendor bill (2026-11-09, direvisi hari yang sama)
 
-- **Voucher selalu menempel** ke invoice, vendor bill, atau biaya job (`VoucherKind`); tidak ada voucher berdiri sendiri.
-  _Keputusan client._
-- **Voucher invoice/bill = pembayaran**: menyimpan voucher sekaligus mencatat penerimaan (BM/KM) atau pembayaran (BK/KK)
-  lewat `recordReceiptTx` / `recordVendorPaymentTx` dalam satu transaksi, sehingga voucher dan pembayarannya tidak bisa
-  terpisah. Tidak ada status Terbit/Bayar; status yang tampil = status pelunasan dokumen (Lunas / Belum lunas).
-- **Isi voucher = baris yang dicentang** (mis. per job); satu baris hanya di satu voucher (unique `VoucherDocLine`, aman
-  terhadap dua penyimpanan bersamaan). Pajak dokumen (PPN, PPh bill) ikut **di voucher yang memuat baris pertama
-  dokumen**, jadi Σ voucher = nilai dokumen. Potongan saat terima invoice seperti Catat Pembayaran.
-- **Dibatasi**: hanya dokumen IDR; nilai voucher ≤ sisa dokumen (pembayaran lewat tombol lama bisa membuat voucher baris
-  sisanya ditolak); voucher invoice/bill tidak bisa dibatalkan (sama dengan pembayaran lain), koreksi lewat Jurnal Umum.
-- **Voucher biaya job tetap** seperti sebelumnya (terbit lalu dibayar). Tombol Catat Pembayaran / Bayar tetap ada.
+- **Istilah client**: *voucher job* = voucher dari Invoice / Vendor Bill (plus tab Biaya job); *voucher non-job* =
+  Jurnal Penerimaan & Pengeluaran (alurnya tetap, langsung terjurnal). Tidak ada voucher berdiri sendiri (`VoucherKind`).
+- **Voucher invoice/bill = dokumen pencatatan saja** (revisi; versi pertama mencatat pembayaran sekaligus): tanpa
+  jurnal, tanpa pembayaran, tanpa status Lunas/Belum lunas, dan status invoice/bill tidak berubah. Pelunasan tetap lewat
+  Catat Pembayaran / Bayar. _Client: "gak perlu ada status, tok hanya sebagai pencatatan saja"._ Jurnal kas di voucher
+  akan mencatat uang dua kali bila dokumennya juga dibayar lewat Bayar, jadi voucher tidak memposting apa pun.
+- **Tabel Kode COA otomatis** (`docVoucherRows`, satu fungsi untuk pratinjau form dan cetakan): invoice = Bank Debit,
+  pendapatan per baris (akun charge; titipan 1350 untuk reimburse; 4900 bila kosong) dan PPN Keluaran Kredit; bill =
+  biaya per baris dan PPN Masukan Debit, PPh 23/26 dan Bank Kredit.
+- **Isi voucher = baris yang dicentang** (mis. per job); satu baris hanya di satu voucher aktif (unique `VoucherDocLine`,
+  aman terhadap dua penyimpanan bersamaan). Pajak dokumen ikut **di voucher yang memuat baris pertama dokumen**, jadi
+  Σ voucher = nilai dokumen.
+- **Dibatasi**: dokumen IDR yang tidak dibatalkan (lunas atau belum), rekening IDR, periode tidak terkunci.
+- **Batalkan dengan alasan** dari daftar Voucher: baris dokumen dilepas (`VoucherDocLine` dihapus) supaya bisa masuk
+  voucher baru; nomor tidak dipakai ulang. Voucher invoice/bill versi pertama yang sudah mencatat pembayaran
+  (`paymentId`) tidak bisa dibatalkan; koreksi lewat Jurnal Umum.
+- **Voucher biaya job tetap** seperti sebelumnya (terbit lalu dibayar).
+- **Menu "Buat Voucher"** di grup Finance sesudah Jurnal Penerimaan & Pengeluaran, dan tombol di halaman itu
+  (permintaan client: buat voucher dari menu accounting).
 - Baris invoice/bill tanpa job (data lama) **ikut job kepala dokumen** di form, kartu, daftar, dan cetakan.
-- Cetak: Voucher Pengeluaran (bill, formulir VC) dan Voucher Penerimaan (invoice, formulir baru VM) dalam format SOP.
 
 ## Import Excel master Customer, Vendor, Commodity (2026-11-09)
 

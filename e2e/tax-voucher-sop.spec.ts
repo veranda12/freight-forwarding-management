@@ -2,7 +2,8 @@ import { test, expect, type Browser, type Page } from "@playwright/test";
 import { Prisma, PrismaClient } from "@prisma/client";
 
 /**
- * E2E baris pajak (Jurnal Pengeluaran & voucher job), nomor bukti format client, cetak SOP, dan pengaturan formulir.
+ * E2E baris pajak (Jurnal Pengeluaran, Jurnal Penerimaan, voucher job), nomor bukti format client, cetak, dan pengaturan
+ * formulir Jurnal Umum.
  * Memeriksa UI sekaligus database: DATABASE_URL wajib DB uji yang sama dengan server (ditolak bila ffms / ffms_pgcheck).
  */
 
@@ -82,13 +83,47 @@ test.describe("Baris pajak, nomor bukti, dan cetak SOP", () => {
     await expect(page.getByText("PPh 23 Bengkel E2E – Jakarta").first()).toBeVisible();
   });
 
-  test("Jurnal Penerimaan tidak punya baris pajak", async ({ page }) => {
+  test("Jurnal Penerimaan dengan PPN Keluaran (Kredit) dan PPh 23 dipotong customer (Debet): bank = jasa + PPN - PPh", async ({ page }) => {
+    const desc = `E2E jasa konsultasi ${Date.now()}`;
     await login(page, "finance@demo.com");
     await page.goto("/accounting/cash-entry");
     await page.getByRole("button", { name: "Catat transaksi" }).click();
     const dialog = page.getByRole("dialog");
     await dialog.getByRole("button", { name: /Jurnal Penerimaan/ }).click();
-    await expect(dialog.getByRole("button", { name: "Tambah baris pajak" })).toHaveCount(0);
+    await dialog.getByPlaceholder("Bunga jasa giro Oktober").fill(desc);
+    await dialog.getByRole("combobox", { name: "Akun lawan" }).click();
+    await page.getByPlaceholder("Ketik kode atau nama…").fill("4900");
+    await page.getByRole("button", { name: /^4900 · / }).click();
+    await dialog.getByLabel(/^Nominal /).fill("10000000");
+
+    await dialog.getByRole("button", { name: "Tambah baris pajak" }).click();
+    await dialog.getByRole("combobox", { name: "Jenis pajak" }).click();
+    // Pilihan penerimaan saja: PPN Keluaran (Kredit) dan PPh 23 dipotong customer (Debet)
+    await expect(page.getByRole("option")).toHaveCount(2);
+    await page.getByRole("option", { name: "PPN Keluaran (Kredit)" }).click();
+    await dialog.getByLabel("Nominal pajak").fill("1100000");
+    await dialog.getByRole("button", { name: "Tambah baris pajak" }).click();
+    await dialog.getByRole("combobox", { name: "Jenis pajak" }).nth(1).click();
+    await page.getByRole("option", { name: "PPh 23 dipotong customer (Debet)" }).click();
+    await dialog.getByLabel("Nominal pajak").nth(1).fill("200000");
+    await expect(dialog.getByText("Diterima", { exact: true })).toBeVisible();
+    await expect(dialog.getByText(rp("10.900.000"))).toBeVisible();
+    await dialog.getByRole("button", { name: "Simpan" }).click();
+    await expect(page.getByText("Jurnal Penerimaan dicatat.")).toBeVisible();
+
+    const row = page.locator("main tr", { hasText: desc }).first();
+    await expect(row).toContainText(rp("10.900.000"));
+    const href = (await row.getByRole("link", { name: "Print" }).getAttribute("href"))!;
+    const id = href.split("/")[4];
+    const e = await db.journalEntry.findUniqueOrThrow({ where: { id }, include: { lines: { include: { account: true } } } });
+    expect(e.number).toMatch(/^SLG\/(BM|KM)\//);
+    expect(e.lines.find((l) => l.account.code === "2100")?.credit.toNumber()).toBe(1_100_000);
+    expect(e.lines.find((l) => l.account.code === "1450")?.debit.toNumber()).toBe(200_000);
+    expect(e.lines.find((l) => l.account.code === "4900")?.credit.toNumber()).toBe(10_000_000);
+    expect((await page.request.get(href)).status()).toBe(200);
+
+    await page.goto(`/accounting/cash-entry?edit=${id}`);
+    await expect(page.getByRole("dialog").getByLabel("Nominal pajak")).toHaveCount(2);
   });
 
   test("Voucher job: reimburse saja tidak bisa diberi pajak; biaya + PPN - PPh = nilai dibayar", async ({ page }) => {
@@ -141,14 +176,16 @@ test.describe("Baris pajak, nomor bukti, dan cetak SOP", () => {
     await admin.page.goto("/settings");
     const card = admin.page.locator("main").getByText("Formulir bukti (SOP)").locator("xpath=ancestor::div[contains(@class,'rounded')][1]");
     await card.getByRole("button", { name: "Ubah" }).click();
-    await admin.page.getByLabel("Doc. No Bukti Bank Keluar").fill(docNo);
-    await admin.page.getByLabel("Revision Bukti Bank Keluar").fill("03");
-    await admin.page.getByLabel("Effective Date Bukti Bank Keluar").fill("2026-11-01");
+    // Hanya formulir Jurnal Umum yang tampil; bukti kas/bank dan voucher memakai template Receipt/Payment Voucher.
+    await expect(admin.page.getByLabel("Doc. No Bukti Bank Keluar")).toHaveCount(0);
+    await admin.page.getByLabel("Doc. No Jurnal Umum / Bukti Jurnal").fill(docNo);
+    await admin.page.getByLabel("Revision Jurnal Umum / Bukti Jurnal").fill("03");
+    await admin.page.getByLabel("Effective Date Jurnal Umum / Bukti Jurnal").fill("2026-11-01");
     const req = admin.page.waitForRequest((r) => r.method() === "POST" && !!r.headers()["next-action"]);
     await card.getByRole("button", { name: "Simpan" }).click();
     const sent = await req;
     await expect(admin.page.getByText("Formulir bukti disimpan.")).toBeVisible();
-    const saved = await db.proofForm.findUniqueOrThrow({ where: { code: "BBK" } });
+    const saved = await db.proofForm.findUniqueOrThrow({ where: { code: "JU" } });
     expect([saved.docNo, saved.revision, saved.effectiveDate?.toISOString().slice(0, 10)]).toEqual([docNo, "03", "2026-11-01"]);
 
     const finance = await session(browser, "finance@demo.com");
@@ -162,7 +199,7 @@ test.describe("Baris pajak, nomor bukti, dan cetak SOP", () => {
       return { status: r.status, text: await r.text() };
     }, { id: sent.headers()["next-action"], path: new URL(sent.url()).pathname, body });
     expect(res.status >= 400 || /"ok":false/.test(res.text) || /"digest"/.test(res.text), `harus ditolak: ${res.status} ${res.text.slice(0, 120)}`).toBe(true);
-    expect((await db.proofForm.findUniqueOrThrow({ where: { code: "BBK" } })).docNo).toBe(docNo);
+    expect((await db.proofForm.findUniqueOrThrow({ where: { code: "JU" } })).docNo).toBe(docNo);
 
     await admin.ctx.close();
     await finance.ctx.close();

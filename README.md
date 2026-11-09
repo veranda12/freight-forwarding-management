@@ -65,8 +65,9 @@ RBAC ditegakkan di server (`requireCan`/`assertCan`) — bukan sekadar menyembun
    - **Costing**: profitability per job (margin diberi warna; merah bila <10%).
    - **Invoice (AR)**: buka invoice → subtotal, PPN 11%, jurnal otomatis, alokasi pembayaran.
    - **Vendor Bill (AP)**: PPN/PPh diisi sesuai tagihan vendor; menu Vendor Bill per job menampilkan pajak bill sebagai baris sendiri.
-   - **Voucher dari invoice / vendor bill**: dari detail dokumen klik **Buat Voucher**, centang baris (mis. per job), simpan → pembayarannya langsung tercatat; status Lunas / Belum lunas. Form Buat Voucher punya tab Invoice, Vendor Bill, dan Biaya job.
-   - **Voucher** dan **Jurnal Pengeluaran**: tambah **baris pajak** (PPN masukan di Debet, PPh 23/26 di Kredit); biaya reimburse tidak dikenai pajak. Cetak bukti dalam format formulir SOP (nomor `SLG/BK/26/11/06/0001`).
+   - **Voucher dari invoice / vendor bill**: dari detail dokumen (atau menu **Buat Voucher**) centang baris (mis. per job) → tabel Kode COA / Debit / Kredit terisi otomatis → simpan. Voucher hanya catatan: tanpa jurnal, status invoice/bill tidak berubah (pelunasan tetap lewat Catat Pembayaran / Bayar). Bisa dibatalkan dari daftar Voucher. Form Buat Voucher punya tab Invoice, Vendor Bill, dan Biaya job.
+   - **Voucher biaya job**, **Jurnal Pengeluaran**, dan **Jurnal Penerimaan**: tambah **baris pajak**. Pengeluaran: PPN Masukan di Debet, PPh 23/26 di Kredit. Penerimaan: PPN Keluaran di Kredit, PPh 23 dipotong customer di Debet. Biaya reimburse tidak dikenai pajak.
+   - **Cetak**: bukti kas/bank dan voucher memakai template Receipt / Payment Voucher (nomor `SLG/BK/26/11/06/0001`); Jurnal Umum memakai formulir SOP.
    - **Receipt & Payment**: penerimaan/pembayaran dengan alokasi.
    - **Accounting**: **Trial Balance (balance ✓)**, **Laba Rugi**, **Neraca**, **Jurnal**. _(±4 mnt)_
 8. **Reporting**: profitability per mode, shipment per status, sales performance, **AR/AP Aging** + **Export Excel**. _(±1 mnt)_
