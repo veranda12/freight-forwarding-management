@@ -16,9 +16,11 @@ export default async function PaymentsPage() {
   const rows: PaymentRow[] = payments.map((p) => ({
     id: p.id, number: p.number, direction: p.direction, date: p.date.toISOString(),
     party: p.customer?.name ?? p.vendor?.name ?? "-", method: p.method, amount: Number(p.amount), reference: p.reference,
+    cancelled: !!p.cancelledAt,
   }));
-  const received = rows.filter((r) => r.direction === "RECEIPT").reduce((s, r) => s + r.amount, 0);
-  const paid = rows.filter((r) => r.direction === "PAYMENT").reduce((s, r) => s + r.amount, 0);
+  const active = rows.filter((r) => !r.cancelled);
+  const received = active.filter((r) => r.direction === "RECEIPT").reduce((s, r) => s + r.amount, 0);
+  const paid = active.filter((r) => r.direction === "PAYMENT").reduce((s, r) => s + r.amount, 0);
 
   return (
     <div className="space-y-6">

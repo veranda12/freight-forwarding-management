@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { cashProofCode, formatInvoiceNumber, formatProofNumber } from "../../src/lib/sequence";
-import { invoiceEditBlock, invoiceTotals } from "../../src/lib/receivables";
+import { invoiceEditBlock, invoiceTotals, receiptCancelBlock } from "../../src/lib/receivables";
 import { jobLockReason, shouldCloseJob } from "../../src/lib/job-lock";
 import { journalEditBlock } from "../../src/lib/journal";
 import { chargeLockReason } from "../../src/lib/job-charges";
@@ -37,6 +37,17 @@ describe("nilai invoice", () => {
     expect(invoiceEditBlock({ status: "UNPAID", amountPaid: 0 })).toBeNull();
     expect(invoiceEditBlock({ status: "PARTIAL", amountPaid: 10 })).toMatch(/pembayaran/);
     expect(invoiceEditBlock({ status: "CANCELLED", amountPaid: 0 })).toMatch(/dibatalkan/);
+    expect(invoiceEditBlock({ status: "OVERDUE", amountPaid: 0 })).toBeNull();
+  });
+  it("batal pelunasan: pesan untuk setiap batasan", () => {
+    const base = { direction: "RECEIPT", cancelledAt: null, date: new Date("2026-11-05T05:00:00Z"), lockKey: null, reconciled: false, reconciledAt: null, fxRevalAfter: false };
+    expect(receiptCancelBlock(base)).toBeNull();
+    expect(receiptCancelBlock({ ...base, direction: "PAYMENT" })).toMatch(/pelunasan invoice/);
+    expect(receiptCancelBlock({ ...base, cancelledAt: new Date() })).toMatch(/sudah dibatalkan/);
+    expect(receiptCancelBlock({ ...base, reconciled: true, reconciledAt: new Date("2026-11-07T05:00:00Z") })).toBe("Pembayaran ini sudah direkonsiliasi pada 07 Nov 2026. Buka dulu rekonsiliasinya di menu Rekonsiliasi Bank.");
+    expect(receiptCancelBlock({ ...base, lockKey: "2026-11-30" })).toBe("Periode November 2026 sudah tutup buku. Buka dulu periodenya di menu Tutup Buku.");
+    expect(receiptCancelBlock({ ...base, lockKey: "2026-10-31" })).toBeNull();
+    expect(receiptCancelBlock({ ...base, fxRevalAfter: true })).toMatch(/revaluasi/);
   });
 });
 

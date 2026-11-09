@@ -8,6 +8,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Breadcrumbs } from "@/components/breadcrumbs";
+import { receiptCancelState } from "@/lib/receivables";
+import { CancelReceiptButton } from "../cancel-receipt-button";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +17,7 @@ const METHOD_LABEL: Record<string, string> = { TRANSFER: "Transfer", CASH: "Tuna
 
 export default async function PaymentDetail({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  await requireCan("payments", "read");
+  const user = await requireCan("payments", "read");
 
   const pay = await prisma.payment.findUnique({
     where: { id },
@@ -23,6 +25,7 @@ export default async function PaymentDetail({ params }: { params: Promise<{ id: 
       customer: { select: { name: true, code: true } },
       vendor: { select: { name: true, code: true } },
       bankAccount: { select: { name: true, accountNo: true, kind: true } },
+      cancelledBy: { select: { name: true } },
       allocations: {
         include: {
           invoice: { select: { id: true, number: true } },
@@ -34,8 +37,9 @@ export default async function PaymentDetail({ params }: { params: Promise<{ id: 
   if (!pay) notFound();
 
   const journal = pay.journalEntryId
-    ? await prisma.journalEntry.findUnique({ where: { id: pay.journalEntryId }, include: { lines: { include: { account: true } } } })
+    ? await prisma.journalEntry.findUnique({ where: { id: pay.journalEntryId }, include: { lines: { include: { account: true } }, reversedBy: { include: { lines: { include: { account: true } } } } } })
     : null;
+  const cancelState = user.role === "ADMIN" && pay.direction === "RECEIPT" && !pay.cancelledAt ? await receiptCancelState(prisma, pay.id) : null;
 
   const isReceipt = pay.direction === "RECEIPT";
   const party = pay.customer ? `${pay.customer.name} (${pay.customer.code})` : pay.vendor ? `${pay.vendor.name} (${pay.vendor.code})` : "-";
@@ -47,6 +51,8 @@ export default async function PaymentDetail({ params }: { params: Promise<{ id: 
         <Breadcrumbs items={[{ label: "Receipt & Payment", href: "/payments" }, { label: pay.number }]} />
         <PageHeader title={pay.number} description={`${isReceipt ? "Penerimaan dari" : "Pembayaran ke"} ${party} · ${formatDate(pay.date)}`}>
           <Badge variant={isReceipt ? "secondary" : "outline"}>{isReceipt ? "Penerimaan" : "Pembayaran"}</Badge>
+          {pay.cancelledAt && <Badge variant="outline" className="text-destructive">BATAL</Badge>}
+          {cancelState && <CancelReceiptButton paymentId={pay.id} number={pay.number} block={cancelState.block} otherInvoices={cancelState.invoices.length > 1 ? cancelState.invoices : []} size="default" />}
         </PageHeader>
       </div>
 
@@ -99,11 +105,26 @@ export default async function PaymentDetail({ params }: { params: Promise<{ id: 
               {pay.notes && <Row label="Catatan" value={pay.notes} muted />}
             </CardContent>
           </Card>
-          {journal && (
+          {pay.cancelledAt && (
             <Card>
-              <CardHeader><CardTitle className="text-base">Jurnal {journal.number}</CardTitle></CardHeader>
+              <CardHeader><CardTitle className="text-base text-destructive">Pelunasan dibatalkan</CardTitle></CardHeader>
+              <CardContent className="space-y-2 text-sm">
+                <Row label="Tanggal batal" value={formatDate(pay.cancelledAt)} muted />
+                <Row label="Oleh" value={pay.cancelledBy?.name ?? "-"} muted />
+                <p className="text-muted-foreground">Alasan: <span className="text-foreground">{pay.cancelReason}</span></p>
+              </CardContent>
+            </Card>
+          )}
+          {[journal, journal?.reversedBy].map((j) => j && (
+            <Card key={j.id}>
+              <CardHeader>
+                <CardTitle className="text-base">
+                  <Link href={`/accounting/journal/${j.id}`} className="hover:underline">{j.isReversal ? "Jurnal pembalik" : "Jurnal"} {j.number}</Link>
+                  {j.isReversed && <Badge variant="outline" className="ml-2 text-[10px] text-destructive">BATAL</Badge>}
+                </CardTitle>
+              </CardHeader>
               <CardContent className="space-y-1.5 text-xs">
-                {journal.lines.map((l) => (
+                {j.lines.map((l) => (
                   <div key={l.id} className="flex justify-between gap-2">
                     <span className="text-muted-foreground">{l.account.code} {l.account.name}</span>
                     <span className="tabular-nums">{Number(l.debit) > 0 ? `D ${formatIDR(Number(l.debit))}` : `K ${formatIDR(Number(l.credit))}`}</span>
@@ -111,7 +132,7 @@ export default async function PaymentDetail({ params }: { params: Promise<{ id: 
                 ))}
               </CardContent>
             </Card>
-          )}
+          ))}
         </div>
       </div>
     </div>

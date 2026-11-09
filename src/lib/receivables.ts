@@ -6,6 +6,8 @@ import { normalizeDeductions, type Deductions } from "./receipt-deductions";
 import { resolveCashAccount, assertCashCurrency } from "./cash-accounts";
 import { cashProofCode, genInvoiceNumber, genProofNumber } from "./sequence";
 import { closeJobsOfInvoice } from "./job-lock";
+import { getLockKey } from "./period-lock";
+import { formatDate, TZ } from "./format";
 import { effectiveRate, IDR, latestRate } from "./fx";
 
 export type InvoiceOpts = { currency?: string; rate?: number; date?: string; dueDate?: string; notes?: string | null };
@@ -133,7 +135,8 @@ export async function createInvoiceFromJobCore(db: PrismaClient, jobId: string, 
 /** Alasan invoice tidak bisa diedit, atau null bila masih bisa. Murni. */
 export function invoiceEditBlock(inv: { status: string; amountPaid: unknown }): string | null {
   if (inv.status === "CANCELLED") return "Invoice sudah dibatalkan.";
-  if (Number(inv.amountPaid) > 0 || inv.status !== "UNPAID") return "Invoice sudah ada pembayaran, jadi tidak bisa diedit.";
+  // Overdue yang belum dibayar sama sekali tetap boleh diedit.
+  if (Number(inv.amountPaid) > 0 || inv.status === "PAID" || inv.status === "PARTIAL") return "Invoice sudah ada pembayaran, jadi tidak bisa diedit.";
   return null;
 }
 
@@ -336,5 +339,92 @@ export async function cancelInvoiceCore(db: PrismaClient, invoiceId: string, use
       if (others === 0) reopened = (await tx.costingLine.updateMany({ where: { jobId: inv.jobId, side: "SELLING", invoiceId: null }, data: { invoiced: false } })).count;
     }
     return { number: inv.number, reopened };
+  });
+}
+
+const monthLabel = (d: Date) => d.toLocaleDateString("id-ID", { month: "long", year: "numeric", timeZone: TZ });
+
+/** Alasan pelunasan tidak bisa dibatalkan, atau null bila bisa. Murni. */
+export function receiptCancelBlock(p: {
+  direction: string; cancelledAt: Date | null; date: Date; lockKey: string | null;
+  reconciled: boolean; reconciledAt: Date | null; fxRevalAfter: boolean;
+}): string | null {
+  if (p.direction !== "RECEIPT") return "Yang bisa dibatalkan di sini hanya pelunasan invoice.";
+  if (p.cancelledAt) return "Pelunasan ini sudah dibatalkan.";
+  if (p.reconciled) {
+    const when = p.reconciledAt ? ` pada ${formatDate(p.reconciledAt)}` : "";
+    return `Pembayaran ini sudah direkonsiliasi${when}. Buka dulu rekonsiliasinya di menu Rekonsiliasi Bank.`;
+  }
+  if (p.lockKey && jktKey(p.date) <= p.lockKey) return `Periode ${monthLabel(p.date)} sudah tutup buku. Buka dulu periodenya di menu Tutup Buku.`;
+  if (p.fxRevalAfter) return "Invoice valas ini sudah direvaluasi kurs setelah tanggal pelunasan, jadi pelunasannya tidak bisa dibatalkan.";
+  return null;
+}
+
+/** Data pelunasan untuk tombol Batalkan Pelunasan: alasan blokir dan invoice yang ikut terdampak. */
+export async function receiptCancelState(db: Db, paymentId: string) {
+  const pay = await db.payment.findUnique({
+    where: { id: paymentId },
+    include: { allocations: { include: { invoice: { select: { id: true, number: true, currency: true, amountPaid: true, amountPaidForeign: true, jobId: true, costingLines: { select: { jobId: true } } } } } } },
+  });
+  if (!pay) throw new Error("Pelunasan tidak ditemukan.");
+  const journal = pay.journalEntryId
+    ? await db.journalEntry.findUnique({ where: { id: pay.journalEntryId }, include: { lines: { select: { reconciledAt: true, statementLine: { select: { id: true } } } } } })
+    : null;
+  const recon = journal?.lines.filter((l) => l.reconciledAt || l.statementLine) ?? [];
+  const fx = pay.allocations.some((a) => a.invoice && a.invoice.currency !== IDR)
+    ? await db.journalEntry.count({ where: { source: "FX_REVAL", isReversed: false, isReversal: false, date: { gte: pay.date } } })
+    : 0;
+  const block = receiptCancelBlock({
+    direction: pay.direction, cancelledAt: pay.cancelledAt, date: pay.date, lockKey: await getLockKey(db),
+    reconciled: recon.length > 0, reconciledAt: recon.find((l) => l.reconciledAt)?.reconciledAt ?? null, fxRevalAfter: fx > 0,
+  });
+  const invoices = pay.allocations.flatMap((a) => (a.invoice ? [a.invoice.number] : []));
+  return { pay, block, invoices };
+}
+
+/**
+ * Batalkan pelunasan invoice (khusus Admin). Jurnal penerimaan dibalik di tanggal yang sama,
+ * pelunasan tetap tersimpan dengan tanda batal, invoice kembali belum lunas, dan job yang
+ * tertutup otomatis dibuka lagi. Nomor invoice tidak berubah; pelunasan ulang memakai nomor bukti baru.
+ */
+export async function cancelReceiptCore(db: PrismaClient, paymentId: string, reason: string, userId?: string) {
+  const why = reason.trim();
+  if (why.length < 3) throw new Error("Alasan pembatalan wajib diisi.");
+  return db.$transaction(async (tx) => {
+    const { pay, block, invoices } = await receiptCancelState(tx, paymentId);
+    if (block) throw new Error(block);
+    const marked = await tx.payment.updateMany({
+      where: { id: pay.id, cancelledAt: null },
+      data: { cancelledAt: new Date(), cancelReason: why, cancelledById: userId ?? null },
+    });
+    if (marked.count === 0) throw new Error("Pelunasan ini sudah dibatalkan.");
+    if (pay.journalEntryId) await reverseJournal(tx, pay.journalEntryId, { date: pay.date, reason: `Pelunasan dibatalkan: ${why}`, createdById: userId });
+
+    const reopened: string[] = [];
+    for (const a of pay.allocations) {
+      const inv = a.invoice;
+      if (!inv) continue;
+      const paid = Math.max(0, r2(Number(inv.amountPaid) - Number(a.amount)));
+      const paidF = Math.max(0, r2(Number(inv.amountPaidForeign) - Number(a.amountForeign)));
+      await tx.invoice.update({
+        where: { id: inv.id },
+        data: { amountPaid: new Prisma.Decimal(paid), amountPaidForeign: new Prisma.Decimal(paidF), status: paid > 0.5 ? "PARTIAL" : "UNPAID" },
+      });
+      // Job yang tertutup karena invoice ini lunas dibuka kembali supaya biaya dan invoice bisa dikoreksi.
+      const jobIds = [...new Set([...inv.costingLines.map((l) => l.jobId), ...(inv.jobId ? [inv.jobId] : [])])];
+      const closed = await tx.job.findMany({ where: { id: { in: jobIds }, status: "CLOSED" }, select: { id: true, number: true } });
+      for (const j of closed) {
+        await tx.job.update({ where: { id: j.id }, data: { status: "DELIVERED", closedAt: null } });
+        await tx.auditLog.create({ data: { entity: "Job", entityId: j.id, action: "REOPEN", summary: `Dibuka otomatis: pelunasan ${pay.number} dibatalkan`, userId: userId ?? null } });
+        reopened.push(j.number);
+      }
+    }
+    await tx.auditLog.create({
+      data: {
+        entity: "Payment", entityId: pay.id, action: "CANCEL", summary: `Pelunasan ${pay.number} dibatalkan: ${why}`, userId: userId ?? null,
+        changes: { invoices, amount: Number(pay.amount), reopenedJobs: reopened },
+      },
+    });
+    return { number: pay.number, invoices, reopened };
   });
 }

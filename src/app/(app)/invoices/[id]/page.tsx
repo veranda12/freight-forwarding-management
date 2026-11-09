@@ -7,7 +7,8 @@ import { can } from "@/lib/rbac";
 import { formatIDR, formatDate, formatNumber } from "@/lib/format";
 import { InvoiceActions } from "./invoice-actions";
 import { latestRate } from "@/lib/fx";
-import { invoiceEditBlock } from "@/lib/receivables";
+import { invoiceEditBlock, receiptCancelState } from "@/lib/receivables";
+import { CancelReceiptButton } from "../../payments/cancel-receipt-button";
 import { suggestPph23 } from "@/lib/receipt-deductions";
 import { cashAccountOptions } from "@/lib/cash-accounts";
 import { PageHeader } from "@/components/page-header";
@@ -47,6 +48,15 @@ export default async function InvoiceDetail({ params }: { params: Promise<{ id: 
   const ppnLabel = `${(Number(inv.ppnRate) * 100).toLocaleString("id-ID", { maximumFractionDigits: 2 })}%`;
   const reimburse = inv.lines.filter((l) => l.asReceipt).reduce((s, l) => s + Number(l.amount), 0);
   const canEdit = can(user.role, "invoices", "write") && !invoiceEditBlock(inv) && inv.costingLines.length > 0;
+  // Batalkan Pelunasan hanya untuk Admin, per pelunasan yang masih aktif.
+  const cancelStates = new Map<string, { block: string | null; invoices: string[] }>();
+  if (user.role === "ADMIN") {
+    for (const a of inv.allocations) {
+      if (a.payment.cancelledAt || cancelStates.has(a.payment.id)) continue;
+      const st = await receiptCancelState(prisma, a.payment.id);
+      cancelStates.set(a.payment.id, { block: st.block, invoices: st.invoices });
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -135,13 +145,22 @@ export default async function InvoiceDetail({ params }: { params: Promise<{ id: 
           {inv.allocations.length > 0 && (
             <Card>
               <CardHeader><CardTitle className="text-base">Pembayaran</CardTitle></CardHeader>
-              <CardContent className="space-y-2 text-sm">
-                {inv.allocations.map((a) => (
-                  <div key={a.id} className="flex justify-between">
-                    <Link href={`/payments/${a.payment.id}`} className="text-primary hover:underline">{a.payment.number} · {formatDate(a.payment.date)}</Link>
-                    <span className="tabular-nums">{formatIDR(Number(a.amount))}</span>
-                  </div>
-                ))}
+              <CardContent className="space-y-3 text-sm">
+                {inv.allocations.map((a) => {
+                  const st = cancelStates.get(a.payment.id);
+                  return (
+                    <div key={a.id} className="space-y-1.5">
+                      <div className="flex justify-between gap-2">
+                        <Link href={`/payments/${a.payment.id}`} className={`text-primary hover:underline ${a.payment.cancelledAt ? "line-through opacity-60" : ""}`}>{a.payment.number} · {formatDate(a.payment.date)}</Link>
+                        <span className={`tabular-nums ${a.payment.cancelledAt ? "line-through opacity-60" : ""}`}>{formatIDR(Number(a.amount))}</span>
+                      </div>
+                      {a.payment.cancelledAt && (
+                        <p className="text-xs text-muted-foreground"><Badge variant="outline" className="mr-1.5 text-[10px] text-destructive">BATAL</Badge>{formatDate(a.payment.cancelledAt)} · {a.payment.cancelReason}</p>
+                      )}
+                      {st && <CancelReceiptButton paymentId={a.payment.id} number={a.payment.number} block={st.block} otherInvoices={st.invoices.filter((n) => n !== inv.number)} />}
+                    </div>
+                  );
+                })}
               </CardContent>
             </Card>
           )}

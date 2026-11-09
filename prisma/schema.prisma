@@ -258,15 +258,16 @@ model User {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
-  accounts       Account[]
-  sessions       Session[]
-  salesCustomers Customer[]     @relation("CustomerSalesPic")
-  salesJobs      Job[]          @relation("JobSalesPic")
-  quotations     Quotation[]    @relation("QuotationOwner")
-  milestones     Milestone[]
-  auditLogs      AuditLog[]
-  journalEntries JournalEntry[]
-  vouchers       Voucher[]      @relation("VoucherCreatedBy")
+  accounts          Account[]
+  sessions          Session[]
+  salesCustomers    Customer[]     @relation("CustomerSalesPic")
+  salesJobs         Job[]          @relation("JobSalesPic")
+  quotations        Quotation[]    @relation("QuotationOwner")
+  milestones        Milestone[]
+  auditLogs         AuditLog[]
+  journalEntries    JournalEntry[]
+  vouchers          Voucher[]      @relation("VoucherCreatedBy")
+  paymentsCancelled Payment[]      @relation("PaymentCancelledBy")
 }
 
 model Account {
@@ -308,25 +309,25 @@ model VerificationToken {
 // ============================================================
 
 model CompanySetting {
-  id          String   @id @default(cuid())
-  name        String
-  legalName   String?
-  npwp        String?
-  address     String?
-  city        String?
-  phone       String?
-  email       String?
-  website     String?
-  logoPath    String?
-  bankName    String?
-  bankAccount String?
-  bankHolder  String?
-  bankBranch  String?
+  id             String   @id @default(cuid())
+  name           String
+  legalName      String?
+  npwp           String?
+  address        String?
+  city           String?
+  phone          String?
+  email          String?
+  website        String?
+  logoPath       String?
+  bankName       String?
+  bankAccount    String?
+  bankHolder     String?
+  bankBranch     String?
   signatoryName  String?
   signatoryTitle String?
   /// Kode perusahaan pada nomor bukti, misalnya SLG/BM/26/11/001.
-  docCode     String   @default("SLG")
-  updatedAt   DateTime @updatedAt
+  docCode        String   @default("SLG")
+  updatedAt      DateTime @updatedAt
 }
 
 model Sequence {
@@ -493,22 +494,22 @@ model ExchangeRate {
 }
 
 model ChargeCode {
-  id               String      @id @default(cuid())
-  code             String      @unique
+  id               String          @id @default(cuid())
+  code             String          @unique
   name             String
   description      String?
-  defaultTaxable   Boolean     @default(true) // PPN applies
-  isPph23          Boolean     @default(false) // service subject to PPh23 on AP
-  isPph26          Boolean     @default(false) // PPh 26 atas pembayaran ke vendor luar negeri
-  pph26Rate        Decimal     @default(20) @db.Decimal(5, 2) // tarif PPh 26 (%)
+  defaultTaxable   Boolean         @default(true) // PPN applies
+  isPph23          Boolean         @default(false) // service subject to PPh23 on AP
+  isPph26          Boolean         @default(false) // PPh 26 atas pembayaran ke vendor luar negeri
+  pph26Rate        Decimal         @default(20) @db.Decimal(5, 2) // tarif PPh 26 (%)
   revenueAccountId String?
-  revenueAccount   CoaAccount? @relation("ChargeRevenue", fields: [revenueAccountId], references: [id])
+  revenueAccount   CoaAccount?     @relation("ChargeRevenue", fields: [revenueAccountId], references: [id])
   expenseAccountId String?
-  expenseAccount   CoaAccount? @relation("ChargeExpense", fields: [expenseAccountId], references: [id])
-  isActive         Boolean     @default(true)
+  expenseAccount   CoaAccount?     @relation("ChargeExpense", fields: [expenseAccountId], references: [id])
+  isActive         Boolean         @default(true)
   invoiceSection   InvoiceSection?
   /// Biaya aktual yang ditagih ulang sesuai kuitansi (as receipt), dicetak berarsir.
-  asReceipt        Boolean     @default(false)
+  asReceipt        Boolean         @default(false)
   rateCardItems    RateCardItem[]
 
   rates          Rate[]
@@ -599,17 +600,17 @@ model JournalEntry {
 }
 
 model JournalLine {
-  id           String       @id @default(cuid())
-  entryId      String
-  entry        JournalEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
-  accountId    String
-  account      CoaAccount   @relation(fields: [accountId], references: [id])
-  description  String?
-  debit        Decimal      @default(0) @db.Decimal(18, 2)
-  credit       Decimal      @default(0) @db.Decimal(18, 2)
+  id            String       @id @default(cuid())
+  entryId       String
+  entry         JournalEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  accountId     String
+  account       CoaAccount   @relation(fields: [accountId], references: [id])
+  description   String?
+  debit         Decimal      @default(0) @db.Decimal(18, 2)
+  credit        Decimal      @default(0) @db.Decimal(18, 2)
   /// Nilai dalam mata uang rekening valas (selalu positif, sisinya mengikuti debit/kredit). Kosong untuk akun IDR.
-  amountForeign Decimal?    @db.Decimal(18, 2)
-  reconciledAt DateTime?
+  amountForeign Decimal?     @db.Decimal(18, 2)
+  reconciledAt  DateTime?
 
   statementLine BankStatementLine?
 
@@ -785,16 +786,16 @@ model Job {
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 
-  containers JobContainer[]
-  milestones Milestone[]
-  documents  JobDocument[]
-  costings   CostingLine[]
-  booking    Booking?
-  invoices   Invoice[]
+  containers   JobContainer[]
+  milestones   Milestone[]
+  documents    JobDocument[]
+  costings     CostingLine[]
+  booking      Booking?
+  invoices     Invoice[]
   invoiceLines InvoiceLine[]
-  bills      VendorBill[]
-  billLines  BillLine[]
-  vouchers   Voucher[]
+  bills        VendorBill[]
+  billLines    BillLine[]
+  vouchers     Voucher[]
 
   @@index([status])
   @@index([mode])
@@ -876,39 +877,39 @@ model Booking {
 // ============================================================
 
 model CostingLine {
-  vehicleId     String?
-  vehicle       Vehicle?   @relation(fields: [vehicleId], references: [id])
-  id            String     @id @default(cuid())
-  jobId         String
-  job           Job        @relation(fields: [jobId], references: [id], onDelete: Cascade)
-  side          ChargeSide
-  chargeCodeId  String
-  chargeCode    ChargeCode @relation(fields: [chargeCodeId], references: [id])
-  description   String?
-  vendorId      String?
-  vendor        Vendor?    @relation(fields: [vendorId], references: [id])
-  currency      String     @default("IDR")
-  exchangeRate  Decimal    @default(1) @db.Decimal(18, 6)
-  qty           Decimal    @default(1) @db.Decimal(18, 2)
-  unitPrice     Decimal    @default(0) @db.Decimal(18, 2) // foreign per unit
-  amountForeign Decimal    @default(0) @db.Decimal(18, 2)
-  estimatedIdr  Decimal    @default(0) @db.Decimal(18, 2)
-  actualIdr     Decimal    @default(0) @db.Decimal(18, 2)
-  taxable       Boolean    @default(true)
-  asReceipt     Boolean    @default(false)
+  vehicleId         String?
+  vehicle           Vehicle?   @relation(fields: [vehicleId], references: [id])
+  id                String     @id @default(cuid())
+  jobId             String
+  job               Job        @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  side              ChargeSide
+  chargeCodeId      String
+  chargeCode        ChargeCode @relation(fields: [chargeCodeId], references: [id])
+  description       String?
+  vendorId          String?
+  vendor            Vendor?    @relation(fields: [vendorId], references: [id])
+  currency          String     @default("IDR")
+  exchangeRate      Decimal    @default(1) @db.Decimal(18, 6)
+  qty               Decimal    @default(1) @db.Decimal(18, 2)
+  unitPrice         Decimal    @default(0) @db.Decimal(18, 2) // foreign per unit
+  amountForeign     Decimal    @default(0) @db.Decimal(18, 2)
+  estimatedIdr      Decimal    @default(0) @db.Decimal(18, 2)
+  actualIdr         Decimal    @default(0) @db.Decimal(18, 2)
+  taxable           Boolean    @default(true)
+  asReceipt         Boolean    @default(false)
   /// Satuan untuk cetakan, misalnya 40HC, B/L, km.
-  unitLabel     String?
+  unitLabel         String?
   /// Dibuat dari rate card; dihitung ulang selama belum ditagih.
-  fromRateCard  Boolean    @default(false)
-  invoiced      Boolean    @default(false)
+  fromRateCard      Boolean    @default(false)
+  invoiced          Boolean    @default(false)
   /// Invoice yang menagih baris selling ini. Pembatalan invoice hanya membuka kembali baris miliknya.
-  invoiceId     String?
-  invoice       Invoice?   @relation("InvoiceCostings", fields: [invoiceId], references: [id], onDelete: SetNull)
-  billed        Boolean    @default(false)
+  invoiceId         String?
+  invoice           Invoice?   @relation("InvoiceCostings", fields: [invoiceId], references: [id], onDelete: SetNull)
+  billed            Boolean    @default(false)
   /// Voucher pengeluaran yang memuat baris buying ini. Baris terkunci sejak voucher dibuat.
-  voucherId     String?
-  voucher       Voucher?   @relation(fields: [voucherId], references: [id], onDelete: SetNull)
-  sortOrder     Int        @default(0)
+  voucherId         String?
+  voucher           Voucher?   @relation(fields: [voucherId], references: [id], onDelete: SetNull)
+  sortOrder         Int        @default(0)
   recordedAt        DateTime?
   recordedJournalId String?
 
@@ -980,9 +981,9 @@ model Invoice {
   createdAt          DateTime          @default(now())
   updatedAt          DateTime          @updatedAt
 
-  lines       InvoiceLine[]
-  allocations PaymentAllocation[]
-  costingLines CostingLine[] @relation("InvoiceCostings")
+  lines        InvoiceLine[]
+  allocations  PaymentAllocation[]
+  costingLines CostingLine[]       @relation("InvoiceCostings")
 
   @@index([status])
   @@index([customerId])
@@ -990,24 +991,24 @@ model Invoice {
 }
 
 model InvoiceLine {
-  id           String     @id @default(cuid())
+  id           String          @id @default(cuid())
   invoiceId    String
-  invoice      Invoice    @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  invoice      Invoice         @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   chargeCodeId String
-  chargeCode   ChargeCode @relation(fields: [chargeCodeId], references: [id])
+  chargeCode   ChargeCode      @relation(fields: [chargeCodeId], references: [id])
   description  String?
-  qty          Decimal    @default(1) @db.Decimal(18, 2)
-  unitPrice    Decimal    @default(0) @db.Decimal(18, 2) // IDR
-  amount       Decimal    @default(0) @db.Decimal(18, 2) // IDR
-  taxable      Boolean    @default(true)
+  qty          Decimal         @default(1) @db.Decimal(18, 2)
+  unitPrice    Decimal         @default(0) @db.Decimal(18, 2) // IDR
+  amount       Decimal         @default(0) @db.Decimal(18, 2) // IDR
+  taxable      Boolean         @default(true)
   section      InvoiceSection?
-  asReceipt    Boolean    @default(false)
+  asReceipt    Boolean         @default(false)
   unitLabel    String?
   note         String?
-  sortOrder    Int        @default(0)
+  sortOrder    Int             @default(0)
   /// Job asal baris. Satu invoice bisa berisi beberapa job atau B/L.
   jobId        String?
-  job          Job?       @relation(fields: [jobId], references: [id])
+  job          Job?            @relation(fields: [jobId], references: [id])
 
   @@index([jobId])
 }
@@ -1102,8 +1103,14 @@ model Payment {
   journalEntryId String?
   createdAt      DateTime         @default(now())
 
-  bankAccountId  String?
-  bankAccount    BankAccount?     @relation(fields: [bankAccountId], references: [id])
+  bankAccountId String?
+  bankAccount   BankAccount? @relation(fields: [bankAccountId], references: [id])
+
+  // Pelunasan yang dibatalkan Admin: jurnal dibalik, data tetap disimpan sebagai riwayat.
+  cancelledAt   DateTime?
+  cancelReason  String?
+  cancelledById String?
+  cancelledBy   User?     @relation("PaymentCancelledBy", fields: [cancelledById], references: [id])
 
   allocations PaymentAllocation[]
 

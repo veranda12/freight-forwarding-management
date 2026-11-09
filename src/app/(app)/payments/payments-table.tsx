@@ -8,12 +8,20 @@ import { formatIDR, formatDate } from "@/lib/format";
 
 export type PaymentRow = {
   id: string; number: string; direction: "RECEIPT" | "PAYMENT"; date: string;
-  party: string; method: string; amount: number; reference: string | null;
+  party: string; method: string; amount: number; reference: string | null; cancelled: boolean;
 };
 
 export function PaymentsTable({ data }: { data: PaymentRow[] }) {
   const columns: ColumnDef<PaymentRow>[] = [
-    { accessorKey: "number", header: "No.", cell: ({ row }) => <Link href={`/payments/${row.original.id}`} className="font-medium text-primary hover:underline">{row.original.number}</Link> },
+    {
+      accessorKey: "number", header: "No.",
+      cell: ({ row }) => (
+        <span className="inline-flex items-center gap-1.5">
+          <Link href={`/payments/${row.original.id}`} className={`font-medium text-primary hover:underline ${row.original.cancelled ? "line-through opacity-60" : ""}`}>{row.original.number}</Link>
+          {row.original.cancelled && <Badge variant="outline" className="text-[10px] text-destructive">BATAL</Badge>}
+        </span>
+      ),
+    },
     {
       accessorKey: "direction", header: "Jenis",
       cell: ({ row }) => row.original.direction === "RECEIPT"

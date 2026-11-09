@@ -4,7 +4,7 @@
  * Hanya untuk database UJI (menolak berjalan di "ffms"). Data uji tidak dihapus.
  */
 import { PrismaClient, Prisma } from "@prisma/client";
-import { createInvoiceCore, updateInvoiceCore, recordReceiptCore, cancelInvoiceCore } from "../../src/lib/receivables";
+import { createInvoiceCore, updateInvoiceCore, recordReceiptCore, cancelInvoiceCore, cancelReceiptCore } from "../../src/lib/receivables";
 import { createBillCore, createBillFromJobCore, recordVendorPaymentCore } from "../../src/lib/payables";
 import { createVoucher, payVoucher, cancelVoucher } from "../../src/lib/vouchers";
 import { createCashEntry, updateCashEntry } from "../../src/lib/cash-entry";
@@ -169,6 +169,37 @@ async function main() {
   ok(closed.status === "CLOSED" && !!closed.closedAt, "lunas: job otomatis Closed");
   await throws(() => addJobCharge(db, j1.id, { side: "BUYING", chargeCodeId: service.id, qty: 1, unitPrice: 1, taxable: false }), /Closed/, "job Closed tidak bisa ditambah biaya");
   ok((await closeJobIfSettled(db, j1.id)) === false, "job Closed tidak ditutup dua kali");
+
+  // 5b. Batalkan pelunasan (Admin): jurnal dibalik, invoice terbuka lagi, nomor invoice tetap
+  const lastRc = await db.payment.findFirstOrThrow({ where: { allocations: { some: { invoiceId: invId } } }, orderBy: { createdAt: "desc" } });
+  await throws(() => cancelReceiptCore(db, lastRc.id, ""), /Alasan/, "batal pelunasan wajib alasan");
+  await setLockKey(db, today);
+  await throws(() => cancelReceiptCore(db, lastRc.id, "uji kunci"), /tutup buku/, "periode tutup buku: batal pelunasan ditolak");
+  await setLockKey(db, null);
+  const rcLine = await db.journalLine.findFirstOrThrow({ where: { entryId: lastRc.journalEntryId!, debit: { gt: 0 } } });
+  await db.journalLine.update({ where: { id: rcLine.id }, data: { reconciledAt: new Date() } });
+  await throws(() => cancelReceiptCore(db, lastRc.id, "uji rekon"), /Rekonsiliasi Bank/, "sudah direkonsiliasi: batal pelunasan ditolak");
+  await db.journalLine.update({ where: { id: rcLine.id }, data: { reconciledAt: null } });
+  const res = await cancelReceiptCore(db, lastRc.id, "Ada biaya yang kurang");
+  ok(res.reopened.includes(j1.number) && (await db.job.findUniqueOrThrow({ where: { id: j1.id } })).status === "DELIVERED", "job yang Closed dibuka kembali");
+  inv = await db.invoice.findUniqueOrThrow({ where: { id: invId }, include: { lines: true } });
+  ok(inv.status === "PARTIAL" && Number(inv.amountPaid) === 1_000_000, "batal satu pelunasan: invoice kembali sebagian");
+  await cancelReceiptCore(db, rc.id, "Ada biaya yang kurang");
+  inv = await db.invoice.findUniqueOrThrow({ where: { id: invId }, include: { lines: true } });
+  ok(inv.status === "UNPAID" && Number(inv.amountPaid) === 0 && inv.number === number, "semua pelunasan batal: invoice belum lunas, nomor tetap");
+  const orig = await db.journalEntry.findUniqueOrThrow({ where: { id: lastRc.journalEntryId! }, include: { reversedBy: true } });
+  ok(orig.isReversed && orig.number === lastRc.number && !!orig.reversedBy && await balanced(orig.reversedBy.id), "jurnal BM lama tetap ada, ditandai batal, jurnal pembalik seimbang");
+  const cancelledRc = await db.payment.findUniqueOrThrow({ where: { id: lastRc.id } });
+  ok(!!cancelledRc.cancelledAt && cancelledRc.cancelReason === "Ada biaya yang kurang", "pelunasan tersimpan dengan tanda batal dan alasan");
+  ok((await db.auditLog.count({ where: { entity: "Payment", action: "CANCEL", entityId: { in: [rc.id, lastRc.id] } } })) === 2, "riwayat pembatalan tercatat");
+  await throws(() => cancelReceiptCore(db, rc.id, "lagi"), /sudah dibatalkan/, "pelunasan tidak bisa dibatalkan dua kali");
+  await editInvoiceCharges(db, invId, { extras: [{ chargeCodeId: service.id, qty: 1, unitPrice: 100_000, asReceipt: false }] });
+  inv = await db.invoice.findUniqueOrThrow({ where: { id: invId }, include: { lines: true } });
+  ok(inv.number === number && Number(inv.total) > total, "invoice bisa diedit lagi setelah pelunasan dibatalkan, nomor tetap");
+  await recordReceiptCore(db, invId, { amount: Number(inv.total), date: today, bankAccountId: bank.id });
+  const again = await db.payment.findFirstOrThrow({ where: { allocations: { some: { invoiceId: invId } } }, orderBy: { createdAt: "desc" } });
+  ok(again.number !== lastRc.number && again.number !== rc.number, `pelunasan ulang memakai nomor baru: ${again.number}`);
+  ok((await db.job.findUniqueOrThrow({ where: { id: j1.id } })).status === "CLOSED", "lunas lagi: job Closed lagi");
 
   // 6. Bukti kas: banyak baris, edit, batas edit
   const cash = await createCashEntry(db, {
