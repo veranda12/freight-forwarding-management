@@ -43,39 +43,31 @@ export async function cancelVoucherAction(voucherId: string, reason: string): Pr
     const r = await cancelVoucher(prisma, voucherId, reason);
     await writeAudit({ entity: "Voucher", entityId: voucherId, action: "CANCEL", summary: `${r.number}: ${reason}`, userId: user.id });
     refresh(r.jobId);
+    if (r.invoiceId) revalidatePath(`/invoices/${r.invoiceId}`);
+    if (r.billId) revalidatePath(`/bills/${r.billId}`);
     return { ok: true };
   } catch (e) { return fail(e); }
 }
 
-// Voucher invoice/bill sekaligus mencatat pembayaran, jadi butuh izin voucher dan izin pembayaran.
-async function assertDocVoucher() {
+// Voucher invoice/bill hanya dokumen (tanpa jurnal dan pembayaran), jadi cukup izin voucher.
+export async function createInvoiceVoucherAction(input: InvoiceVoucherInput): Promise<Result<{ id: string; number: string }>> {
   const user = await assertCan("vouchers", "write");
-  await assertCan("payments", "write");
-  return user;
-}
-
-export async function createInvoiceVoucherAction(input: InvoiceVoucherInput): Promise<Result<{ id: string; number: string; proofNumber: string }>> {
-  const user = await assertDocVoucher();
   try {
     const r = await createInvoiceVoucher(prisma, input, user.id);
-    await writeAudit({ entity: "Voucher", entityId: r.id, action: "CREATE_INVOICE", summary: `${r.number} / ${r.proofNumber}`, userId: user.id });
+    await writeAudit({ entity: "Voucher", entityId: r.id, action: "CREATE_INVOICE", summary: r.number, userId: user.id });
     refresh();
     revalidatePath(`/invoices/${input.invoiceId}`);
-    revalidatePath("/invoices");
-    revalidatePath("/payments");
     return { ok: true, ...r };
   } catch (e) { return fail(e); }
 }
 
-export async function createBillVoucherAction(input: BillVoucherInput): Promise<Result<{ id: string; number: string; proofNumber: string }>> {
-  const user = await assertDocVoucher();
+export async function createBillVoucherAction(input: BillVoucherInput): Promise<Result<{ id: string; number: string }>> {
+  const user = await assertCan("vouchers", "write");
   try {
     const r = await createBillVoucher(prisma, input, user.id);
-    await writeAudit({ entity: "Voucher", entityId: r.id, action: "CREATE_BILL", summary: `${r.number} / ${r.proofNumber}`, userId: user.id });
+    await writeAudit({ entity: "Voucher", entityId: r.id, action: "CREATE_BILL", summary: r.number, userId: user.id });
     refresh();
     revalidatePath(`/bills/${input.billId}`);
-    revalidatePath("/bills");
-    revalidatePath("/payments");
     return { ok: true, ...r };
   } catch (e) { return fail(e); }
 }

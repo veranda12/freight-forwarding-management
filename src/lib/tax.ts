@@ -7,7 +7,8 @@ import { isPeriod, periodLabel, periodRange, remainingForPeriod, masaStatus, TAX
 
 /**
  * Rekap pajak per rentang tanggal: PPN keluaran (invoice), PPN masukan dan PPh (vendor bill), ditambah baris pajak
- * yang diketik di voucher dan Jurnal Pengeluaran (dibaca dari jurnalnya, sehingga rekap sama dengan saldo akun).
+ * yang diketik di voucher, Jurnal Pengeluaran (PPN masukan, PPh), dan Jurnal Penerimaan (PPN keluaran); dibaca dari
+ * jurnalnya, sehingga rekap sama dengan saldo akun.
  */
 export async function getTaxRecap(db: PrismaClient, fromKey: string, toKey: string) {
   const from = new Date(`${fromKey}T00:00:00+07:00`);
@@ -27,7 +28,7 @@ export async function getTaxRecap(db: PrismaClient, fromKey: string, toKey: stri
     db.coaAccount.findMany({ where: { code: { in: [ACC.PPN_OUT, ACC.PPN_IN, ACC.PPH23, ACC.PPH26] } }, select: { id: true, code: true } }),
     db.journalLine.findMany({
       where: {
-        account: { code: { in: [ACC.PPN_IN, ACC.PPH23, ACC.PPH26] } },
+        account: { code: { in: [ACC.PPN_OUT, ACC.PPN_IN, ACC.PPH23, ACC.PPH26] } },
         entry: { source: { in: ["VOUCHER", "CASH_ENTRY"] }, isReversal: false, isReversed: false, date: { gte: from, lte: to } },
       },
       include: { account: { select: { code: true } }, entry: { select: { date: true, number: true } } },
@@ -40,10 +41,13 @@ export async function getTaxRecap(db: PrismaClient, fromKey: string, toKey: stri
     .map((l) => ({ date: jktKey(l.entry.date), number: l.entry.number, party: l.description ?? "-", dpp: null as number | null, amount: Number(l[side]) }));
   const byDate = <T extends { date: string }>(rows: T[]) => rows.sort((a, b) => a.date.localeCompare(b.date));
 
-  const ppnOut = invoices.map((i) => ({
-    date: jktKey(i.date), number: i.number, party: i.customer.name,
-    dpp: Number(i.taxableBase), ppn: Number(i.ppnAmount), currency: i.currency,
-  }));
+  const ppnOut = byDate([
+    ...invoices.map((i) => ({
+      date: jktKey(i.date), number: i.number, party: i.customer.name,
+      dpp: Number(i.taxableBase) as number | null, ppn: Number(i.ppnAmount), currency: i.currency,
+    })),
+    ...fromJournal(ACC.PPN_OUT, "credit").map(({ amount, ...r }) => ({ ...r, ppn: amount, currency: "IDR" })),
+  ]);
   const ppnIn = byDate([
     ...bills.filter((b) => Number(b.ppnAmount) > 0).map((b) => ({
       date: jktKey(b.date), number: b.number, party: b.vendor.name,

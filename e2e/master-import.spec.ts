@@ -75,7 +75,7 @@ test.describe("Import Excel master data", () => {
     ]);
     await login(page, "sales@demo.com");
     const { dialog, text } = await importVia(page, "/customers", "customer.xlsx", file, "Simpan 3 baris");
-    expect(text).toMatch(/4 baris.*2 baru.*1 diperbarui.*1 dilewati/s);
+    expect(text).toMatch(/4 baris[\s\S]*2 baru[\s\S]*1 diperbarui[\s\S]*1 dilewati/);
     await expect(dialog.getByText("Nama minimal 3 huruf.")).toBeVisible();
     await expect(dialog.getByRole("button", { name: /Unduh baris yang dilewati/ })).toBeVisible();
     expect(await db.customer.count({ where: { name: { in: [`PT E2E Import ${ts}`, `PT E2E Peringatan ${ts}`] } } })).toBe(2);

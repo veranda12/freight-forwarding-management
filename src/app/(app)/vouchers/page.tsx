@@ -13,8 +13,11 @@ import { VouchersTable, type VoucherRow } from "./vouchers-table";
 
 export const dynamic = "force-dynamic";
 
-export default async function VouchersPage() {
+export default async function VouchersPage({ searchParams }: { searchParams: Promise<{ baru?: string | string[] }> }) {
   const user = await requireCan("vouchers", "read");
+  // ?baru=<id> dari form Buat Voucher: voucher yang baru disimpan ditaruh paling atas dan disorot.
+  const sp = await searchParams;
+  const fresh = (Array.isArray(sp.baru) ? sp.baru[0] : sp.baru ?? "").slice(0, 40) || null;
   const today = new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10);
   const [vouchers, cash] = await Promise.all([
     prisma.voucher.findMany({
@@ -34,25 +37,27 @@ export default async function VouchersPage() {
       : v.bill ? { kind: "BILL", label: v.bill.number, href: `/bills/${v.bill.id}` }
       : { kind: "JOB", label: v.job?.number ?? "-", href: v.job ? `/costing/${v.job.id}` : null },
     sourceText: v.invoice?.number ?? v.bill?.number ?? v.job?.number ?? "",
-    // Voucher invoice/bill: status pelunasan dokumennya. Voucher job: status voucher sendiri.
-    docSettled: v.invoice ? v.invoice.status === "PAID" : v.bill ? v.bill.status === "PAID" : null,
     bl: v.job ? [v.job.hblNo, v.job.mblNo, v.job.hawbNo, v.job.mawbNo].filter(Boolean).join(" / ")
       : docLineJobs(v),
     payee: v.payee, total: Number(v.total), status: v.status, proofNumber: v.proofNumber, journalEntryId: v.journalEntryId,
+    hasPayment: !!v.paymentId,
   }));
-  const unpaid = rows.filter((r) => r.status === "ISSUED");
+  // Hanya voucher biaya job yang punya proses bayar; voucher invoice/bill hanya catatan.
+  const freshRow = fresh ? rows.find((r) => r.id === fresh) ?? null : null;
+  const ordered = freshRow ? [freshRow, ...rows.filter((r) => r !== freshRow)] : rows;
+  const unpaid = rows.filter((r) => r.source.kind === "JOB" && r.status === "ISSUED");
   const canWrite = can(user.role, "vouchers", "write");
   return (
     <div className="space-y-6">
-      <PageHeader title="Voucher" description="Voucher dari invoice (uang masuk), vendor bill (uang keluar), atau biaya job">
+      <PageHeader title="Voucher" description="Voucher penerimaan dari invoice, voucher pengeluaran dari vendor bill, atau voucher biaya job">
         {canWrite && <Button asChild><Link href="/vouchers/new"><Plus /> Buat Voucher</Link></Button>}
       </PageHeader>
       <StatStrip items={[
         { label: "Total voucher", value: rows.length },
-        { label: "Belum dibayar", value: unpaid.length, tone: unpaid.length ? "warning" : undefined },
+        { label: "Biaya job belum dibayar", value: unpaid.length, tone: unpaid.length ? "warning" : undefined },
         { label: "Nilai belum dibayar", value: formatIDR(unpaid.reduce((s, r) => s + r.total, 0)), tone: "warning" },
       ]} />
-      <VouchersTable data={rows} canWrite={canWrite} cashAccounts={cash.options} defaultCashId={cash.defaultId} today={today} />
+      <VouchersTable data={ordered} freshId={freshRow?.id ?? null} canWrite={canWrite} cashAccounts={cash.options} defaultCashId={cash.defaultId} today={today} />
     </div>
   );
 }

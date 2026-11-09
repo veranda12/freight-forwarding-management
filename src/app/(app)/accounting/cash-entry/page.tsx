@@ -7,7 +7,10 @@ import { listTransfers } from "@/lib/bank-transfer";
 import { latestRate } from "@/lib/fx";
 import { getLockKey } from "@/lib/period-lock";
 import { formatIDR } from "@/lib/format";
+import Link from "next/link";
+import { TicketPlus } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
+import { Button } from "@/components/ui/button";
 import { StatStrip } from "@/components/stat-strip";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CashEntryPanel, type CashPrefill } from "./cash-entry-panel";
@@ -57,7 +60,10 @@ export default async function CashEntryPage({ searchParams }: { searchParams: Pr
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Jurnal Penerimaan & Pengeluaran" description="Transaksi kas dan bank di luar invoice dan bill, serta transfer antar rekening" />
+      <PageHeader title="Jurnal Penerimaan & Pengeluaran" description="Transaksi kas dan bank di luar invoice dan bill, serta transfer antar rekening">
+        {/* Pintasan ke voucher invoice / bill / biaya job (permintaan client: buat voucher dari menu accounting). */}
+        {can(user.role, "vouchers", "write") && <Button asChild variant="outline"><Link href="/vouchers/new"><TicketPlus /> Buat Voucher</Link></Button>}
+      </PageHeader>
       <StatStrip items={[
         { label: "Transaksi kas", value: active.length },
         { label: "Total penerimaan", value: formatIDR(totalIn), tone: "success" },

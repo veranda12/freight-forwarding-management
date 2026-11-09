@@ -57,7 +57,7 @@ export function VoucherBuilder({ jobs, today, lockKey }: { jobs: VoucherJob[]; t
         jobId: job.id, lineIds: selected, dateKey, payee, vendorId: picked.find((l) => l.vendorId)?.vendorId ?? null, notes,
         taxRows: taxRows.map((r) => ({ kind: r.kind, amount: Number(r.amount), description: r.description })),
       });
-      if (res.ok) { toast.success("Voucher dibuat."); router.push("/vouchers"); router.refresh(); }
+      if (res.ok) { toast.success("Voucher dibuat."); router.push(`/vouchers?baru=${res.id}`); router.refresh(); }
       else toast.error(res.error);
     });
   }

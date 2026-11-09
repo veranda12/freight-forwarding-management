@@ -11,7 +11,13 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { PROOF_FORMS, type ProofFormValues } from "@/lib/proof-forms";
 import { saveProofFormsAction } from "./actions";
 
-/** Kotak dokumen SOP di kanan atas cetakan bukti: Doc. No, Revision, Effective Date per jenis formulir. */
+/**
+ * Kotak dokumen SOP di kanan atas cetakan Jurnal Umum: Doc. No, Revision, Effective Date.
+ * Bukti kas/bank dan voucher memakai template Receipt/Payment Voucher tanpa kotak ini, jadi barisnya tidak ditampilkan
+ * (isian lamanya tetap tersimpan dan ikut terkirim apa adanya saat Simpan).
+ */
+const SHOWN = PROOF_FORMS.filter((f) => f.flow === "JOURNAL");
+
 export function ProofFormsForm({ initial, canWrite }: { initial: ProofFormValues[]; canWrite: boolean }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -31,7 +37,7 @@ export function ProofFormsForm({ initial, canWrite }: { initial: ProofFormValues
       <CardHeader className="flex flex-row items-center justify-between space-y-0">
         <div>
           <CardTitle className="text-base">Formulir bukti (SOP)</CardTitle>
-          <p className="mt-1 text-sm text-muted-foreground">Tampil di kotak kanan atas cetakan bukti kas/bank, jurnal, dan voucher. Kosongkan bila belum ditetapkan.</p>
+          <p className="mt-1 text-sm text-muted-foreground">Tampil di kotak kanan atas cetakan Jurnal Umum. Bukti kas/bank dan voucher memakai template Receipt/Payment Voucher. Kosongkan bila belum ditetapkan.</p>
         </div>
         {canWrite && !editing && <Button variant="outline" size="sm" onClick={() => setEditing(true)}><Pencil /> Ubah</Button>}
       </CardHeader>
@@ -41,7 +47,7 @@ export function ProofFormsForm({ initial, canWrite }: { initial: ProofFormValues
             <TableHead>Formulir</TableHead><TableHead>Doc. No</TableHead><TableHead>Revision</TableHead><TableHead>Effective Date</TableHead>
           </TableRow></TableHeader>
           <TableBody>
-            {PROOF_FORMS.map((f) => {
+            {SHOWN.map((f) => {
               const r = rows.find((x) => x.code === f.code)!;
               return (
                 <TableRow key={f.code}>

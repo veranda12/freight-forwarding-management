@@ -24,7 +24,10 @@ export type CashEntryInput = {
   reference?: string | null;
   /** Kurs IDR per 1 unit mata uang rekening. Wajib untuk rekening valas; diabaikan untuk rekening IDR. */
   rate?: number | null;
-  /** Baris pajak (hanya Jurnal Pengeluaran): PPN masukan di Debet, PPh 23/26 dipotong di Kredit. Mata uang = rekening. */
+  /**
+   * Baris pajak, mata uang = rekening. Jurnal Pengeluaran: PPN Masukan di Debet, PPh 23/26 dipotong di Kredit.
+   * Jurnal Penerimaan: PPN Keluaran di Kredit, PPh 23 dipotong customer (dibayar dimuka) di Debet.
+   */
   taxRows?: TaxRowInput[];
 };
 
@@ -45,9 +48,8 @@ export function validateCashEntry(input: CashEntryInput) {
     return { counterAccountId: r.counterAccountId, amount, description: (r.description ?? "").trim() || description };
   });
   const amount = r2(rows.reduce((s, r) => s + r.amount, 0));
-  if (input.direction === "IN" && input.taxRows?.length) throw new Error("Baris pajak hanya untuk Jurnal Pengeluaran.");
-  // Jurnal Pengeluaran tidak punya biaya reimburse, jadi seluruh baris menjadi dasar pajak.
-  const tax = validateTaxRows(input.taxRows, { total: amount, nonReimburse: amount });
+  // Jurnal kas tidak punya biaya reimburse, jadi seluruh baris menjadi dasar pajak.
+  const tax = validateTaxRows(input.taxRows, { total: amount, nonReimburse: amount }, input.direction);
   return { ...input, rows, amount, taxRows: tax.rows, net: tax.net, description, reference: (input.reference ?? "").trim() || null };
 }
 
@@ -68,13 +70,15 @@ async function cashContent(tx: Prisma.TransactionClient, v: Valid) {
   if (!(rate > 0)) throw new Error(`Kurs ${cash.currency} untuk tanggal ini belum ada. Isi kurs secara manual.`);
   const idrRows = v.rows.map((r) => ({ ...r, idr: r2(r.amount * rate) }));
   const taxLines = v.taxRows.length ? taxJournalLines(v.taxRows, await accountMap(tx), rate) : [];
-  // Kas = biaya + PPN - PPh, dihitung dari baris rupiah supaya jurnal selalu seimbang.
-  const idr = r2(idrRows.reduce((s, r) => s + r.idr, 0) + taxLines.reduce((s, l) => s + (l.debit ?? 0) - (l.credit ?? 0), 0));
+  // Kas = dasar + PPN - PPh, dihitung dari baris rupiah supaya jurnal selalu seimbang. Pengeluaran: pajak Debet
+  // menambah kas keluar; penerimaan: pajak Kredit (PPN Keluaran) menambah kas masuk, Debet (PPh 23) mengurangi.
+  const taxNet = taxLines.reduce((s, l) => s + (l.debit ?? 0) - (l.credit ?? 0), 0);
+  const idr = r2(idrRows.reduce((s, r) => s + r.idr, 0) + (v.direction === "IN" ? -taxNet : taxNet));
   const fx = isFx ? v.net : null;
   const desc = `${v.direction === "IN" ? "Penerimaan" : "Pengeluaran"} ${cash.name}: ${v.description}${isFx ? ` (${cash.currency} ${v.net} @ ${rate})` : ""}${v.reference ? ` (${v.reference})` : ""}`;
   const cashLine = { accountId: cash.coaId, description: v.description, amountForeign: fx };
   const lines: JournalLineInput[] = v.direction === "IN"
-    ? [{ ...cashLine, debit: idr }, ...idrRows.map((r) => ({ accountId: r.counterAccountId, credit: r.idr, description: r.description }))]
+    ? [{ ...cashLine, debit: idr }, ...idrRows.map((r) => ({ accountId: r.counterAccountId, credit: r.idr, description: r.description })), ...taxLines]
     : [...idrRows.map((r) => ({ accountId: r.counterAccountId, debit: r.idr, description: r.description })), ...taxLines, { ...cashLine, credit: idr }];
   return { cash, desc, lines, idr };
 }
@@ -134,9 +138,14 @@ export async function listCashEntries(db: PrismaClient, opts: { from?: string; t
     const others = e.lines.filter((l) => l.id !== cashLine?.id);
     const bank = banks.find((b) => b.coaAccountId === cashLine?.accountId);
     const inflow = Number(cashLine?.debit ?? 0) > 0;
-    // Jurnal Pengeluaran: PPN masukan di Debet dan PPh di Kredit dibaca sebagai baris pajak.
+    // Baris pajak dibaca dari akun dan sisinya. Pengeluaran: PPN Masukan Debet, PPh Kredit.
+    // Penerimaan: PPN Keluaran Kredit, PPh 23 dibayar dimuka Debet.
     const taxKind = (l: (typeof others)[number]): TaxRowKind | null => {
-      if (inflow) return null;
+      if (inflow) {
+        if (l.account.code === ACC.PPN_OUT && Number(l.credit) > 0) return "PPN_OUT";
+        if (l.account.code === ACC.PPH23_CLAIM && Number(l.debit) > 0) return "PPH23_CLAIM";
+        return null;
+      }
       if (l.account.code === ACC.PPN_IN && Number(l.debit) > 0) return "PPN_IN";
       if (l.account.code === ACC.PPH23 && Number(l.credit) > 0) return "PPH23";
       if (l.account.code === ACC.PPH26 && Number(l.credit) > 0) return "PPH26";

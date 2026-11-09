@@ -60,9 +60,8 @@ export default async function InvoiceDetail({ params }: { params: Promise<{ id: 
     }
   }
   const vouchers = await vouchersOfDoc(prisma, { invoiceId: inv.id });
-  // Voucher invoice sekaligus mencatat penerimaan: hanya invoice IDR yang masih punya sisa.
-  const canVoucher = can(user.role, "vouchers", "write") && can(user.role, "payments", "write")
-    && inv.currency === "IDR" && inv.status !== "CANCELLED" && inv.status !== "PAID" && outstanding > 0.5;
+  // Voucher invoice hanya catatan (tanpa jurnal): invoice IDR yang tidak dibatalkan, lunas atau belum.
+  const canVoucher = can(user.role, "vouchers", "write") && inv.currency === "IDR" && inv.status !== "CANCELLED";
 
   return (
     <div className="space-y-6">
@@ -171,7 +170,7 @@ export default async function InvoiceDetail({ params }: { params: Promise<{ id: 
               </CardContent>
             </Card>
           )}
-          <DocVouchersCard vouchers={vouchers} settled={inv.status === "PAID"} />
+          <DocVouchersCard vouchers={vouchers} />
           {journal && (
             <Card>
               <CardHeader><CardTitle className="text-base">Jurnal {journal.number}</CardTitle></CardHeader>
