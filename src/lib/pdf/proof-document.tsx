@@ -1,6 +1,7 @@
 import React from "react";
 import { Document, Image, Page, View, Text, StyleSheet } from "@react-pdf/renderer";
 import { formatInTimeZone } from "date-fns-tz";
+import { id as idLocale } from "date-fns/locale";
 import { formatNumber, TZ } from "@/lib/format";
 import { formInfo, type ProofFormCode } from "@/lib/proof-forms";
 
@@ -47,6 +48,9 @@ export type ProofDoc = {
   info: [string, string][];
   rows: ProofRow[];
   note?: string;
+  /** Voucher dibatalkan: judul diberi tanda DIBATALKAN. */
+  cancelled?: boolean;
+  /** Kotak Doc. No / Revision / Effective Date: hanya tercetak di Jurnal Umum. */
   box: { docNo: string; revision: string; effectiveDate: string };
   company: { name: string; address: string | null; city: string | null; phone: string | null; logoFile: string | null };
 };
@@ -54,11 +58,8 @@ export type ProofDoc = {
 // Angka tanpa desimal bila bulat, seperti contoh client; nol tetap ditulis 0.
 const money = (n: number) => formatNumber(n, Number.isInteger(Math.round(n * 100) / 100) ? 0 : 2);
 
-const SIGNS: Record<"IN" | "OUT" | "JOURNAL", [string, string][]> = {
-  OUT: [["Disetujui Oleh", "Pejabat Yang Berwenang"], ["Dicatat Oleh", "Akuntansi"], ["Dikeluarkan Oleh", "Kasir"], ["Diterima Oleh", "Penerima yang Berhak"]],
-  IN: [["Disetujui Oleh", "Pejabat Yang Berwenang"], ["Dicatat Oleh", "Akuntansi"], ["Diterima Oleh", "Kasir"], ["Disetor Oleh", "Penyetor"]],
-  JOURNAL: [["Dibuat Oleh", "Akuntansi"], ["Diperiksa Oleh", "Kepala Akuntansi"], ["Disetujui Oleh", "Pejabat Yang Berwenang"]],
-};
+/** Tanda tangan formulir Jurnal Umum (bukti uang masuk/keluar memakai VOUCHER_SIGNS). */
+const JOURNAL_SIGNS: [string, string][] = [["Dibuat Oleh", "Akuntansi"], ["Diperiksa Oleh", "Kepala Akuntansi"], ["Disetujui Oleh", "Pejabat Yang Berwenang"]];
 
 function MetaRow({ label, value, last, render }: { label: string; value?: string; last?: boolean; render?: boolean }) {
   return (
@@ -72,15 +73,18 @@ function MetaRow({ label, value, last, render }: { label: string; value?: string
 }
 
 /**
- * Bukti kas/bank, jurnal, dan voucher dalam format formulir SOP client: kop dengan kotak Doc. No / Revision /
- * Effective Date / Page, tabel Keterangan - No Perkiraan - Debet - Kredit, dan kolom tanda tangan.
+ * Cetakan bukti:
+ * - Uang masuk / keluar (bukti kas & bank, voucher): template Receipt / Payment Voucher client (`VoucherProof`).
+ * - Jurnal Umum: format formulir SOP client, kop dengan kotak Doc. No / Revision / Effective Date / Page,
+ *   tabel Keterangan - No Perkiraan - Debet - Kredit, dan kolom tanda tangan.
  */
 export function ProofDocument({ doc }: { doc: ProofDoc }) {
   const f = formInfo(doc.form);
+  if (f.flow !== "JOURNAL") return <VoucherProof doc={doc} flow={f.flow} />;
   const totalDebit = doc.rows.reduce((t, r) => t + r.debit, 0);
   const totalCredit = doc.rows.reduce((t, r) => t + r.credit, 0);
   const cols = { desc: INNER * 0.44, acc: INNER * 0.18, amt: INNER * 0.19 };
-  const signs = SIGNS[f.flow];
+  const signs = JOURNAL_SIGNS;
   const head: [string, string][] = [[f.numberLabel, doc.number], ["Tanggal", formatInTimeZone(doc.date, TZ, "dd-MM-yyyy")]];
   // Info tambahan (voucher: penerima, job, B/L, ...) dua per baris supaya muat satu halaman A5.
   const pairs: [string, string][][] = [];
@@ -164,6 +168,122 @@ export function ProofDocument({ doc }: { doc: ProofDoc }) {
               </View>
             ))}
           </View>
+        </View>
+      </Page>
+    </Document>
+  );
+}
+
+// ---------------------------------------------------------------- template Receipt / Payment Voucher
+
+const BLUE = "#1d4ed8";
+const RED = "#b91c1c";
+
+const v = StyleSheet.create({
+  page: { padding: PAD, fontSize: 9, fontFamily: "Helvetica", color: INK },
+  head: { flexDirection: "row", alignItems: "center", paddingBottom: 6, borderBottomWidth: 1.5, borderColor: BLUE },
+  logo: { width: 54, height: 44, objectFit: "contain", marginRight: 8 },
+  coName: { fontSize: 15, fontFamily: "Helvetica-Bold", color: BLUE },
+  coSub: { fontSize: 8, fontFamily: "Helvetica-Oblique", color: BLUE, marginTop: 2 },
+  titleBox: { borderWidth: 1, borderColor: BLUE, borderRadius: 4, paddingVertical: 5, paddingHorizontal: 12, alignItems: "center" },
+  title: { fontSize: 12, fontFamily: "Helvetica-Bold", color: BLUE },
+  subtitle: { fontSize: 8.5, fontFamily: "Helvetica-Bold", color: BLUE, marginTop: 1 },
+  cancelled: { fontSize: 9, fontFamily: "Helvetica-Bold", color: RED, marginTop: 2 },
+  meta: { flexDirection: "row", marginTop: 3 },
+  metaLabel: { width: 112 },
+  colon: { width: 10 },
+  bankBox: { borderWidth: B, borderColor: INK, marginTop: 6, paddingVertical: 3, textAlign: "center", fontFamily: "Helvetica-Bold", fontSize: 10 },
+  table: { borderWidth: B, borderColor: INK, marginTop: 6 },
+  th: { fontFamily: "Helvetica-Bold", textAlign: "center", paddingVertical: 3, paddingHorizontal: 4 },
+  td: { paddingVertical: 2.5, paddingHorizontal: 4 },
+  signs: { flexDirection: "row", marginTop: 12, justifyContent: "space-between" },
+  sign: { borderWidth: B, borderColor: INK, width: (INNER - 3 * 8) / 4 },
+  signTop: { textAlign: "center", paddingVertical: 2.5, borderBottomWidth: B, borderColor: INK },
+  signBottom: { textAlign: "center", fontFamily: "Helvetica-Bold", paddingVertical: 2.5 },
+});
+
+/** Tanda tangan sama untuk Receipt dan Payment Voucher (keputusan 2026-11-09). */
+const VOUCHER_SIGNS: [string, string][] = [
+  ["Diajukan oleh,", "Operasional"], ["Diketahui oleh,", "Manager Ops"], ["Disetujui oleh,", "Direktur"], ["Diterima oleh,", "Finance"],
+];
+
+const dashMoney = (n: number) => (Math.abs(n) < 0.005 ? "-" : money(n));
+
+/**
+ * Template voucher client: kop logo + nama PT dan kotak RECEIPT / PAYMENT VOUCHER, No. Voucher dan tanggal,
+ * baris rekening, tabel Keterangan - Kode COA - Debit - Kredit dengan Total, lalu empat kotak tanda tangan.
+ * Nomor tetap nomor bukti SLG (BM/BK/KM/KK/VC).
+ */
+function VoucherProof({ doc, flow }: { doc: ProofDoc; flow: "IN" | "OUT" }) {
+  const isIn = flow === "IN";
+  const title = isIn ? "RECEIPT VOUCHER" : "PAYMENT VOUCHER";
+  const totalDebit = doc.rows.reduce((t, r) => t + r.debit, 0);
+  const totalCredit = doc.rows.reduce((t, r) => t + r.credit, 0);
+  const cols = { desc: INNER * 0.4, acc: INNER * 0.18, amt: INNER * 0.21 };
+  const address = [doc.company.address, doc.company.city].filter(Boolean).join(", ");
+  const meta: [string, string][] = [
+    ["No. Voucher", doc.number],
+    [isIn ? "Tanggal Penerimaan" : "Tanggal Pembayaran", formatInTimeZone(doc.date, TZ, "dd MMMM yyyy", { locale: idLocale })],
+    ...doc.info,
+  ];
+  return (
+    <Document title={`${title} ${doc.number}`}>
+      <Page size="A5" orientation="landscape" style={v.page}>
+        <View style={v.head}>
+          {doc.company.logoFile ? <Image src={doc.company.logoFile} style={v.logo} /> : null}
+          <View style={{ flex: 1 }}>
+            <Text style={v.coName}>{doc.company.name}</Text>
+            {address ? <Text style={v.coSub}>{address}</Text> : null}
+          </View>
+          <View style={v.titleBox}>
+            <Text style={v.title}>{title}</Text>
+            <Text style={v.subtitle}>{isIn ? "(Voucher Penerimaan)" : "(Voucher Pengeluaran)"}</Text>
+            {doc.cancelled ? <Text style={v.cancelled}>DIBATALKAN</Text> : null}
+          </View>
+        </View>
+
+        <View style={{ marginTop: 6 }}>
+          {meta.map(([k, val], i) => (
+            <View key={`${k}-${i}`} style={v.meta}>
+              <Text style={v.metaLabel}>{k}</Text>
+              <Text style={v.colon}>:</Text>
+              <Text style={[{ flex: 1 }, i === 0 ? s.bold : {}]}>{val}</Text>
+            </View>
+          ))}
+        </View>
+
+        {doc.account ? <Text style={v.bankBox}>{doc.account}</Text> : null}
+
+        <View style={v.table}>
+          <View style={[s.row, s.bb]} fixed>
+            <Text style={[v.th, s.br, { width: cols.desc }]}>Keterangan</Text>
+            <Text style={[v.th, s.br, { width: cols.acc }]}>Kode COA</Text>
+            <Text style={[v.th, s.br, { width: cols.amt }]}>Debit (Rp)</Text>
+            <Text style={[v.th, { flex: 1 }]}>Kredit (Rp)</Text>
+          </View>
+          {doc.rows.map((r, i) => (
+            <View key={i} style={[s.row, s.bb]} wrap={false}>
+              <Text style={[v.td, s.br, { width: cols.desc }]}>{r.description}</Text>
+              <Text style={[v.td, s.br, s.center, { width: cols.acc }]}>{r.account || "-"}</Text>
+              <Text style={[v.td, s.br, s.right, { width: cols.amt }]}>{dashMoney(r.debit)}</Text>
+              <Text style={[v.td, s.right, { flex: 1 }]}>{dashMoney(r.credit)}</Text>
+            </View>
+          ))}
+          <View style={s.row} wrap={false}>
+            <Text style={[v.td, s.br, s.bold, s.center, { width: cols.desc + cols.acc }]}>Total</Text>
+            <Text style={[v.td, s.br, s.bold, s.right, { width: cols.amt }]}>{money(totalDebit)}</Text>
+            <Text style={[v.td, s.bold, s.right, { flex: 1 }]}>{money(totalCredit)}</Text>
+          </View>
+        </View>
+
+        <View style={v.signs} wrap={false}>
+          {VOUCHER_SIGNS.map(([top, bottom]) => (
+            <View key={top} style={v.sign}>
+              <Text style={v.signTop}>{top}</Text>
+              <View style={{ height: 40 }} />
+              <Text style={v.signBottom}>{bottom}</Text>
+            </View>
+          ))}
         </View>
       </Page>
     </Document>

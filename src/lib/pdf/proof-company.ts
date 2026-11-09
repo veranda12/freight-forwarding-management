@@ -13,11 +13,11 @@ export async function proofCompany(db: PrismaClient) {
   };
 }
 
-/** Baris rekening di cetakan bukti: "BCA 408 347 9828" untuk bank, nama kas untuk kas. */
+/** Baris rekening di cetakan bukti: "BCA - 4083479828" untuk bank (seperti template voucher client), nama kas untuk kas. */
 export function cashAccountLine(ba: { kind: string; name: string; bankName: string | null; accountNo: string | null } | null | undefined): string | null {
   if (!ba) return null;
   if (ba.kind === "CASH" || !ba.accountNo) return ba.name;
-  return `${ba.bankName ?? ba.name} ${ba.accountNo}`;
+  return `${ba.bankName ?? ba.name} - ${ba.accountNo}`;
 }
 
 const UNIT = ["", "satu", "dua", "tiga", "empat", "lima", "enam", "tujuh", "delapan", "sembilan", "sepuluh", "sebelas"];
