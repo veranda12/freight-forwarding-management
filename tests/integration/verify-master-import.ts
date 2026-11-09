@@ -115,7 +115,7 @@ async function main() {
 
   // 4. Import ulang file yang sama: baris baru kini terdeteksi sudah ada (tidak ganda)
   const again = await previewImport(db, "customers", custFile);
-  ok(again.summary.create === 0 && again.rows.find((r) => r.row === 2)?.errors.join().includes("sudah ada sebagai"), "file yang sama diimport ulang: tidak membuat data ganda");
+  ok(again.summary.create === 0 && !!again.rows.find((r) => r.row === 2)?.errors.join().includes("sudah ada sebagai"), "file yang sama diimport ulang: tidak membuat data ganda");
 
   // 5. File ditolak
   await throws(() => previewImport(db, "customers", Buffer.from("bukan excel")), /bukan Excel/, "file bukan xlsx ditolak");
