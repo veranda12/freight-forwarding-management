@@ -8,16 +8,22 @@ export type RateItem = {
   chargeCodeId: string;
   chargeCode: { code: string; name: string; asReceipt: boolean };
   containerTypeId: string | null;
-  basis: "PER_CONTAINER" | "PER_BL" | "PER_KM_OVER";
+  basis: "PER_CONTAINER" | "PER_BL" | "PER_KM_OVER" | "OVERWEIGHT";
   condition: "ALWAYS" | "RED_LANE" | "OPTIONAL";
   price: number;
   thresholdKm: number | null;
+  /** OVERWEIGHT: berat maksimal per container (kg) yang sudah termasuk tarif dasar. */
+  thresholdKg: number | null;
   taxable: boolean;
   sortOrder: number;
 };
 
-/** `units` berisi nomor dan jarak tiap container (kosong = ikut jarak job), dipakai untuk surcharge jarak per container. */
-export type ContainerGroup = { containerTypeId: string | null; code: string; count: number; units?: { containerNo: string; distanceKm: number | null }[] };
+/**
+ * `units` berisi nomor, jarak (kosong = ikut jarak job), dan berat kotor tiap container,
+ * dipakai untuk surcharge jarak dan overweight per container.
+ */
+export type ContainerUnit = { containerNo: string; distanceKm: number | null; weightKg?: number | null };
+export type ContainerGroup = { containerTypeId: string | null; code: string; count: number; units?: ContainerUnit[] };
 
 export type GeneratedCharge = {
   chargeCodeId: string;
@@ -33,7 +39,7 @@ const idr = (n: number) => n.toLocaleString("en-US", { maximumFractionDigits: 0 
 
 type ContainerRow = {
   containerTypeId: string | null; containerType: { code: string } | null;
-  containerNo?: string; distanceKm?: Prisma.Decimal | number | null;
+  containerNo?: string; distanceKm?: Prisma.Decimal | number | null; grossWeightKg?: Prisma.Decimal | number | null;
 };
 
 /** Kelompokkan container job per tipe. */
@@ -43,18 +49,28 @@ export function groupContainers(containers: ContainerRow[]): ContainerGroup[] {
     const key = c.containerTypeId ?? "";
     const g = map.get(key) ?? { containerTypeId: c.containerTypeId, code: c.containerType?.code ?? "CONT", count: 0 };
     g.count++;
-    if (c.containerNo) (g.units ??= []).push({ containerNo: c.containerNo, distanceKm: c.distanceKm == null ? null : Number(c.distanceKm) });
+    if (c.containerNo) {
+      (g.units ??= []).push({
+        containerNo: c.containerNo, distanceKm: c.distanceKm == null ? null : Number(c.distanceKm),
+        weightKg: c.grossWeightKg == null ? null : Number(c.grossWeightKg),
+      });
+    }
     map.set(key, g);
   }
   return [...map.values()].sort((a, b) => a.code.localeCompare(b.code));
 }
 
+const SURCHARGE = new Set<RateItem["basis"]>(["PER_KM_OVER", "OVERWEIGHT"]);
+const ton = (kg: number) => (kg / 1000).toLocaleString("en-US", { maximumFractionDigits: 2 });
+
 /**
  * Selling charge dari rate card untuk satu job (murni, tanpa DB).
  * Tarif per container memakai baris khusus tipe container bila ada, selain itu baris umum (tanpa tipe).
  * Baris OPTIONAL tidak dibuat; baris RED_LANE hanya untuk jalur merah.
- * Surcharge jarak dihitung per container: jarak container bila diisi, selain itu jarak job. Container
- * dengan jarak berbeda menjadi baris terpisah yang mencantumkan nomor containernya.
+ *
+ * Surcharge dihitung per container: jarak container bila diisi (selain itu jarak job) dan berat kotornya.
+ * Kelebihan jarak dan kelebihan berat tidak ditagih dua-duanya: per container diambil yang nominalnya
+ * lebih besar. Container dengan hasil berbeda menjadi baris terpisah yang mencantumkan nomor containernya.
  */
 export function buildRateCardCharges(items: RateItem[], groups: ContainerGroup[], lane: string | null, distanceKm: number | null): GeneratedCharge[] {
   const active = items
@@ -72,22 +88,52 @@ export function buildRateCardCharges(items: RateItem[], groups: ContainerGroup[]
     if (!byKey.has(k)) { byKey.set(k, []); order.push(k); }
     byKey.get(k)!.push(i);
   }
+  const rateFor = (rows: RateItem[], g: ContainerGroup) =>
+    rows.find((r) => r.containerTypeId && r.containerTypeId === g.containerTypeId) ?? rows.find((r) => !r.containerTypeId);
 
-  // Jarak efektif tiap container per tipe, dikelompokkan per km.
-  const kmGroups = (g: ContainerGroup) => {
-    const units = g.units?.length ? g.units : Array.from({ length: g.count }, () => ({ containerNo: "", distanceKm: null }));
-    const map = new Map<number, string[]>();
-    for (const u of units) {
-      const km = u.distanceKm ?? distanceKm;
-      if (km == null) throw new Error(u.containerNo ? `Isi jarak container ${u.containerNo} atau jarak tujuan job dulu.` : "Isi jarak gudang (km) di Clearance & Delivery dulu.");
-      map.set(km, [...(map.get(km) ?? []), u.containerNo]);
+  const unitsOf = (g: ContainerGroup): ContainerUnit[] =>
+    g.units?.length ? g.units : Array.from({ length: g.count }, () => ({ containerNo: "", distanceKm: null, weightKg: null }));
+
+  // Surcharge per container: kandidat dari tiap tarif jarak/overweight, diambil yang terbesar.
+  type Pick = { item: RateItem; amount: number; description: string };
+  const surchargeKeys = order.filter((k) => SURCHARGE.has(byKey.get(k)![0].basis));
+  const pickFor = (g: ContainerGroup, u: ContainerUnit): { pick: Pick | null; sig: string } => {
+    let pick: Pick | null = null;
+    const sig: string[] = [];
+    for (const k of surchargeKeys) {
+      const rows = byKey.get(k)!;
+      const item = rateFor(rows, g);
+      if (rows[0].basis === "PER_KM_OVER") {
+        if (!item) throw new Error(`Rate card ${rows[0].chargeCode.code} belum punya tarif untuk container ${g.code}.`);
+        const km = u.distanceKm ?? distanceKm;
+        if (km == null) throw new Error(u.containerNo ? `Isi jarak container ${u.containerNo} atau jarak tujuan job dulu.` : "Isi jarak gudang (km) di Clearance & Delivery dulu.");
+        sig.push(`km${km}`);
+        const threshold = item.thresholdKm ?? 0;
+        const extraKm = r2(Math.max(0, km - threshold));
+        const amount = r2(extraKm * item.price);
+        if (extraKm > 0 && (!pick || amount > pick.amount)) {
+          pick = { item, amount, description: `${extraKm} km over ${threshold} km @ IDR ${idr(item.price)}/km` };
+        }
+      } else {
+        // Overweight hanya untuk tipe yang punya tarifnya; tipe lain tidak dicek beratnya.
+        if (!item) continue;
+        if (u.weightKg == null) throw new Error(u.containerNo ? `Isi berat (gross weight) container ${u.containerNo} dulu untuk cek overweight.` : `Isi berat tiap container ${g.code} di tab Containers dulu untuk cek overweight.`);
+        const limit = item.thresholdKg ?? 0;
+        const over = u.weightKg > limit;
+        sig.push(`ow${over}`);
+        if (over && (!pick || item.price > pick.amount)) {
+          pick = { item, amount: r2(item.price), description: `Overweight ${ton(u.weightKg)} ton over ${ton(limit)} ton` };
+        }
+      }
     }
-    return [...map.entries()].sort((a, b) => a[0] - b[0]);
+    return { pick, sig: sig.join("|") };
   };
-  const needsKm = active.some((i) => i.basis === "PER_KM_OVER");
-  const distinctKm = needsKm ? new Set(groups.flatMap((g) => kmGroups(g).map(([km]) => km))).size : 0;
+  const picks = new Map<ContainerGroup, { unit: ContainerUnit; pick: Pick | null; sig: string }[]>();
+  if (surchargeKeys.length) for (const g of groups) picks.set(g, unitsOf(g).map((unit) => ({ unit, ...pickFor(g, unit) })));
+  const distinctSig = new Set([...picks.values()].flat().map((p) => p.sig)).size;
 
   const out: GeneratedCharge[] = [];
+  let surchargeDone = false;
   for (const k of order) {
     const rows = byKey.get(k)!;
     const first = rows[0];
@@ -96,24 +142,33 @@ export function buildRateCardCharges(items: RateItem[], groups: ContainerGroup[]
       out.push({ ...base, qty: 1, unitPrice: r2(first.price), taxable: first.taxable, unitLabel: "B/L", description: null });
       continue;
     }
+    if (SURCHARGE.has(first.basis)) {
+      // Semua surcharge keluar sekali, di posisi tarif surcharge pertama.
+      if (surchargeDone) continue;
+      surchargeDone = true;
+      for (const g of groups) {
+        const lines = new Map<string, { pick: Pick; nos: string[] }>();
+        for (const p of picks.get(g) ?? []) {
+          if (!p.pick) continue;
+          const key = `${p.pick.item.chargeCodeId}|${p.pick.amount}|${p.pick.description}`;
+          const l = lines.get(key) ?? { pick: p.pick, nos: [] };
+          l.nos.push(p.unit.containerNo);
+          lines.set(key, l);
+        }
+        for (const { pick, nos } of [...lines.values()].sort((a, b) => a.pick.amount - b.pick.amount)) {
+          const listed = distinctSig > 1 && nos.every(Boolean) ? `${nos.join(", ")}: ` : "";
+          out.push({
+            chargeCodeId: pick.item.chargeCodeId, asReceipt: pick.item.chargeCode.asReceipt, qty: nos.length, unitPrice: pick.amount,
+            taxable: pick.item.taxable, unitLabel: g.code, description: `${listed}${pick.description}`,
+          });
+        }
+      }
+      continue;
+    }
     for (const g of groups) {
-      const item = rows.find((r) => r.containerTypeId && r.containerTypeId === g.containerTypeId) ?? rows.find((r) => !r.containerTypeId);
+      const item = rateFor(rows, g);
       if (!item) throw new Error(`Rate card ${first.chargeCode.code} belum punya tarif untuk container ${g.code}.`);
-      if (item.basis === "PER_CONTAINER") {
-        out.push({ ...base, qty: g.count, unitPrice: r2(item.price), taxable: item.taxable, unitLabel: g.code, description: null });
-        continue;
-      }
-      // PER_KM_OVER: kelebihan km di atas batas, dikali tarif per km, per container.
-      const threshold = item.thresholdKm ?? 0;
-      for (const [km, nos] of kmGroups(g)) {
-        const extraKm = r2(Math.max(0, km - threshold));
-        if (extraKm <= 0) continue;
-        const listed = distinctKm > 1 && nos.every(Boolean) ? `${nos.join(", ")}: ` : "";
-        out.push({
-          ...base, qty: nos.length, unitPrice: r2(extraKm * item.price), taxable: item.taxable, unitLabel: g.code,
-          description: `${listed}${extraKm} km over ${threshold} km @ IDR ${idr(item.price)}/km`,
-        });
-      }
+      out.push({ ...base, qty: g.count, unitPrice: r2(item.price), taxable: item.taxable, unitLabel: g.code, description: null });
     }
   }
   return out;
@@ -121,7 +176,8 @@ export function buildRateCardCharges(items: RateItem[], groups: ContainerGroup[]
 
 export function toRateItem(r: {
   id: string; chargeCodeId: string; chargeCode: { code: string; name: string; asReceipt: boolean }; containerTypeId: string | null;
-  basis: RateItem["basis"]; condition: RateItem["condition"]; price: Prisma.Decimal | number; thresholdKm: number | null; taxable: boolean; sortOrder: number;
+  basis: RateItem["basis"]; condition: RateItem["condition"]; price: Prisma.Decimal | number; thresholdKm: number | null;
+  thresholdKg: number | null; taxable: boolean; sortOrder: number;
 }): RateItem {
   return { ...r, price: Number(r.price) };
 }
@@ -147,7 +203,7 @@ export async function applyRateCard(db: PrismaClient, jobId: string): Promise<nu
 
     await tx.costingLine.deleteMany({ where: { jobId, side: "SELLING", fromRateCard: true, invoiced: false } });
     // Baris rate card yang sudah diubah manual (misalnya angka kuitansi) dipertahankan, tidak dibuat dobel.
-    // Surcharge jarak bisa punya beberapa baris per tipe (beda jarak), jadi dicocokkan juga dengan keterangannya.
+    // Surcharge jarak/overweight bisa punya beberapa baris per tipe (beda jarak atau berat), jadi dicocokkan juga dengan keterangannya.
     const manual = await tx.costingLine.findMany({
       where: { jobId, side: "SELLING", fromRateCard: false, unitLabel: { not: null } },
       select: { id: true, chargeCodeId: true, unitLabel: true, description: true },

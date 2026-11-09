@@ -8,8 +8,10 @@ import { writeAudit } from "@/lib/audit";
 import { errorMessage } from "@/lib/action-error";
 
 export type RateCardInput = {
-  chargeCodeId: string; containerTypeId: string | null; basis: "PER_CONTAINER" | "PER_BL" | "PER_KM_OVER";
-  condition: "ALWAYS" | "RED_LANE" | "OPTIONAL"; price: string; thresholdKm: string; taxable: boolean; note: string; sortOrder: string; isActive: boolean;
+  chargeCodeId: string; containerTypeId: string | null; basis: "PER_CONTAINER" | "PER_BL" | "PER_KM_OVER" | "OVERWEIGHT";
+  condition: "ALWAYS" | "RED_LANE" | "OPTIONAL"; price: string; thresholdKm: string;
+  /** Batas berat dalam ton (diketik user), disimpan dalam kg. */
+  thresholdTon: string; taxable: boolean; note: string; sortOrder: string; isActive: boolean;
 };
 type Result = { ok: true } | { ok: false; error: string };
 
@@ -19,10 +21,14 @@ function parse(input: RateCardInput) {
   if (!Number.isFinite(price) || price < 0) throw new Error("Tarif tidak boleh minus.");
   const threshold = input.thresholdKm.trim() === "" ? null : Math.round(Number(input.thresholdKm));
   if (input.basis === "PER_KM_OVER" && !(threshold != null && threshold >= 0)) throw new Error("Isi batas km untuk tarif per km.");
+  const tonText = input.thresholdTon.trim().replace(",", ".");
+  const thresholdKg = tonText === "" ? null : Math.round(Number(tonText) * 1000);
+  if (input.basis === "OVERWEIGHT" && !(thresholdKg != null && Number.isFinite(thresholdKg) && thresholdKg > 0)) throw new Error("Isi batas berat (ton) untuk tarif overweight.");
   return {
     chargeCodeId: input.chargeCodeId, containerTypeId: input.basis === "PER_BL" ? null : input.containerTypeId || null,
     basis: input.basis, condition: input.condition, price: new Prisma.Decimal(price),
-    thresholdKm: input.basis === "PER_KM_OVER" ? threshold : null, taxable: input.taxable,
+    thresholdKm: input.basis === "PER_KM_OVER" ? threshold : null,
+    thresholdKg: input.basis === "OVERWEIGHT" ? thresholdKg : null, taxable: input.taxable,
     note: input.note.trim() || null, sortOrder: Math.round(Number(input.sortOrder) || 0), isActive: input.isActive,
   };
 }

@@ -229,6 +229,7 @@ export const BASIS_LABELS: Record<TariffBasis, string> = {
   PER_CONTAINER: "Per container",
   PER_BL: "Per B/L",
   PER_KM_OVER: "Per km di atas batas, per container",
+  OVERWEIGHT: "Overweight (flat) di atas batas berat, per container",
 };
 
 export const CONDITION_LABELS: Record<TariffCondition, string> = {

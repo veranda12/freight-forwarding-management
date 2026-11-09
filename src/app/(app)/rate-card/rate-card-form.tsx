@@ -13,7 +13,9 @@ import { BASIS_LABELS, CONDITION_LABELS } from "@/lib/enums";
 import { createRateCardItemAction, updateRateCardItemAction, type RateCardInput } from "./actions";
 
 type Opt = { id: string; label: string };
-export type RateCardInitial = Omit<RateCardInput, "price" | "thresholdKm" | "sortOrder"> & { id: string; price: number; thresholdKm: number | null; sortOrder: number };
+export type RateCardInitial = Omit<RateCardInput, "price" | "thresholdKm" | "thresholdTon" | "sortOrder"> & {
+  id: string; price: number; thresholdKm: number | null; thresholdKg: number | null; sortOrder: number;
+};
 
 const ALL = "__all__";
 
@@ -25,6 +27,7 @@ export function RateCardForm({ charges, containerTypes, initial }: { charges: Op
   const fromInitial = (): RateCardInput => ({
     chargeCodeId: initial?.chargeCodeId ?? "", containerTypeId: initial?.containerTypeId ?? null, basis: initial?.basis ?? "PER_CONTAINER",
     condition: initial?.condition ?? "ALWAYS", price: initial ? String(initial.price) : "", thresholdKm: initial?.thresholdKm == null ? "" : String(initial.thresholdKm),
+    thresholdTon: initial?.thresholdKg == null ? "" : String(initial.thresholdKg / 1000),
     taxable: initial?.taxable ?? false, note: initial?.note ?? "", sortOrder: String(initial?.sortOrder ?? 0), isActive: initial?.isActive ?? true,
   });
   const [f, setF] = useState(fromInitial);
@@ -82,7 +85,7 @@ export function RateCardForm({ charges, containerTypes, initial }: { charges: Op
             </Select>
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="rc-price">{f.basis === "PER_KM_OVER" ? "Tarif per km (IDR)" : "Tarif (IDR)"}</Label>
+            <Label htmlFor="rc-price">{f.basis === "PER_KM_OVER" ? "Tarif per km (IDR)" : f.basis === "OVERWEIGHT" ? "Tarif flat (IDR)" : "Tarif (IDR)"}</Label>
             <Input id="rc-price" type="number" min={0} value={f.price} onChange={(e) => set({ price: e.target.value })} />
           </div>
           {f.basis === "PER_KM_OVER" && (
@@ -90,6 +93,17 @@ export function RateCardForm({ charges, containerTypes, initial }: { charges: Op
               <Label htmlFor="rc-km">Batas km (termasuk tarif dasar)</Label>
               <Input id="rc-km" type="number" min={0} value={f.thresholdKm} onChange={(e) => set({ thresholdKm: e.target.value })} />
             </div>
+          )}
+          {f.basis === "OVERWEIGHT" && (
+            <div className="space-y-1.5">
+              <Label htmlFor="rc-ton">Batas berat per container (ton)</Label>
+              <Input id="rc-ton" type="number" min={0} step="0.01" value={f.thresholdTon} onChange={(e) => set({ thresholdTon: e.target.value })} />
+            </div>
+          )}
+          {(f.basis === "OVERWEIGHT" || f.basis === "PER_KM_OVER") && (
+            <p className="text-xs text-muted-foreground sm:col-span-2">
+              Surcharge jarak dan overweight tidak ditagih dua-duanya. Per container sistem mengambil yang nominalnya lebih besar.
+            </p>
           )}
           <div className="space-y-1.5">
             <Label htmlFor="rc-sort">Urutan</Label>

@@ -5,7 +5,7 @@ import { amountInWords, numberToWords } from "../../src/lib/amount-words";
 let seq = 0;
 const item = (code: string, p: Partial<RateItem>): RateItem => ({
   id: `r${seq++}`, chargeCodeId: code, chargeCode: { code, name: code, asReceipt: false }, containerTypeId: null,
-  basis: "PER_CONTAINER", condition: "ALWAYS", price: 0, thresholdKm: null, taxable: false, sortOrder: seq, ...p,
+  basis: "PER_CONTAINER", condition: "ALWAYS", price: 0, thresholdKm: null, thresholdKg: null, taxable: false, sortOrder: seq, ...p,
 });
 
 const RATES: RateItem[] = [
@@ -87,6 +87,65 @@ describe("buildRateCardCharges", () => {
   });
   it("tipe container tanpa tarif ditolak dengan pesan jelas", () => {
     expect(() => buildRateCardCharges([item("CC", { containerTypeId: "t20", price: 1 })], hc3, null, null)).toThrow(/40HC/);
+  });
+});
+
+describe("surcharge jarak vs overweight: ambil yang lebih besar", () => {
+  // Ketentuan trucking 20GP: tarif dasar 2.900.000 sampai 30 km dan 23 ton.
+  // Lebih dari 30 km: 90.000/km. Lebih dari 23 ton: 600.000 flat. Tidak ditagih dua-duanya.
+  const SC = [
+    item("TRUCK", { containerTypeId: "t20", price: 2_900_000 }),
+    item("XDIST", { basis: "PER_KM_OVER", containerTypeId: "t20", price: 90_000, thresholdKm: 30 }),
+    item("OVWT", { basis: "OVERWEIGHT", containerTypeId: "t20", price: 600_000, thresholdKg: 23_000 }),
+  ];
+  const one = (km: number, kg: number | null) =>
+    buildRateCardCharges(SC, [{ containerTypeId: "t20", code: "20GP", count: 1, units: [{ containerNo: "AAAU1111111", distanceKm: km, weightKg: kg }] }], "GREEN", null)
+      .filter((o) => o.chargeCodeId !== "TRUCK");
+
+  it.each([
+    [24, 25_000, "OVWT", 600_000],
+    [32, 24_000, "OVWT", 600_000],
+    [42, 26_000, "XDIST", 1_080_000],
+    [42, 20_000, "XDIST", 1_080_000],
+  ])("%s km, %s kg → %s %s", (km, kg, code, amount) => {
+    expect(one(km, kg)).toEqual([expect.objectContaining({ chargeCodeId: code, qty: 1, unitPrice: amount, unitLabel: "20GP" })]);
+  });
+  it("tidak lebih dari batas (30 km, 23 ton pas) → tidak ada surcharge", () => {
+    expect(one(30, 23_000)).toEqual([]);
+  });
+  it("keterangan menyebut dasar surcharge", () => {
+    expect(one(24, 25_000)[0].description).toBe("Overweight 25 ton over 23 ton");
+    expect(one(42, 26_000)[0].description).toBe("12 km over 30 km @ IDR 90,000/km");
+  });
+  it("berat kosong ditolak dengan nomor containernya", () => {
+    expect(() => one(24, null)).toThrow(/berat.*AAAU1111111/);
+  });
+  it("tipe tanpa tarif overweight tidak dicek beratnya", () => {
+    const rates = [...SC, item("XDIST", { basis: "PER_KM_OVER", price: 100_000, thresholdKm: 30 }), item("TRUCK", { price: 3_100_000 })];
+    const out = buildRateCardCharges(rates, [{ containerTypeId: "t40", code: "40HC", count: 1, units: [{ containerNo: "CCCU3333333", distanceKm: 38, weightKg: null }] }], "GREEN", null);
+    expect(out.filter((o) => o.chargeCodeId === "XDIST")).toEqual([expect.objectContaining({ unitPrice: 800_000 })]);
+  });
+  it("per container: hasil berbeda jadi baris terpisah dengan nomor container", () => {
+    const out = buildRateCardCharges(SC, [{
+      containerTypeId: "t20", code: "20GP", count: 3, units: [
+        { containerNo: "AAAU1111111", distanceKm: 24, weightKg: 25_000 },
+        { containerNo: "BBBU2222222", distanceKm: 42, weightKg: 26_000 },
+        { containerNo: "CCCU3333333", distanceKm: 24, weightKg: 18_000 },
+      ],
+    }], "GREEN", null).filter((o) => o.chargeCodeId !== "TRUCK");
+    expect(out).toEqual([
+      expect.objectContaining({ chargeCodeId: "OVWT", qty: 1, unitPrice: 600_000, description: "AAAU1111111: Overweight 25 ton over 23 ton" }),
+      expect.objectContaining({ chargeCodeId: "XDIST", qty: 1, unitPrice: 1_080_000, description: "BBBU2222222: 12 km over 30 km @ IDR 90,000/km" }),
+    ]);
+  });
+  it("beberapa container overweight dengan berat sama: satu baris qty sesuai jumlah", () => {
+    const out = buildRateCardCharges(SC, [{
+      containerTypeId: "t20", code: "20GP", count: 2, units: [
+        { containerNo: "AAAU1111111", distanceKm: 24, weightKg: 25_000 },
+        { containerNo: "BBBU2222222", distanceKm: 24, weightKg: 25_000 },
+      ],
+    }], "GREEN", null).filter((o) => o.chargeCodeId === "OVWT");
+    expect(out).toEqual([expect.objectContaining({ qty: 2, unitPrice: 600_000, description: "Overweight 25 ton over 23 ton" })]);
   });
 });
 

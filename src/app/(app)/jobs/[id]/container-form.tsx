@@ -111,8 +111,9 @@ export function ContainerForm({ jobId, types, initial, warehouses, jobDest }: {
             <Input value={sealNo} onChange={(e) => setSealNo(e.target.value.toUpperCase())} placeholder="SL1234567" maxLength={30} />
           </div>
           <div className="space-y-1.5">
-            <Label>Berat kotor (kg, opsional)</Label>
+            <Label>Berat kotor (kg)</Label>
             <Input type="number" min={0} value={gross} onChange={(e) => setGross(e.target.value)} />
+            <p className="text-xs text-muted-foreground">Wajib bila rate card punya tarif overweight untuk tipe ini.</p>
           </div>
           <div className="space-y-1.5">
             <Label>Volume (cbm, opsional)</Label>

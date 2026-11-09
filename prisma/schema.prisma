@@ -244,6 +244,9 @@ enum TariffBasis {
   PER_BL
   /// Per container, dikali kelebihan km di atas batas jarak.
   PER_KM_OVER
+  /// Per container, tarif flat bila berat kotor container melebihi batas berat.
+  /// Tidak ditagih bersamaan dengan PER_KM_OVER: per container diambil yang lebih besar.
+  OVERWEIGHT
 }
 
 enum TariffCondition {
@@ -1535,6 +1538,8 @@ model RateCardItem {
   price           Decimal         @default(0) @db.Decimal(18, 2)
   /// PER_KM_OVER: jarak yang sudah termasuk tarif dasar.
   thresholdKm     Int?
+  /// OVERWEIGHT: berat maksimal per container (kg) yang sudah termasuk tarif dasar.
+  thresholdKg     Int?
   taxable         Boolean         @default(false)
   note            String?
   sortOrder       Int             @default(0)

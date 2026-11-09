@@ -44,7 +44,7 @@ export default async function RateCardPage() {
                     {r.taxable && <Badge variant="outline" className="ml-1 text-[10px]">PPN</Badge>}
                   </TableCell>
                   <TableCell className="text-xs text-muted-foreground">{r.chargeCode.invoiceSection ? SECTION_LABELS[r.chargeCode.invoiceSection] : "-"}</TableCell>
-                  <TableCell className="text-sm">{BASIS_LABELS[r.basis]}{r.basis === "PER_KM_OVER" && r.thresholdKm != null ? ` (> ${r.thresholdKm} km)` : ""}</TableCell>
+                  <TableCell className="text-sm">{BASIS_LABELS[r.basis]}{r.basis === "PER_KM_OVER" && r.thresholdKm != null ? ` (> ${r.thresholdKm} km)` : ""}{r.basis === "OVERWEIGHT" && r.thresholdKg != null ? ` (> ${r.thresholdKg / 1000} ton)` : ""}</TableCell>
                   <TableCell>{r.basis === "PER_BL" ? "-" : r.containerType?.code ?? "Semua"}</TableCell>
                   <TableCell className="text-sm">{CONDITION_LABELS[r.condition]}</TableCell>
                   <TableCell className="text-right tabular-nums">{Number(r.price) > 0 ? formatIDR(Number(r.price)) : "Aktual"}</TableCell>
@@ -53,7 +53,7 @@ export default async function RateCardPage() {
                     <TableCell className="text-right">
                       <RateCardForm charges={chargeOpts} containerTypes={typeOpts} initial={{
                         id: r.id, chargeCodeId: r.chargeCodeId, containerTypeId: r.containerTypeId, basis: r.basis, condition: r.condition,
-                        price: Number(r.price), thresholdKm: r.thresholdKm, taxable: r.taxable, note: r.note ?? "", sortOrder: r.sortOrder, isActive: r.isActive,
+                        price: Number(r.price), thresholdKm: r.thresholdKm, thresholdKg: r.thresholdKg, taxable: r.taxable, note: r.note ?? "", sortOrder: r.sortOrder, isActive: r.isActive,
                       }} />
                     </TableCell>
                   )}
