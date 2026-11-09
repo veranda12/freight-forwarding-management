@@ -64,7 +64,9 @@ RBAC ditegakkan di server (`requireCan`/`assertCan`) — bukan sekadar menyembun
 7. **Login sebagai Finance** (`finance@demo.com`):
    - **Costing**: profitability per job (margin diberi warna; merah bila <10%).
    - **Invoice (AR)**: buka invoice → subtotal, PPN 11%, jurnal otomatis, alokasi pembayaran.
-   - **Vendor Bill (AP)**: PPh 23 2% otomatis pada jasa.
+   - **Vendor Bill (AP)**: PPN/PPh diisi sesuai tagihan vendor; menu Vendor Bill per job menampilkan pajak bill sebagai baris sendiri.
+   - **Voucher dari invoice / vendor bill**: dari detail dokumen klik **Buat Voucher**, centang baris (mis. per job), simpan → pembayarannya langsung tercatat; status Lunas / Belum lunas. Form Buat Voucher punya tab Invoice, Vendor Bill, dan Biaya job.
+   - **Voucher** dan **Jurnal Pengeluaran**: tambah **baris pajak** (PPN masukan di Debet, PPh 23/26 di Kredit); biaya reimburse tidak dikenai pajak. Cetak bukti dalam format formulir SOP (nomor `SLG/BK/26/11/06/0001`).
    - **Receipt & Payment**: penerimaan/pembayaran dengan alokasi.
    - **Accounting**: **Trial Balance (balance ✓)**, **Laba Rugi**, **Neraca**, **Jurnal**. _(±4 mnt)_
 8. **Reporting**: profitability per mode, shipment per status, sales performance, **AR/AP Aging** + **Export Excel**. _(±1 mnt)_
@@ -73,11 +75,14 @@ RBAC ditegakkan di server (`requireCan`/`assertCan`) — bukan sekadar menyembun
 
 Master Data (Customer, Vendor, Overseas Agent, Port & Airport, Currency & Kurs, Charge Code, Aturan Berat, Container Type, Commodity, Pajak, COA) · **Ekspor-Impor** (Rate, Quotation, Job, Booking, Dokumentasi PDF, Tracking publik) · **Domestik** (STT antar kota, Cek Tarif, Tarif Domestik) · Finance (Costing, AR Invoice, AP Bill, Debit/Credit Note, Payment, Accounting, Laporan) · Dashboard · Sistem (User, Audit Log, Setting).
 
+**Import Excel** di daftar Customer, Vendor, dan Commodity: tombol *Import Excel* → *Unduh template* → isi sheet Data → *Periksa* (pratinjau per baris) → *Simpan*. Kolom Kode kosong = data baru, terisi = memperbarui data itu (sel kosong tidak mengubah apa pun). Maks. 1.000 baris / 2 MB per file (.xlsx).
+
 ## 6. Prinsip Teknis
 
 - Uang = `Decimal(18,2)`, kurs = `Decimal(18,6)` — tidak pernah float.
 - Timezone `Asia/Jakarta`; format Rupiah & tanggal locale Indonesia.
-- Penomoran dokumen via tabel `Sequence` (aman dari race), di dalam transaksi DB.
+- Penomoran dokumen via tabel `Sequence` (aman dari race), di dalam transaksi DB. Bukti kas/bank, Jurnal Umum, dan voucher: `SLG/BK/26/11/06/0001`, nomor urut tahunan per jenis bukti.
+- Kotak Doc. No / Revision / Effective Date pada cetakan bukti diisi di **Setting → Formulir bukti (SOP)**.
 - Jurnal selalu seimbang; pembatalan via **reversal** (jurnal tidak dihapus).
 - Seed deterministik (`faker.seed`), nomor kontainer ISO 6346 valid, Trial Balance balance.
 

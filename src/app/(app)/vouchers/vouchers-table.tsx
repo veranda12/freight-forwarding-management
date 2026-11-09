@@ -18,9 +18,16 @@ import { formatDate, formatIDR } from "@/lib/format";
 import { cancelVoucherAction, payVoucherAction } from "./actions";
 
 export type VoucherRow = {
-  id: string; number: string; date: string; job: string; bl: string; payee: string; total: number;
+  id: string; number: string; date: string; bl: string; payee: string; total: number;
+  source: { kind: "JOB" | "INVOICE" | "BILL"; label: string; href: string | null };
+  /** Teks pencarian: nomor job / invoice / bill. */
+  sourceText: string;
+  /** Voucher invoice/bill: dokumennya sudah lunas? null untuk voucher job. */
+  docSettled: boolean | null;
   status: VoucherStatus; proofNumber: string | null; journalEntryId: string | null;
 };
+
+const SOURCE = { JOB: "Job", INVOICE: "Invoice", BILL: "Bill" } as const;
 
 const STATUS: Record<VoucherStatus, string> = { ISSUED: "Belum dibayar", PAID: "Dibayar", CANCELLED: "Batal" };
 
@@ -57,9 +64,20 @@ export function VouchersTable({ data, canWrite, cashAccounts, defaultCashId, tod
   const columns: ColumnDef<VoucherRow>[] = [
     { accessorKey: "number", header: "No. Voucher", cell: ({ row }) => <span className="whitespace-nowrap font-medium">{row.original.number}</span> },
     { accessorKey: "date", header: "Tanggal", cell: ({ row }) => <span className="whitespace-nowrap">{formatDate(row.original.date)}</span> },
-    { accessorKey: "job", header: "No. Job", cell: ({ row }) => <span className="whitespace-nowrap">{row.original.job}</span> },
-    { accessorKey: "bl", header: "No. B/L", cell: ({ row }) => <span className="text-muted-foreground">{row.original.bl || "-"}</span> },
-    { accessorKey: "payee", header: "Dibayar kepada" },
+    {
+      accessorKey: "sourceText", header: "Sumber",
+      cell: ({ row }) => {
+        const s = row.original.source;
+        return (
+          <span className="whitespace-nowrap">
+            <span className="text-xs text-muted-foreground">{SOURCE[s.kind]} </span>
+            {s.href ? <Link href={s.href} className="text-primary hover:underline">{s.label}</Link> : s.label}
+          </span>
+        );
+      },
+    },
+    { accessorKey: "bl", header: "Job / B/L", cell: ({ row }) => <span className="text-muted-foreground">{row.original.bl || "-"}</span> },
+    { accessorKey: "payee", header: "Pihak" },
     { accessorKey: "total", header: "Nilai", cell: ({ row }) => <span className="tabular-nums">{formatIDR(row.original.total)}</span> },
     {
       accessorKey: "status", header: "Status",
@@ -67,7 +85,9 @@ export function VouchersTable({ data, canWrite, cashAccounts, defaultCashId, tod
         const r = row.original;
         return (
           <div>
-            <Badge variant="outline" className={r.status === "PAID" ? "border-success/50 text-success" : r.status === "ISSUED" ? "border-warning/50 text-warning" : ""}>{STATUS[r.status]}</Badge>
+            {r.docSettled === null
+              ? <Badge variant="outline" className={r.status === "PAID" ? "border-success/50 text-success" : r.status === "ISSUED" ? "border-warning/50 text-warning" : ""}>{STATUS[r.status]}</Badge>
+              : <Badge variant="outline" className={r.docSettled ? "border-success/50 text-success" : "border-warning/50 text-warning"}>{r.docSettled ? "Lunas" : "Belum lunas"}</Badge>}
             {r.proofNumber && r.journalEntryId && <div><Link href={`/accounting/journal/${r.journalEntryId}`} className="text-xs text-primary hover:underline">{r.proofNumber}</Link></div>}
           </div>
         );
@@ -90,7 +110,7 @@ export function VouchersTable({ data, canWrite, cashAccounts, defaultCashId, tod
 
   return (
     <>
-      <DataTable columns={columns} data={data} searchPlaceholder="Cari no. voucher, no. job, no. B/L, atau penerima…" searchKeys={["number", "job", "bl", "payee"]} emptyTitle="Belum ada voucher" />
+      <DataTable columns={columns} data={data} searchPlaceholder="Cari no. voucher, no. invoice/bill/job, no. B/L, atau pihak…" searchKeys={["number", "sourceText", "bl", "payee"]} emptyTitle="Belum ada voucher" />
 
       <Dialog open={!!pay} onOpenChange={(v) => !v && setPay(null)}>
         <DialogContent>

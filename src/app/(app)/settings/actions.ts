@@ -7,6 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { assertCan } from "@/lib/auth-helpers";
 import { writeAudit } from "@/lib/audit";
 import { errorMessage } from "@/lib/action-error";
+import { saveProofForms, type ProofFormValues } from "@/lib/proof-forms";
 
 export type CompanyInput = {
   name: string; legalName: string; npwp: string; address: string; city: string; phone: string; email: string; website: string;
@@ -90,6 +91,20 @@ export async function removeCompanyLogoAction(): Promise<Result> {
     await writeAudit({ entity: "CompanySetting", entityId: current.id, action: "UPDATE", summary: "Logo dihapus", userId: user.id });
   } catch (e) {
     return { ok: false, error: errorMessage(e, "Gagal menghapus logo.") };
+  }
+  revalidatePath("/settings");
+  return { ok: true };
+}
+
+/** Simpan kotak dokumen SOP (Doc. No, Revision, Effective Date) untuk cetakan bukti. */
+export async function saveProofFormsAction(rows: ProofFormValues[]): Promise<Result> {
+  const user = await assertCan("settings", "write");
+  try {
+    const saved = await saveProofForms(prisma, rows);
+    const summary = saved.map((s) => `${s.code}: ${s.docNo ?? "-"} rev ${s.revision ?? "-"} ${s.effectiveDate ? s.effectiveDate.toISOString().slice(0, 10) : "-"}`).join("; ");
+    await writeAudit({ entity: "ProofForm", entityId: "all", action: "UPDATE", summary, userId: user.id });
+  } catch (e) {
+    return { ok: false, error: errorMessage(e, "Gagal menyimpan formulir bukti.") };
   }
   revalidatePath("/settings");
   return { ok: true };

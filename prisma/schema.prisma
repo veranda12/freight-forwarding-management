@@ -194,6 +194,20 @@ enum VoucherStatus {
   CANCELLED
 }
 
+/// Sumber voucher: biaya job (terbit lalu dibayar), atau invoice / vendor bill (langsung mencatat pembayaran).
+enum VoucherKind {
+  JOB
+  INVOICE
+  BILL
+}
+
+/// Jenis baris pajak yang diketik Finance: PPN masukan (Debet), PPh 23/26 dipotong (Kredit).
+enum TaxRowKind {
+  PPN_IN
+  PPH23
+  PPH26
+}
+
 enum CashAccountKind {
   BANK
   CASH
@@ -325,9 +339,18 @@ model CompanySetting {
   bankBranch     String?
   signatoryName  String?
   signatoryTitle String?
-  /// Kode perusahaan pada nomor bukti, misalnya SLG/BM/26/11/001.
-  docCode        String   @default("SLG")
-  updatedAt      DateTime @updatedAt
+  /// Kode perusahaan pada nomor bukti, misalnya SLG/BK/26/11/06/0001.
+  docCode     String   @default("SLG")
+  updatedAt   DateTime @updatedAt
+}
+
+/// Kotak dokumen SOP pada cetakan bukti, per jenis formulir: BBM, BBK, BKM, BKK, JU, VC, VM.
+model ProofForm {
+  code          String    @id
+  docNo         String?
+  revision      String?
+  effectiveDate DateTime? @db.Date
+  updatedAt     DateTime  @updatedAt
 }
 
 model Sequence {
@@ -922,8 +945,20 @@ model CostingLine {
 model Voucher {
   id             String        @id @default(cuid())
   number         String        @unique
-  jobId          String
-  job            Job           @relation(fields: [jobId], references: [id])
+  kind           VoucherKind   @default(JOB)
+  jobId          String?
+  job            Job?          @relation(fields: [jobId], references: [id], onDelete: Restrict)
+  invoiceId      String?
+  invoice        Invoice?      @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  billId         String?
+  bill           VendorBill?   @relation(fields: [billId], references: [id], onDelete: Restrict)
+  /// Pembayaran yang dicatat voucher invoice/bill.
+  paymentId      String?       @unique
+  payment        Payment?      @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  /// Voucher ini membawa PPN/PPh dokumen (memuat baris pertama dokumen).
+  carriesTax     Boolean       @default(false)
+  /// Potongan saat terima invoice (PPh 23 pelanggan, admin bank, lain).
+  deductions     Decimal       @default(0) @db.Decimal(18, 2)
   date           DateTime
   payee          String
   vendorId       String?
@@ -943,11 +978,42 @@ model Voucher {
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
 
-  lines CostingLine[]
+  lines    CostingLine[]
+  taxLines VoucherTaxLine[]
+  docLines VoucherDocLine[]
 
   @@index([jobId])
+  @@index([invoiceId])
+  @@index([billId])
   @@index([status])
 }
+
+/// Baris pajak voucher (diketik Finance). Total voucher = biaya + PPN - PPh = nilai yang dibayar.
+model VoucherTaxLine {
+  id          String     @id @default(cuid())
+  voucherId   String
+  voucher     Voucher    @relation(fields: [voucherId], references: [id], onDelete: Cascade)
+  kind        TaxRowKind
+  description String
+  amount      Decimal    @db.Decimal(18, 2)
+  sortOrder   Int        @default(0)
+
+  @@index([voucherId])
+}
+/// Baris invoice/bill yang dimuat voucher. Satu baris hanya boleh di satu voucher (unique).
+model VoucherDocLine {
+  id            String       @id @default(cuid())
+  voucherId     String
+  voucher       Voucher      @relation(fields: [voucherId], references: [id], onDelete: Cascade)
+  invoiceLineId String?      @unique
+  invoiceLine   InvoiceLine? @relation(fields: [invoiceLineId], references: [id], onDelete: Restrict)
+  billLineId    String?      @unique
+  billLine      BillLine?    @relation(fields: [billLineId], references: [id], onDelete: Restrict)
+  amount        Decimal      @db.Decimal(18, 2)
+
+  @@index([voucherId])
+}
+
 
 // ============================================================
 // FINANCE: AR / AP / NOTES / PAYMENTS
@@ -981,9 +1047,10 @@ model Invoice {
   createdAt          DateTime          @default(now())
   updatedAt          DateTime          @updatedAt
 
-  lines        InvoiceLine[]
-  allocations  PaymentAllocation[]
-  costingLines CostingLine[]       @relation("InvoiceCostings")
+  lines       InvoiceLine[]
+  allocations PaymentAllocation[]
+  costingLines CostingLine[] @relation("InvoiceCostings")
+  vouchers     Voucher[]
 
   @@index([status])
   @@index([customerId])
@@ -1009,6 +1076,8 @@ model InvoiceLine {
   /// Job asal baris. Satu invoice bisa berisi beberapa job atau B/L.
   jobId        String?
   job          Job?            @relation(fields: [jobId], references: [id])
+
+  voucherLine  VoucherDocLine?
 
   @@index([jobId])
 }
@@ -1044,6 +1113,7 @@ model VendorBill {
 
   lines       BillLine[]
   allocations PaymentAllocation[]
+  vouchers    Voucher[]
 
   @@index([status])
   @@index([vendorId])
@@ -1064,6 +1134,8 @@ model BillLine {
   /// Job asal baris. Satu bill vendor bisa berisi biaya beberapa job.
   jobId        String?
   job          Job?       @relation(fields: [jobId], references: [id])
+
+  voucherLine  VoucherDocLine?
 
   @@index([jobId])
 }
@@ -1113,6 +1185,7 @@ model Payment {
   cancelledBy   User?     @relation("PaymentCancelledBy", fields: [cancelledById], references: [id])
 
   allocations PaymentAllocation[]
+  voucher     Voucher?
 
   @@index([direction])
   @@index([date])

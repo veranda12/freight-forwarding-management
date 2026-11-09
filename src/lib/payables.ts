@@ -114,6 +114,9 @@ export async function createBillFromJobCore(db: PrismaClient, jobId: string, ven
   return createBillCore(db, vendorId, lines.map((l) => l.id), userId, opts);
 }
 
+/** Hasil pencatatan pembayaran: dipakai voucher yang dibuat dalam transaksi yang sama. */
+export type PaymentRecorded = { paymentId: string; number: string; journalEntryId: string };
+
 export type VendorPaymentInput = {
   amount?: number; // IDR (bill IDR)
   amountForeign?: number; // nominal valas (bill valas)
@@ -128,88 +131,92 @@ export type VendorPaymentInput = {
  * Pembayaran ke vendor. Bill valas: selisih antara IDR yang tercatat (hutang) dan
  * IDR yang benar-benar dikeluarkan (nominal x kurs bayar) masuk ke 7100.
  */
-export async function recordVendorPaymentCore(db: PrismaClient, billId: string, input: VendorPaymentInput, userId?: string): Promise<void> {
-  const bill = await db.vendorBill.findUnique({ where: { id: billId }, include: { vendor: true } });
+export async function recordVendorPaymentTx(tx: Prisma.TransactionClient, billId: string, input: VendorPaymentInput, userId?: string): Promise<PaymentRecorded> {
+  const bill = await tx.vendorBill.findUnique({ where: { id: billId }, include: { vendor: true } });
   if (!bill) throw new Error("Bill tidak ditemukan.");
   if (bill.status === "CANCELLED") throw new Error("Bill sudah dibatalkan.");
   if (bill.status === "PAID") throw new Error("Bill sudah lunas.");
   const date = input.date ? new Date(`${input.date}T12:00:00+07:00`) : new Date();
 
-  await db.$transaction(async (tx) => {
-    const acc = await accountMap(tx);
-    const cash = await resolveCashAccount(tx, input.bankAccountId, "payment");
-    assertCashCurrency(cash, bill.currency, "pembayaran bill");
-    const number = await genProofNumber(tx, cashProofCode(cash.kind, "OUT"), date);
-    const outIdr = r2(Number(bill.total) - Number(bill.amountPaid));
+  const acc = await accountMap(tx);
+  const cash = await resolveCashAccount(tx, input.bankAccountId, "payment");
+  assertCashCurrency(cash, bill.currency, "pembayaran bill");
+  const number = await genProofNumber(tx, cashProofCode(cash.kind, "OUT"), date);
+  const outIdr = r2(Number(bill.total) - Number(bill.amountPaid));
 
-    if (bill.currency === IDR) {
-      const amount = r2(Number(input.amount));
-      if (!(amount > 0)) throw new Error("Nominal harus lebih dari 0.");
-      if (amount > outIdr + 0.5) throw new Error(`Melebihi sisa hutang (${outIdr}).`);
-      const pay = await tx.payment.create({
-        data: {
-          number, direction: "PAYMENT", date, vendorId: bill.vendorId,
-          method: (input.method as any) ?? "TRANSFER", reference: input.reference, currency: IDR, bankAccountId: cash.bankAccountId,
-          amount: new Prisma.Decimal(amount),
-          allocations: { create: [{ billId: bill.id, amount: new Prisma.Decimal(amount) }] },
-        },
-      });
-      const jeId = await postJournal(tx, {
-        date, description: `Pembayaran ${number} - ${bill.vendor.name}`, source: "PAYMENT", sourceId: pay.id,
-        lines: [
-          { accountId: acc[ACC.AP], debit: amount, description: `Pelunasan ${bill.number}` },
-          { accountId: cash.coaId, credit: amount, description: `Pembayaran dari ${cash.name}` },
-        ],
-        createdById: userId, number,
-      });
-      await tx.payment.update({ where: { id: pay.id }, data: { journalEntryId: jeId } });
-      const newPaid = r2(Number(bill.amountPaid) + amount);
-      await tx.vendorBill.update({
-        where: { id: bill.id },
-        data: { amountPaid: new Prisma.Decimal(newPaid), status: newPaid >= Number(bill.total) - 0.5 ? "PAID" : "PARTIAL" },
-      });
-      return;
-    }
-
-    const aF = r2(Number(input.amountForeign));
-    if (!(aF > 0)) throw new Error(`Nominal ${bill.currency} harus lebih dari 0.`);
-    const outF = r2(Number(bill.amountForeign) - Number(bill.amountPaidForeign));
-    if (aF > outF + 0.01) throw new Error(`Melebihi sisa hutang ${bill.currency} (${outF}).`);
-    const isFull = aF >= outF - 0.005;
-    const bookedIdr = isFull ? outIdr : r2(aF * Number(bill.exchangeRate));
-    const payRate = Number(input.paymentRate) > 0 ? Number(input.paymentRate) : await latestRate(tx, bill.currency, jktKey(date));
-    if (!(payRate && payRate > 0)) throw new Error(`Kurs ${bill.currency} untuk tanggal ini belum ada. Isi kurs pembayaran.`);
-    const cashIdr = r2(aF * payRate);
-    const fx = r2(bookedIdr - cashIdr); // > 0: bayar lebih murah dari tercatat (laba kurs)
-
+  if (bill.currency === IDR) {
+    const amount = r2(Number(input.amount));
+    if (!(amount > 0)) throw new Error("Nominal harus lebih dari 0.");
+    if (amount > outIdr + 0.5) throw new Error(`Melebihi sisa hutang (${outIdr}).`);
     const pay = await tx.payment.create({
       data: {
         number, direction: "PAYMENT", date, vendorId: bill.vendorId,
-        method: (input.method as any) ?? "TRANSFER", reference: input.reference, bankAccountId: cash.bankAccountId,
-        currency: bill.currency, exchangeRate: new Prisma.Decimal(payRate.toFixed(6)),
-        amount: new Prisma.Decimal(cashIdr),
-        allocations: { create: [{ billId: bill.id, amount: new Prisma.Decimal(bookedIdr), amountForeign: new Prisma.Decimal(aF) }] },
+        method: (input.method as any) ?? "TRANSFER", reference: input.reference, currency: IDR, bankAccountId: cash.bankAccountId,
+        amount: new Prisma.Decimal(amount),
+        allocations: { create: [{ billId: bill.id, amount: new Prisma.Decimal(amount) }] },
       },
     });
-    const lines: JournalLineInput[] = [
-      { accountId: acc[ACC.AP], debit: bookedIdr, description: `Pelunasan ${bill.number}` },
-      { accountId: cash.coaId, credit: cashIdr, description: `Pembayaran dari ${cash.name} ${bill.currency} ${aF}`, amountForeign: cash.currency === bill.currency ? aF : null },
-    ];
-    if (fx > 0) lines.push({ accountId: acc[ACC.FX], credit: fx, description: "Laba selisih kurs" });
-    if (fx < 0) lines.push({ accountId: acc[ACC.FX], debit: -fx, description: "Rugi selisih kurs" });
     const jeId = await postJournal(tx, {
-      date, description: `Pembayaran ${number} - ${bill.vendor.name}`, source: "PAYMENT", sourceId: pay.id, lines, createdById: userId, number,
+      date, description: `Pembayaran ${number} - ${bill.vendor.name}`, source: "PAYMENT", sourceId: pay.id,
+      lines: [
+        { accountId: acc[ACC.AP], debit: amount, description: `Pelunasan ${bill.number}` },
+        { accountId: cash.coaId, credit: amount, description: `Pembayaran dari ${cash.name}` },
+      ],
+      createdById: userId, number,
     });
     await tx.payment.update({ where: { id: pay.id }, data: { journalEntryId: jeId } });
-    const newPaidIdr = r2(Number(bill.amountPaid) + bookedIdr);
-    const newPaidF = r2(Number(bill.amountPaidForeign) + aF);
+    const newPaid = r2(Number(bill.amountPaid) + amount);
     await tx.vendorBill.update({
       where: { id: bill.id },
-      data: {
-        amountPaid: new Prisma.Decimal(newPaidIdr),
-        amountPaidForeign: new Prisma.Decimal(newPaidF),
-        status: isFull || newPaidIdr >= Number(bill.total) - 0.5 ? "PAID" : "PARTIAL",
-      },
+      data: { amountPaid: new Prisma.Decimal(newPaid), status: newPaid >= Number(bill.total) - 0.5 ? "PAID" : "PARTIAL" },
     });
+    return { paymentId: pay.id, number, journalEntryId: jeId };
+  }
+
+  const aF = r2(Number(input.amountForeign));
+  if (!(aF > 0)) throw new Error(`Nominal ${bill.currency} harus lebih dari 0.`);
+  const outF = r2(Number(bill.amountForeign) - Number(bill.amountPaidForeign));
+  if (aF > outF + 0.01) throw new Error(`Melebihi sisa hutang ${bill.currency} (${outF}).`);
+  const isFull = aF >= outF - 0.005;
+  const bookedIdr = isFull ? outIdr : r2(aF * Number(bill.exchangeRate));
+  const payRate = Number(input.paymentRate) > 0 ? Number(input.paymentRate) : await latestRate(tx, bill.currency, jktKey(date));
+  if (!(payRate && payRate > 0)) throw new Error(`Kurs ${bill.currency} untuk tanggal ini belum ada. Isi kurs pembayaran.`);
+  const cashIdr = r2(aF * payRate);
+  const fx = r2(bookedIdr - cashIdr); // > 0: bayar lebih murah dari tercatat (laba kurs)
+
+  const pay = await tx.payment.create({
+    data: {
+      number, direction: "PAYMENT", date, vendorId: bill.vendorId,
+      method: (input.method as any) ?? "TRANSFER", reference: input.reference, bankAccountId: cash.bankAccountId,
+      currency: bill.currency, exchangeRate: new Prisma.Decimal(payRate.toFixed(6)),
+      amount: new Prisma.Decimal(cashIdr),
+      allocations: { create: [{ billId: bill.id, amount: new Prisma.Decimal(bookedIdr), amountForeign: new Prisma.Decimal(aF) }] },
+    },
   });
+  const lines: JournalLineInput[] = [
+    { accountId: acc[ACC.AP], debit: bookedIdr, description: `Pelunasan ${bill.number}` },
+    { accountId: cash.coaId, credit: cashIdr, description: `Pembayaran dari ${cash.name} ${bill.currency} ${aF}`, amountForeign: cash.currency === bill.currency ? aF : null },
+  ];
+  if (fx > 0) lines.push({ accountId: acc[ACC.FX], credit: fx, description: "Laba selisih kurs" });
+  if (fx < 0) lines.push({ accountId: acc[ACC.FX], debit: -fx, description: "Rugi selisih kurs" });
+  const jeId = await postJournal(tx, {
+    date, description: `Pembayaran ${number} - ${bill.vendor.name}`, source: "PAYMENT", sourceId: pay.id, lines, createdById: userId, number,
+  });
+  await tx.payment.update({ where: { id: pay.id }, data: { journalEntryId: jeId } });
+  const newPaidIdr = r2(Number(bill.amountPaid) + bookedIdr);
+  const newPaidF = r2(Number(bill.amountPaidForeign) + aF);
+  await tx.vendorBill.update({
+    where: { id: bill.id },
+    data: {
+      amountPaid: new Prisma.Decimal(newPaidIdr),
+      amountPaidForeign: new Prisma.Decimal(newPaidF),
+      status: isFull || newPaidIdr >= Number(bill.total) - 0.5 ? "PAID" : "PARTIAL",
+    },
+  });
+  return { paymentId: pay.id, number, journalEntryId: jeId };
+}
+
+/** Pembayaran ke vendor dalam transaksinya sendiri. */
+export async function recordVendorPaymentCore(db: PrismaClient, billId: string, input: VendorPaymentInput, userId?: string): Promise<void> {
+  await db.$transaction((tx) => recordVendorPaymentTx(tx, billId, input, userId));
 }

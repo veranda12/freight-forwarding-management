@@ -4,6 +4,7 @@ import { requireCan } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
 import { can } from "@/lib/rbac";
 import { formatIDR } from "@/lib/format";
+import { docLineJobs } from "@/lib/doc-vouchers";
 import { cashAccountOptions } from "@/lib/cash-accounts";
 import { PageHeader } from "@/components/page-header";
 import { StatStrip } from "@/components/stat-strip";
@@ -18,20 +19,32 @@ export default async function VouchersPage() {
   const [vouchers, cash] = await Promise.all([
     prisma.voucher.findMany({
       orderBy: [{ date: "desc" }, { number: "desc" }],
-      include: { job: { select: { number: true, hblNo: true, mblNo: true, hawbNo: true, mawbNo: true } } },
+      include: {
+        job: { select: { id: true, number: true, hblNo: true, mblNo: true, hawbNo: true, mawbNo: true } },
+        invoice: { select: { id: true, number: true, status: true, job: { select: { number: true } } } },
+        bill: { select: { id: true, number: true, status: true, job: { select: { number: true } } } },
+        docLines: { select: { invoiceLine: { select: { job: { select: { number: true } } } }, billLine: { select: { job: { select: { number: true } } } } } },
+      },
     }),
     cashAccountOptions(prisma, "payment"),
   ]);
   const rows: VoucherRow[] = vouchers.map((v) => ({
-    id: v.id, number: v.number, date: v.date.toISOString(), job: v.job.number,
-    bl: [v.job.hblNo, v.job.mblNo, v.job.hawbNo, v.job.mawbNo].filter(Boolean).join(" / "),
+    id: v.id, number: v.number, date: v.date.toISOString(),
+    source: v.invoice ? { kind: "INVOICE", label: v.invoice.number, href: `/invoices/${v.invoice.id}` }
+      : v.bill ? { kind: "BILL", label: v.bill.number, href: `/bills/${v.bill.id}` }
+      : { kind: "JOB", label: v.job?.number ?? "-", href: v.job ? `/costing/${v.job.id}` : null },
+    sourceText: v.invoice?.number ?? v.bill?.number ?? v.job?.number ?? "",
+    // Voucher invoice/bill: status pelunasan dokumennya. Voucher job: status voucher sendiri.
+    docSettled: v.invoice ? v.invoice.status === "PAID" : v.bill ? v.bill.status === "PAID" : null,
+    bl: v.job ? [v.job.hblNo, v.job.mblNo, v.job.hawbNo, v.job.mawbNo].filter(Boolean).join(" / ")
+      : docLineJobs(v),
     payee: v.payee, total: Number(v.total), status: v.status, proofNumber: v.proofNumber, journalEntryId: v.journalEntryId,
   }));
   const unpaid = rows.filter((r) => r.status === "ISSUED");
   const canWrite = can(user.role, "vouchers", "write");
   return (
     <div className="space-y-6">
-      <PageHeader title="Voucher" description="Pengeluaran biaya harian job. Biaya terkunci sejak voucher dibuat">
+      <PageHeader title="Voucher" description="Voucher dari invoice (uang masuk), vendor bill (uang keluar), atau biaya job">
         {canWrite && <Button asChild><Link href="/vouchers/new"><Plus /> Buat Voucher</Link></Button>}
       </PageHeader>
       <StatStrip items={[

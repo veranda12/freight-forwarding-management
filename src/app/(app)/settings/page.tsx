@@ -5,6 +5,8 @@ import { PRODUCT } from "@/config/product";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CompanyForm } from "./company-form";
+import { ProofFormsForm } from "./proof-forms-form";
+import { listProofForms } from "@/lib/proof-forms";
 
 export const dynamic = "force-dynamic";
 
@@ -26,6 +28,7 @@ export default async function SettingsPage() {
           signatoryName: v(c?.signatoryName), signatoryTitle: v(c?.signatoryTitle), docCode: v(c?.docCode),
         }}
       />
+      <ProofFormsForm initial={await listProofForms(prisma)} canWrite={can(user.role, "settings", "write")} />
       <Card className="max-w-xl">
         <CardHeader><CardTitle className="text-base">Aplikasi</CardTitle></CardHeader>
         <CardContent className="space-y-2 text-sm">

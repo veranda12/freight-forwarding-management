@@ -81,11 +81,11 @@ export default async function TaxPage({ searchParams }: { searchParams: Promise<
 
       <TaxTable title="PPN Keluaran (invoice)" rows={recap.ppnOut} cols={["Tanggal", "No. Invoice", "Customer", "DPP", "PPN"]}
         render={(r: any) => [r.date, r.number, r.party, r.dpp, r.ppn]} />
-      <TaxTable title="PPN Masukan (vendor bill)" rows={recap.ppnIn} cols={["Tanggal", "No. Bill", "Vendor", "DPP", "PPN"]}
+      <TaxTable title="PPN Masukan (vendor bill, voucher, Jurnal Pengeluaran)" rows={recap.ppnIn} cols={["Tanggal", "No. Dokumen", "Vendor / keterangan", "DPP", "PPN"]}
         render={(r: any) => [r.date, r.number, r.party, r.dpp, r.ppn]} />
-      <TaxTable title="PPh 23 Dipotong (vendor bill)" rows={recap.pph23} cols={["Tanggal", "No. Bill", "Vendor", "DPP", "PPh 23"]}
+      <TaxTable title="PPh 23 Dipotong (vendor bill, voucher, Jurnal Pengeluaran)" rows={recap.pph23} cols={["Tanggal", "No. Dokumen", "Vendor / keterangan", "DPP", "PPh 23"]}
         render={(r: any) => [r.date, r.number, r.party, r.dpp, r.pph]} />
-      <TaxTable title="PPh 26 Dipotong (vendor luar negeri)" rows={recap.pph26} cols={["Tanggal", "No. Bill", "Vendor", "DPP", "PPh 26"]}
+      <TaxTable title="PPh 26 Dipotong (vendor luar negeri)" rows={recap.pph26} cols={["Tanggal", "No. Dokumen", "Vendor / keterangan", "DPP", "PPh 26"]}
         render={(r: any) => [r.date, r.number, r.party, r.dpp, r.pph]} />
 
       <p className="text-xs text-muted-foreground">
@@ -96,7 +96,7 @@ export default async function TaxPage({ searchParams }: { searchParams: Promise<
   );
 }
 
-function TaxTable({ title, rows, cols, render }: { title: string; rows: unknown[]; cols: string[]; render: (r: any) => (string | number)[] }) {
+function TaxTable({ title, rows, cols, render }: { title: string; rows: unknown[]; cols: string[]; render: (r: any) => (string | number | null)[] }) {
   return (
     <Card>
       <CardHeader><CardTitle className="text-base">{title}</CardTitle></CardHeader>
@@ -111,7 +111,7 @@ function TaxTable({ title, rows, cols, render }: { title: string; rows: unknown[
                 <TableRow key={idx}>
                   {render(r).map((v, i) => (
                     <TableCell key={i} className={i >= 3 ? "text-right tabular-nums" : ""}>
-                      {i === 0 ? formatDate(String(v)) : i >= 3 ? formatIDR(Number(v)) : v}
+                      {i === 0 ? formatDate(String(v)) : i >= 3 ? (v === null ? "-" : formatIDR(Number(v))) : v}
                     </TableCell>
                   ))}
                 </TableRow>

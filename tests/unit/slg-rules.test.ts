@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cashProofCode, formatInvoiceNumber, formatProofNumber } from "../../src/lib/sequence";
+import { cashProofCode, formatInvoiceNumber, formatProofNumber, withProofDay } from "../../src/lib/sequence";
 import { invoiceEditBlock, invoiceTotals, receiptCancelBlock } from "../../src/lib/receivables";
 import { jobLockReason, shouldCloseJob } from "../../src/lib/job-lock";
 import { journalEditBlock } from "../../src/lib/journal";
@@ -11,8 +11,23 @@ import { terbilang } from "../../src/lib/pdf/proof-company";
 import { can } from "../../src/lib/rbac";
 
 describe("nomor bukti", () => {
-  it("format bukti SLG/BM/26/11/001", () => {
-    expect(formatProofNumber("SLG", "BM", 2026, 11, 1)).toBe("SLG/BM/26/11/001");
+  it("format bukti mengikuti contoh client: SLG/BK/26/11/06/0258", () => {
+    expect(formatProofNumber("SLG", "BK", 2026, 11, 6, 258)).toBe("SLG/BK/26/11/06/0258");
+    expect(formatProofNumber("SLG", "BM", 2026, 1, 1, 1)).toBe("SLG/BM/26/01/01/0001");
+    expect(formatProofNumber("SLG", "JU", 2026, 12, 31, 12345)).toBe("SLG/JU/26/12/31/12345");
+  });
+  it("edit tanggal di bulan yang sama: segmen tanggal ikut, nomor urut tetap", () => {
+    const d = new Date("2026-11-09T12:00:00+07:00");
+    expect(withProofDay("SLG/BK/26/11/06/0258", d)).toBe("SLG/BK/26/11/09/0258");
+    expect(withProofDay("SLG/VC/26/11/06/12345", d)).toBe("SLG/VC/26/11/09/12345");
+    // tengah malam WIB tetap dihitung tanggal Jakarta
+    expect(withProofDay("SLG/KK/26/11/06/0001", new Date("2026-11-09T17:30:00Z"))).toBe("SLG/KK/26/11/10/0001");
+  });
+  it("nomor format lama dan nomor lain tidak diubah", () => {
+    const d = new Date("2026-11-09T12:00:00+07:00");
+    expect(withProofDay("SLG/BM/26/11/001", d)).toBe("SLG/BM/26/11/001");
+    expect(withProofDay("JE/2026/11/0001", d)).toBe("JE/2026/11/0001");
+    expect(withProofDay("INV/26/11/021", d)).toBe("INV/26/11/021");
   });
   it("format invoice 3 angka, otomatis 4 angka mulai 1000", () => {
     expect(formatInvoiceNumber(2026, 11, 21)).toBe("INV/26/11/021");

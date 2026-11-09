@@ -18,6 +18,7 @@ import { MoneyInput } from "@/components/money-input";
 import { SearchableSelect } from "@/components/searchable-select";
 import { formatIDR, formatDate, formatMoney } from "@/lib/format";
 import { cancelCashEntryAction, createCashEntryAction, previewProofAction, updateCashEntryAction } from "../actions";
+import { TaxRowsEditor, taxSummary, type TaxRowDraft, newTaxRow } from "@/components/tax-rows-editor";
 
 export type CashOpt = { id: string; label: string; currency?: string; kind?: string };
 type Opt = { id: string; label: string };
@@ -26,6 +27,7 @@ type Entry = {
   bankName: string; counter: string; reversed: boolean; currency: string; amountForeign: number | null;
   bankAccountId: string; note: string; reference: string; rate: number | null; reconciled: boolean;
   rows: { counterAccountId: string; amount: number; description: string }[];
+  taxRows: { kind: string; amount: number; description: string }[];
 };
 export type CashPrefill = { direction: "IN" | "OUT"; bankAccountId: string; amount: string; dateKey: string; description: string };
 type Row = { key: number; counterAccountId: string; amount: string; description: string };
@@ -49,6 +51,8 @@ export function CashEntryPanel({ cashAccounts, defaultCashId, inAccounts, outAcc
   const [open, setOpen] = useState((!!prefill || !!editing0) && canWrite);
   const [f, setF] = useState(editing0 ? fromEntry(editing0) : prefill ? { ...blank, direction: prefill.direction, bankAccountId: prefill.bankAccountId, dateKey: prefill.dateKey, description: prefill.description } : blank);
   const [rows, setRows] = useState<Row[]>(() => (editing0 ? rowsOf(editing0) : [newRow(prefill?.amount ?? "")]));
+  const taxOf = (e: Entry): TaxRowDraft[] => e.taxRows.map((r) => newTaxRow(r.kind, String(r.amount), r.description));
+  const [taxRows, setTaxRows] = useState<TaxRowDraft[]>(() => (editing0 ? taxOf(editing0) : []));
   const set = (p: Partial<typeof f>) => setF((x) => ({ ...x, ...p }));
   const setRow = (key: number, p: Partial<Row>) => setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...p } : r)));
   const [cancel, setCancel] = useState<Entry | null>(null);
@@ -60,7 +64,8 @@ export function CashEntryPanel({ cashAccounts, defaultCashId, inAccounts, outAcc
   const isFx = cur !== "IDR";
   const rateNum = Number(f.rate) || rates[cur] || 0;
   const total = rows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
-  const rowsReady = rows.length > 0 && rows.every((r) => r.counterAccountId && Number(r.amount) > 0);
+  const tax = taxSummary(f.direction === "OUT" ? taxRows : [], total);
+  const rowsReady = rows.length > 0 && rows.every((r) => r.counterAccountId && Number(r.amount) > 0) && tax.ready;
   // Saat edit, rekening hanya bisa diganti ke jenis yang sama, karena kodenya ada di nomor bukti.
   const editKind = editing ? cashAccounts.find((a) => a.id === editing.bankAccountId)?.kind : null;
   const cashChoices = editKind ? cashAccounts.filter((a) => a.kind === editKind) : cashAccounts;
@@ -74,16 +79,17 @@ export function CashEntryPanel({ cashAccounts, defaultCashId, inAccounts, outAcc
     return () => { live = false; };
   }, [editing, open, account?.kind, f.direction, f.dateKey]);
 
-  function startNew() { setEditing(null); setF(blank); setRows([newRow()]); }
-  function startEdit(e: Entry) { setEditing(e); setF(fromEntry(e)); setRows(rowsOf(e)); setOpen(true); }
+  function startNew() { setEditing(null); setF(blank); setRows([newRow()]); setTaxRows([]); }
+  function startEdit(e: Entry) { setEditing(e); setF(fromEntry(e)); setRows(rowsOf(e)); setTaxRows(taxOf(e)); setOpen(true); }
   function save() {
     start(async () => {
       const input = {
         direction: f.direction, bankAccountId: f.bankAccountId, dateKey: f.dateKey, description: f.description, reference: f.reference, rate: isFx ? rateNum : null,
         rows: rows.map((r) => ({ counterAccountId: r.counterAccountId, amount: Number(r.amount), description: r.description })),
+        taxRows: f.direction === "OUT" ? taxRows.map((r) => ({ kind: r.kind, amount: Number(r.amount), description: r.description })) : [],
       };
       const res = editing ? await updateCashEntryAction(editing.id, input) : await createCashEntryAction(input);
-      if (res.ok) { toast.success(editing ? "Transaksi diperbarui, nomor bukti tetap." : `${LABEL[f.direction]} dicatat.`); setOpen(false); setEditing(null); setF(blank); setRows([newRow()]); router.replace("/accounting/cash-entry"); router.refresh(); }
+      if (res.ok) { toast.success(editing ? "Transaksi diperbarui. Nomor urut bukti tetap." : `${LABEL[f.direction]} dicatat.`); setOpen(false); setEditing(null); setF(blank); setRows([newRow()]); setTaxRows([]); router.replace("/accounting/cash-entry"); router.refresh(); }
       else toast.error(res.error);
     });
   }
@@ -105,13 +111,13 @@ export function CashEntryPanel({ cashAccounts, defaultCashId, inAccounts, outAcc
           <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
             <DialogHeader>
               <DialogTitle>{editing ? `Edit ${editing.number}` : LABEL[f.direction]}</DialogTitle>
-              <DialogDescription>{editing ? "Nomor bukti tetap, dan isi sebelumnya tersimpan di riwayat perubahan." : "Untuk transaksi di luar invoice dan bill. Satu nomor bukti bisa berisi beberapa baris."}</DialogDescription>
+              <DialogDescription>{editing ? "Nomor urut tetap; tanggal di nomor ikut tanggal baru (hanya di bulan yang sama). Isi sebelumnya tersimpan di riwayat perubahan." : "Untuk transaksi di luar invoice dan bill. Satu nomor bukti bisa berisi beberapa baris."}</DialogDescription>
             </DialogHeader>
             <div className="grid gap-3 text-sm sm:grid-cols-2">
               {!editing && (
                 <div className="flex gap-2 sm:col-span-2">
-                  <Button type="button" variant={f.direction === "OUT" ? "default" : "outline"} className="flex-1" onClick={() => { set({ direction: "OUT" }); setRows([newRow()]); }}><ArrowUpRight /> Jurnal Pengeluaran</Button>
-                  <Button type="button" variant={f.direction === "IN" ? "default" : "outline"} className="flex-1" onClick={() => { set({ direction: "IN" }); setRows([newRow()]); }}><ArrowDownLeft /> Jurnal Penerimaan</Button>
+                  <Button type="button" variant={f.direction === "OUT" ? "default" : "outline"} className="flex-1" onClick={() => { set({ direction: "OUT" }); setRows([newRow()]); setTaxRows([]); }}><ArrowUpRight /> Jurnal Pengeluaran</Button>
+                  <Button type="button" variant={f.direction === "IN" ? "default" : "outline"} className="flex-1" onClick={() => { set({ direction: "IN" }); setRows([newRow()]); setTaxRows([]); }}><ArrowDownLeft /> Jurnal Penerimaan</Button>
                 </div>
               )}
               <div className="space-y-1.5">
@@ -148,6 +154,11 @@ export function CashEntryPanel({ cashAccounts, defaultCashId, inAccounts, outAcc
                 </div>
                 {isFx && <p className="text-xs text-muted-foreground">Dicatat di buku: {formatIDR(Math.round(total * rateNum * 100) / 100)}</p>}
               </div>
+              {f.direction === "OUT" && (
+                <div className="sm:col-span-2">
+                  <TaxRowsEditor rows={taxRows} onChange={setTaxRows} base={total} format={(n) => (isFx ? formatMoney(n, cur, 2) : formatIDR(n))} />
+                </div>
+              )}
               <div className="space-y-1.5 sm:col-span-2"><Label>Referensi (opsional)</Label><Input value={f.reference} onChange={(e) => set({ reference: e.target.value })} placeholder="No. mutasi rekening koran" /></div>
             </div>
             <DialogFooter>

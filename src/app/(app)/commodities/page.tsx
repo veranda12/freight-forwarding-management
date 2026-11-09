@@ -4,6 +4,7 @@ import { requireCan } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
 import { can } from "@/lib/rbac";
 import { PageHeader } from "@/components/page-header";
+import { MasterImportDialog } from "@/components/master-import-dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -17,6 +18,7 @@ export default async function CommoditiesPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="Commodity" description={`${items.length} komoditas dengan HS Code`}>
+        {canWrite && <MasterImportDialog kind="commodities" label="Commodity" />}
         {canWrite && <Button asChild><Link href="/commodities/new"><Plus /> Commodity Baru</Link></Button>}
       </PageHeader>
       <Card>

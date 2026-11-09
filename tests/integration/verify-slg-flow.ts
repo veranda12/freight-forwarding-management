@@ -110,7 +110,7 @@ async function main() {
   const v2 = await line(j1.id, "BUYING", service.id, 300_000, true, vendor.id);
   const voucherId = await createVoucher(db, { jobId: j1.id, lineIds: [v1.id, v2.id], dateKey: today, payee: vendor.name });
   let vc = await db.voucher.findUniqueOrThrow({ where: { id: voucherId } });
-  ok(/^[A-Z]+\/VC\/\d{2}\/\d{2}\/\d{3,}$/.test(vc.number), `format voucher ${vc.number}`);
+  ok(/^[A-Z]+\/VC\/\d{2}\/\d{2}\/\d{2}\/\d{4,}$/.test(vc.number), `format voucher ${vc.number}`);
   await throws(() => updateJobCharge(db, v1.id, { side: "BUYING", chargeCodeId: service.id, qty: 1, unitPrice: 1, taxable: true }), /voucher/, "biaya terkunci sejak voucher dibuat");
   await cancelVoucher(db, voucherId, "uji batal");
   ok((await db.costingLine.findUniqueOrThrow({ where: { id: v1.id } })).voucherId === null, "batal voucher membuka biaya");
