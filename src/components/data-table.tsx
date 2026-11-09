@@ -37,6 +37,8 @@ interface DataTableProps<TData, TValue> {
   searchKeys?: (keyof TData)[];
   pageSize?: number;
   onRowClick?: (row: TData) => void;
+  /** Kelas tambahan per baris, mis. menyorot data yang baru disimpan. */
+  rowClassName?: (row: TData) => string | undefined;
   toolbar?: React.ReactNode;
   emptyTitle?: string;
   facets?: Facet[];
@@ -51,6 +53,7 @@ export function DataTable<TData, TValue>({
   searchKeys,
   pageSize = 25,
   onRowClick,
+  rowClassName,
   toolbar,
   emptyTitle,
   facets,
@@ -157,7 +160,7 @@ export function DataTable<TData, TValue>({
                 <TableRow
                   key={row.id}
                   onClick={() => onRowClick?.(row.original)}
-                  className={cn(onRowClick && "cursor-pointer")}
+                  className={cn(onRowClick && "cursor-pointer", rowClassName?.(row.original))}
                 >
                   {row.getVisibleCells().map((cell) => (
                     <TableCell key={cell.id}>

@@ -165,6 +165,9 @@ test.describe("Baris pajak, nomor bukti, dan cetak SOP", () => {
     expect(v.taxLines.map((t) => [t.kind, t.amount.toNumber()])).toEqual([["PPN_IN", 11_000], ["PPH23", 20_000]]);
     expect(v.number).toMatch(/^SLG\/VC\/\d{2}\/\d{2}\/\d{2}\/\d{4}$/);
     await expect(page.locator("main tr", { hasText: v.number })).toContainText(rp("1.491.000"));
+    // Sesudah simpan: daftar Voucher, voucher baru di baris paling atas dan disorot
+    await expect(page.locator("main tbody tr").first()).toContainText(v.number);
+    await expect(page.locator("main tbody tr").first()).toContainText("Baru disimpan");
     const pdf = await page.request.get(`/api/vouchers/${v.id}/pdf`);
     expect(pdf.status()).toBe(200);
     expect(pdf.headers()["content-type"]).toContain("application/pdf");

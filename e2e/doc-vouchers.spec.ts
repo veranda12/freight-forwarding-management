@@ -76,7 +76,14 @@ test.describe("Voucher dari invoice dan vendor bill", () => {
     await expect(table.getByRole("row", { name: /Total/ })).toContainText(rp("1.011.000"));
     await page.getByRole("button", { name: "Simpan voucher" }).click();
     await expect(page.getByText(/Voucher SLG\/VC\/.+ tersimpan\./)).toBeVisible();
-    await page.waitForURL(`**/bills/${billId}`);
+    // Sesudah simpan: ke daftar Voucher, voucher baru di baris paling atas dan disorot
+    await page.waitForURL(/\/vouchers\?baru=/);
+    const firstSaved = await db.voucher.findFirstOrThrow({ where: { billId }, orderBy: { createdAt: "desc" } });
+    expect(new URL(page.url()).searchParams.get("baru")).toBe(firstSaved.id);
+    const topRow = page.locator("main tbody tr").first();
+    await expect(topRow).toContainText(firstSaved.number);
+    await expect(topRow).toContainText("Baru disimpan");
+    await expect(page.locator("main").getByText("Baru disimpan")).toHaveCount(1);
 
     let bill = await db.vendorBill.findUniqueOrThrow({ where: { id: billId } });
     expect([bill.status, bill.amountPaid.toNumber()]).toEqual(["UNPAID", 0]);
@@ -85,11 +92,12 @@ test.describe("Voucher dari invoice dan vendor bill", () => {
     await expect(page.getByRole("checkbox", { name: new RegExp(`${A.number.replace(/\//g, "\\/")}$`) })).toBeDisabled();
     await page.getByRole("checkbox", { name: new RegExp(`${B.number.replace(/\//g, "\\/")}$`) }).check();
     await page.getByRole("button", { name: "Simpan voucher" }).click();
-    await page.waitForURL(`**/bills/${billId}`);
+    await page.waitForURL(/\/vouchers\?baru=/);
     bill = await db.vendorBill.findUniqueOrThrow({ where: { id: billId } });
     expect([bill.status, bill.amountPaid.toNumber()]).toEqual(["UNPAID", 0]);
     expect({ entries: await db.journalEntry.count(), payments: await db.payment.count() }).toEqual(ledgerBefore);
     // Bill masih bisa dibayar seperti biasa, dan tombol voucher tetap ada (voucher tidak terikat status bayar)
+    await page.goto(`/bills/${billId}`);
     await expect(page.locator(`a[href="/vouchers/new?bill=${billId}"]:visible`)).toBeVisible();
     await expect(page.locator("main").getByText("Total voucher aktif")).toBeVisible();
 
@@ -122,7 +130,7 @@ test.describe("Voucher dari invoice dan vendor bill", () => {
     await expect(table.getByRole("row", { name: /Penerimaan dari/ })).toContainText(rp(expected.toLocaleString("id-ID")));
     await page.getByRole("button", { name: "Simpan voucher" }).click();
     await expect(page.getByText(/Voucher SLG\/VC\/.+ tersimpan\./)).toBeVisible();
-    await page.waitForURL(`**/invoices/${invoiceId}`);
+    await page.waitForURL(/\/vouchers\?baru=/);
 
     const v = await db.voucher.findFirstOrThrow({ where: { invoiceId } });
     expect([v.total.toNumber(), v.paymentId, v.kind]).toEqual([expected, null, "INVOICE"]);
@@ -138,7 +146,7 @@ test.describe("Voucher dari invoice dan vendor bill", () => {
     const boxB = page.getByRole("checkbox", { name: new RegExp(`${B.number.replace(/\//g, "\\/")}$`) });
     await boxB.check();
     await page.getByRole("button", { name: "Simpan voucher" }).click();
-    await page.waitForURL(`**/bills/${billId}`);
+    await page.waitForURL(/\/vouchers\?baru=/);
     const v = await db.voucher.findFirstOrThrow({ where: { billId } });
 
     await page.goto("/vouchers");
@@ -184,7 +192,7 @@ test.describe("Voucher dari invoice dan vendor bill", () => {
     const req = fin.page.waitForRequest((r) => r.method() === "POST" && !!r.headers()["next-action"]);
     await fin.page.getByRole("button", { name: "Simpan voucher" }).click();
     const sent = await req;
-    await fin.page.waitForURL(`**/bills/${billId}`);
+    await fin.page.waitForURL(/\/vouchers\?baru=/);
     const before = await db.voucher.count({ where: { billId } });
 
     const mgr = await session(browser, "manager@demo.com");

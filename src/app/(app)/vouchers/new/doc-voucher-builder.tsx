@@ -77,7 +77,8 @@ export function DocVoucherBuilder({ kind, docs, focusId, q, today, lockKey, cash
         : await createBillVoucherAction({ ...common, billId: doc.id });
       if (res.ok) {
         toast.success(`Voucher ${res.number} tersimpan.`);
-        router.push(isInvoice ? `/invoices/${doc.id}` : `/bills/${doc.id}`);
+        // Semua jenis voucher sesudah disimpan ke daftar Voucher, voucher baru disorot di atas (keputusan 2026-11-09).
+        router.push(`/vouchers?baru=${res.id}`);
         router.refresh();
       } else toast.error(res.error);
     });

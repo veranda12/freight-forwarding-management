@@ -13,8 +13,11 @@ import { VouchersTable, type VoucherRow } from "./vouchers-table";
 
 export const dynamic = "force-dynamic";
 
-export default async function VouchersPage() {
+export default async function VouchersPage({ searchParams }: { searchParams: Promise<{ baru?: string | string[] }> }) {
   const user = await requireCan("vouchers", "read");
+  // ?baru=<id> dari form Buat Voucher: voucher yang baru disimpan ditaruh paling atas dan disorot.
+  const sp = await searchParams;
+  const fresh = (Array.isArray(sp.baru) ? sp.baru[0] : sp.baru ?? "").slice(0, 40) || null;
   const today = new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10);
   const [vouchers, cash] = await Promise.all([
     prisma.voucher.findMany({
@@ -40,6 +43,8 @@ export default async function VouchersPage() {
     hasPayment: !!v.paymentId,
   }));
   // Hanya voucher biaya job yang punya proses bayar; voucher invoice/bill hanya catatan.
+  const freshRow = fresh ? rows.find((r) => r.id === fresh) ?? null : null;
+  const ordered = freshRow ? [freshRow, ...rows.filter((r) => r !== freshRow)] : rows;
   const unpaid = rows.filter((r) => r.source.kind === "JOB" && r.status === "ISSUED");
   const canWrite = can(user.role, "vouchers", "write");
   return (
@@ -52,7 +57,7 @@ export default async function VouchersPage() {
         { label: "Biaya job belum dibayar", value: unpaid.length, tone: unpaid.length ? "warning" : undefined },
         { label: "Nilai belum dibayar", value: formatIDR(unpaid.reduce((s, r) => s + r.total, 0)), tone: "warning" },
       ]} />
-      <VouchersTable data={rows} canWrite={canWrite} cashAccounts={cash.options} defaultCashId={cash.defaultId} today={today} />
+      <VouchersTable data={ordered} freshId={freshRow?.id ?? null} canWrite={canWrite} cashAccounts={cash.options} defaultCashId={cash.defaultId} today={today} />
     </div>
   );
 }

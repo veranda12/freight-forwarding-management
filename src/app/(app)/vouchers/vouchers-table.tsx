@@ -31,8 +31,8 @@ const SOURCE = { JOB: "Job", INVOICE: "Invoice", BILL: "Bill" } as const;
 
 const STATUS: Record<VoucherStatus, string> = { ISSUED: "Belum dibayar", PAID: "Dibayar", CANCELLED: "Batal" };
 
-export function VouchersTable({ data, canWrite, cashAccounts, defaultCashId, today }: {
-  data: VoucherRow[]; canWrite: boolean; cashAccounts: { id: string; label: string }[]; defaultCashId: string | null; today: string;
+export function VouchersTable({ data, freshId = null, canWrite, cashAccounts, defaultCashId, today }: {
+  data: VoucherRow[]; freshId?: string | null; canWrite: boolean; cashAccounts: { id: string; label: string }[]; defaultCashId: string | null; today: string;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -62,7 +62,15 @@ export function VouchersTable({ data, canWrite, cashAccounts, defaultCashId, tod
   }
 
   const columns: ColumnDef<VoucherRow>[] = [
-    { accessorKey: "number", header: "No. Voucher", cell: ({ row }) => <span className="whitespace-nowrap font-medium">{row.original.number}</span> },
+    {
+      accessorKey: "number", header: "No. Voucher",
+      cell: ({ row }) => (
+        <span className="whitespace-nowrap font-medium">
+          {row.original.number}
+          {row.original.id === freshId && <Badge className="ml-1.5 text-[10px]">Baru disimpan</Badge>}
+        </span>
+      ),
+    },
     { accessorKey: "date", header: "Tanggal", cell: ({ row }) => <span className="whitespace-nowrap">{formatDate(row.original.date)}</span> },
     {
       accessorKey: "sourceText", header: "Sumber",
@@ -111,7 +119,7 @@ export function VouchersTable({ data, canWrite, cashAccounts, defaultCashId, tod
 
   return (
     <>
-      <DataTable columns={columns} data={data} searchPlaceholder="Cari no. voucher, no. invoice/bill/job, no. B/L, atau pihak…" searchKeys={["number", "sourceText", "bl", "payee"]} emptyTitle="Belum ada voucher" />
+      <DataTable columns={columns} data={data} rowClassName={(r) => (r.id === freshId ? "bg-primary/10 hover:bg-primary/15" : undefined)} searchPlaceholder="Cari no. voucher, no. invoice/bill/job, no. B/L, atau pihak…" searchKeys={["number", "sourceText", "bl", "payee"]} emptyTitle="Belum ada voucher" />
 
       <Dialog open={!!pay} onOpenChange={(v) => !v && setPay(null)}>
         <DialogContent>
