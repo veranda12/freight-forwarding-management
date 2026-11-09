@@ -10,7 +10,7 @@ import { errorMessage } from "@/lib/action-error";
 type Result<T = object> = ({ ok: true } & T) | { ok: false; error: string };
 const fail = (e: unknown): { ok: false; error: string } => ({ ok: false, error: errorMessage(e, "Gagal.") });
 
-function refresh(jobId?: string) {
+function refresh(jobId?: string | null) {
   revalidatePath("/vouchers");
   revalidatePath("/accounting");
   if (jobId) revalidatePath(`/costing/${jobId}`);

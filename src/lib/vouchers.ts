@@ -69,6 +69,7 @@ export async function payVoucher(db: PrismaClient, voucherId: string, input: Vou
       include: { lines: { include: { chargeCode: true } }, taxLines: { orderBy: { sortOrder: "asc" } }, job: { select: { number: true } } },
     });
     if (!voucher) throw new Error("Voucher tidak ditemukan.");
+    if (voucher.kind !== "JOB") throw new Error("Voucher invoice/bill sudah tercatat sebagai pembayaran saat dibuat.");
     if (voucher.status !== "ISSUED") throw new Error(voucher.status === "PAID" ? "Voucher sudah dibayar." : "Voucher sudah dibatalkan.");
     const cash = await resolveCashAccount(tx, input.bankAccountId, "payment");
     assertCashCurrency(cash, "IDR", "pembayaran voucher");
@@ -81,7 +82,7 @@ export async function payVoucher(db: PrismaClient, voucherId: string, input: Vou
       byAccount[id] = r2((byAccount[id] ?? 0) + Number(l.actualIdr));
     }
     const total = Number(voucher.total);
-    const description = `Voucher ${voucher.number} - ${voucher.payee} (${voucher.job.number})`;
+    const description = `Voucher ${voucher.number} - ${voucher.payee}${voucher.job ? ` (${voucher.job.number})` : ""}`;
     const taxLines = taxJournalLines(voucher.taxLines.map((t) => ({ kind: t.kind, amount: Number(t.amount), description: t.description })), acc);
     const journalEntryId = await postJournal(tx, {
       date, description, source: "VOUCHER", sourceId: voucher.id, createdById: userId, number,
@@ -112,6 +113,7 @@ export async function cancelVoucher(db: PrismaClient, voucherId: string, reason:
   return db.$transaction(async (tx) => {
     const voucher = await tx.voucher.findUnique({ where: { id: voucherId } });
     if (!voucher) throw new Error("Voucher tidak ditemukan.");
+    if (voucher.kind !== "JOB") throw new Error("Voucher invoice/bill sudah tercatat sebagai pembayaran. Koreksi lewat Jurnal Umum.");
     if (voucher.status === "PAID") throw new Error("Voucher sudah dibayar. Koreksi lewat Jurnal Umum.");
     if (voucher.status === "CANCELLED") throw new Error("Voucher sudah dibatalkan.");
     await tx.costingLine.updateMany({ where: { voucherId }, data: { voucherId: null } });

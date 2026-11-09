@@ -28,7 +28,7 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
   if (!v) return NextResponse.json({ error: "voucher not found" }, { status: 404 });
 
   const bank = v.bankAccountId ? await prisma.bankAccount.findUnique({ where: { id: v.bankAccountId }, include: { coaAccount: { select: { code: true } } } }) : null;
-  const bl = [v.job.hblNo, v.job.mblNo, v.job.hawbNo, v.job.mawbNo].filter(Boolean).join(" / ");
+  const bl = v.job ? [v.job.hblNo, v.job.mblNo, v.job.hawbNo, v.job.mawbNo].filter(Boolean).join(" / ") : "";
   const method = { TRANSFER: "Transfer", CASH: "Tunai", CHEQUE: "Cek/Giro" }[v.method ?? ""] ?? "-";
   const rows: ProofRow[] = [
     ...v.lines.map((l) => ({
@@ -46,7 +46,7 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
     <ProofDocument doc={{
       form: "VC", number: v.number, date: v.date, account: v.status === "PAID" ? cashAccountLine(bank) : null,
       info: [
-        ["Dibayar kepada", v.payee], ["No. Job", v.job.number], ["No. B/L", bl || "-"], ["Customer", v.job.customer.name],
+        ["Dibayar kepada", v.payee], ["No. Job", v.job?.number ?? "-"], ["No. B/L", bl || "-"], ["Customer", v.job?.customer.name ?? "-"],
         ...(v.proofNumber ? [["No. Bukti Bayar", `${v.proofNumber} (${method})`] as [string, string]] : []),
         ...(v.status === "CANCELLED" ? [["Status", `BATAL: ${v.cancelReason ?? ""}`] as [string, string]] : []),
         ...(v.notes ? [["Catatan", v.notes] as [string, string]] : []),

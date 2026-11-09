@@ -23,8 +23,8 @@ export default async function VouchersPage() {
     cashAccountOptions(prisma, "payment"),
   ]);
   const rows: VoucherRow[] = vouchers.map((v) => ({
-    id: v.id, number: v.number, date: v.date.toISOString(), job: v.job.number,
-    bl: [v.job.hblNo, v.job.mblNo, v.job.hawbNo, v.job.mawbNo].filter(Boolean).join(" / "),
+    id: v.id, number: v.number, date: v.date.toISOString(), job: v.job?.number ?? "-",
+    bl: v.job ? [v.job.hblNo, v.job.mblNo, v.job.hawbNo, v.job.mawbNo].filter(Boolean).join(" / ") : "",
     payee: v.payee, total: Number(v.total), status: v.status, proofNumber: v.proofNumber, journalEntryId: v.journalEntryId,
   }));
   const unpaid = rows.filter((r) => r.status === "ISSUED");

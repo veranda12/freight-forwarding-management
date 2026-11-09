@@ -240,18 +240,22 @@ async function searchKind(db: Db, kind: ProofKind, q: ProofQuery, take: number):
           q,
           (t) => [
             { number: ci(t) }, { proofNumber: ci(t) }, { payee: ci(t) }, { notes: ci(t) }, { reference: ci(t) },
-            { vendor: { name: ci(t) } }, { job: jobWhere(t) },
+            { vendor: { name: ci(t) } }, { job: jobWhere(t) }, { invoice: { number: ci(t) } }, { bill: { number: ci(t) } },
           ],
           (a) => [{ total: a }],
         ),
         orderBy: [{ date: "desc" }, { number: "desc" }],
         take,
-        select: { id: true, number: true, proofNumber: true, date: true, payee: true, total: true, status: true, notes: true, journalEntryId: true, jobId: true, job: { select: JOB_SELECT } },
+        select: {
+          id: true, number: true, proofNumber: true, date: true, payee: true, total: true, status: true, notes: true, journalEntryId: true, jobId: true,
+          job: { select: JOB_SELECT }, invoice: { select: { number: true } }, bill: { select: { number: true } },
+        },
       });
       return rows.map((v) => ({
         kind, id: v.id, number: v.number, proofNumber: v.proofNumber, date: v.date.toISOString(), party: v.payee,
         ...jobsText([v.job]), amount: n(v.total), currency: "IDR", status: VOUCHER_STATUS[v.status] ?? v.status,
-        description: v.notes ?? "", journalEntryId: v.journalEntryId, parentId: v.jobId,
+        description: [v.invoice ? `Invoice ${v.invoice.number}` : v.bill ? `Bill ${v.bill.number}` : "", v.notes].filter(Boolean).join(" · "),
+        journalEntryId: v.journalEntryId, parentId: v.jobId,
       }));
     }
     case "note": {
