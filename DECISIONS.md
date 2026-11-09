@@ -55,6 +55,21 @@ Format: **Keputusan** — _alasan_.
 - Baris invoice/bill tanpa job (data lama) **ikut job kepala dokumen** di form, kartu, daftar, dan cetakan.
 - Cetak: Voucher Pengeluaran (bill, formulir VC) dan Voucher Penerimaan (invoice, formulir baru VM) dalam format SOP.
 
+## Import Excel master Customer, Vendor, Commodity (2026-11-09)
+
+- **Template dari kode** (`src/lib/master-import.ts`, satu spesifikasi kolom untuk template, pembacaan, dan petunjuk):
+  sheet Data (header, kolom teks untuk NPWP/telepon/kode, dropdown Ya/Tidak dan Tipe vendor), Petunjuk, Contoh. Contoh
+  sengaja di sheet terpisah supaya tidak ikut ter-import.
+- **Kode terisi = update, kosong = baru** (keputusan Andhika). Saat update, sel kosong = nilai lama tetap. Commodity
+  dikunci HS Code + Nama (yang sudah ada hanya bisa diubah kolom Aktif-nya). Kode baru CUST/VEND berurutan seperti form.
+- **Sebanyak mungkin disimpan**: penghalang (wajib kosong, angka/Ya-Tidak/tipe salah, kode tidak ada, nama sudah ada atau
+  ganda di file) dilewati dan dilaporkan; peringatan (email/NPWP, Sales PIC tidak dikenal) tetap disimpan.
+- **Pratinjau lalu Simpan**; simpan membaca dan memvalidasi ulang file dalam satu transaksi (hasil pratinjau di browser
+  tidak dipercaya). Bentrok unik dengan user lain = seluruh import gagal, tidak setengah masuk.
+- **Route handler, bukan server action**, untuk upload: file sampai 2 MB tidak terbentur batas body server action (1 MB)
+  tanpa mengubah konfigurasi global. Cek login, izin write entitas (sama dengan form Baru), dan origin.
+- Batas: `.xlsx` saja, 2 MB, 1.000 baris per file. Satu entri audit log per import.
+
 ## RBAC
 
 - Pembatasan ditegakkan **di server**: helper `requireRole()` dipanggil di setiap server action & route handler, bukan sekadar sembunyikan menu.
