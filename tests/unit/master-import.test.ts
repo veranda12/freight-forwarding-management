@@ -61,7 +61,7 @@ describe("validasi customer", () => {
     expect(rows[2].errors.join()).toMatch(/sudah ada sebagai CUST0003.*Kode CUST0003/);
     expect(rows[3].errors.join()).toMatch(/0 sampai 180/);
     expect(rows[4].errors.join()).toMatch(/Ya atau Tidak/);
-    expect(rows[5].errors.join()).toMatch(/CUST9999 tidak ditemukan/);
+    expect(rows[5].errors).toEqual(["Kode CUST9999 tidak ditemukan. Kosongkan kolom Kode untuk membuat data baru."]);
   });
   it("peringatan tetap disimpan: email/NPWP salah, PIC tidak dikenal", () => {
     const [r] = validateRows("customers", [raw(2, { name: "PT Peringatan", email: "bukan-email", npwp: "123", picEmail: "x@y.z" })], ctx());

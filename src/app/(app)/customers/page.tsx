@@ -4,6 +4,7 @@ import { requireCan } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
 import { can } from "@/lib/rbac";
 import { PageHeader } from "@/components/page-header";
+import { MasterImportDialog } from "@/components/master-import-dialog";
 import { Button } from "@/components/ui/button";
 import { CustomersTable, type CustomerRow } from "./customers-table";
 
@@ -23,7 +24,10 @@ export default async function CustomersPage() {
     <div className="space-y-6">
       <PageHeader title="Customer" description={`${rows.length} customer terdaftar`}>
         {can(user.role, "customers", "write") && (
-          <Button asChild><Link href="/customers/new"><Plus /> Customer Baru</Link></Button>
+          <>
+            <MasterImportDialog kind="customers" label="Customer" />
+            <Button asChild><Link href="/customers/new"><Plus /> Customer Baru</Link></Button>
+          </>
         )}
       </PageHeader>
       <CustomersTable data={rows} />

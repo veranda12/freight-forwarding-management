@@ -211,7 +211,8 @@ export function validateRows(kind: ImportKind, raws: RawRow[], ctx: ImportContex
       if (c.kind === "code" || (kind === "commodities" && (c.key === "hsCode" || c.key === "name"))) continue;
       const s = v(c.key);
       if (s === "") {
-        if (c.required && action === "create") errors.push(`${c.header} wajib diisi.`);
+        // Kode diisi tapi tidak ditemukan: maksudnya update, jadi kolom wajib data baru tidak ditagih.
+        if (c.required && action === "create" && !key) errors.push(`${c.header} wajib diisi.`);
         continue;
       }
       switch (c.kind) {

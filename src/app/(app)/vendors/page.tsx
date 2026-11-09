@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { can } from "@/lib/rbac";
 import { VENDOR_TYPE_LABELS } from "@/lib/enums";
 import { PageHeader } from "@/components/page-header";
+import { MasterImportDialog } from "@/components/master-import-dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -19,6 +20,7 @@ export default async function VendorsPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="Vendor" description={`${vendors.length} vendor (carrier, airline, trucking, PPJK, warehouse, depo)`}>
+        {canWrite && <MasterImportDialog kind="vendors" label="Vendor" />}
         {canWrite && <Button asChild><Link href="/vendors/new"><Plus /> Vendor Baru</Link></Button>}
       </PageHeader>
       <Card>
