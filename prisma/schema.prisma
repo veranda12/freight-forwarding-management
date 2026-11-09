@@ -343,7 +343,7 @@ model CompanySetting {
   updatedAt   DateTime @updatedAt
 }
 
-/// Kotak dokumen SOP pada cetakan bukti, per jenis formulir: BBM, BBK, BKM, BKK, JU, VC.
+/// Kotak dokumen SOP pada cetakan bukti, per jenis formulir: BBM, BBK, BKM, BKK, JU, VC, VM.
 model ProofForm {
   code          String    @id
   docNo         String?

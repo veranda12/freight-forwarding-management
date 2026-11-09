@@ -11,6 +11,7 @@ export const PROOF_FORMS = [
   { code: "BKK", name: "Bukti Kas Keluar", title: "BUKTI KAS KELUAR", numberLabel: "No BKK", flow: "OUT" },
   { code: "JU", name: "Jurnal Umum / Bukti Jurnal", title: "JURNAL UMUM", numberLabel: "No Jurnal", flow: "JOURNAL" },
   { code: "VC", name: "Voucher Pengeluaran", title: "VOUCHER PENGELUARAN", numberLabel: "No Voucher", flow: "OUT" },
+  { code: "VM", name: "Voucher Penerimaan", title: "VOUCHER PENERIMAAN", numberLabel: "No Voucher", flow: "IN" },
 ] as const;
 
 export type ProofFormCode = (typeof PROOF_FORMS)[number]["code"];

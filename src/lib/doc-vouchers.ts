@@ -156,3 +156,109 @@ async function saveVoucher(tx: Prisma.TransactionClient, v: {
   });
   return { id: voucher.id, number, proofNumber: v.paid.number };
 }
+
+// ---------------------------------------------------------------- data form dan halaman detail
+
+export type DocForVoucher = {
+  id: string; number: string; party: string; date: string; status: string; total: number; outstanding: number;
+  ppn: number; pph: number;
+  lines: { id: string; label: string; note: string | null; job: string | null; amount: number; reimburse: boolean; voucher: string | null }[];
+};
+
+const OPEN_INVOICE = ["UNPAID", "PARTIAL", "OVERDUE"] as const;
+const OPEN_BILL = ["UNPAID", "PARTIAL"] as const;
+const MAX_DOCS = 30;
+const ci = (t: string) => ({ contains: t, mode: "insensitive" as const });
+const jobText = (t: string) => ({ OR: [{ number: ci(t) }, { hblNo: ci(t) }, { mblNo: ci(t) }, { hawbNo: ci(t) }, { mawbNo: ci(t) }] });
+
+/**
+ * Invoice IDR yang belum lunas untuk form voucher, terbaru dulu (maks. 30). Pencarian: no. invoice, customer, job, B/L.
+ * `focusId` (dari tombol di detail invoice) selalu ikut ditampilkan paling atas.
+ */
+export async function invoicesForVoucher(db: PrismaClient, q = "", focusId?: string | null): Promise<DocForVoucher[]> {
+  const t = q.trim().slice(0, 60);
+  const rows = await db.invoice.findMany({
+    where: {
+      OR: [
+        ...(focusId ? [{ id: focusId }] : []),
+        {
+          status: { in: [...OPEN_INVOICE] }, currency: IDR,
+          ...(t ? { OR: [{ number: ci(t) }, { customer: { name: ci(t) } }, { lines: { some: { job: jobText(t) } } }] } : {}),
+        },
+      ],
+    },
+    orderBy: [{ date: "desc" }, { number: "desc" }],
+    take: MAX_DOCS,
+    include: {
+      customer: { select: { name: true } }, job: { select: { number: true } },
+      lines: {
+        orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
+        include: { chargeCode: { select: { code: true, name: true } }, job: { select: { number: true } }, voucherLine: USED },
+      },
+    },
+  });
+  const docs = rows.map((i): DocForVoucher => ({
+    id: i.id, number: i.number, party: i.customer.name, date: i.date.toISOString(), status: i.status,
+    total: Number(i.total), outstanding: r2(Number(i.total) - Number(i.amountPaid)), ppn: Number(i.ppnAmount), pph: 0,
+    lines: i.lines.map((l) => ({
+      id: l.id, label: `${l.chargeCode.code} ${l.chargeCode.name}`, note: l.description && l.description !== l.chargeCode.name ? l.description : null,
+      job: l.job?.number ?? i.job?.number ?? null, amount: Number(l.amount), reimburse: l.asReceipt, voucher: l.voucherLine?.voucher.number ?? null,
+    })),
+  }));
+  return focusId ? [...docs.filter((d) => d.id === focusId), ...docs.filter((d) => d.id !== focusId)] : docs;
+}
+
+/** Vendor bill IDR yang belum lunas untuk form voucher. Pencarian: no. bill, ref. vendor, vendor, job, B/L. */
+export async function billsForVoucher(db: PrismaClient, q = "", focusId?: string | null): Promise<DocForVoucher[]> {
+  const t = q.trim().slice(0, 60);
+  const rows = await db.vendorBill.findMany({
+    where: {
+      OR: [
+        ...(focusId ? [{ id: focusId }] : []),
+        {
+          status: { in: [...OPEN_BILL] }, currency: IDR,
+          ...(t ? { OR: [{ number: ci(t) }, { vendorRef: ci(t) }, { vendor: { name: ci(t) } }, { lines: { some: { job: jobText(t) } } }] } : {}),
+        },
+      ],
+    },
+    orderBy: [{ date: "desc" }, { number: "desc" }],
+    take: MAX_DOCS,
+    include: {
+      vendor: { select: { name: true } }, job: { select: { number: true } },
+      lines: { orderBy: { id: "asc" }, include: { chargeCode: { select: { code: true, name: true, asReceipt: true } }, job: { select: { number: true } }, voucherLine: USED } },
+    },
+  });
+  const docs = rows.map((b): DocForVoucher => ({
+    id: b.id, number: b.vendorRef ? `${b.number} · ${b.vendorRef}` : b.number, party: b.vendor.name, date: b.date.toISOString(), status: b.status,
+    total: Number(b.total), outstanding: r2(Number(b.total) - Number(b.amountPaid)),
+    ppn: Number(b.ppnAmount), pph: r2(Number(b.pph23Amount) + Number(b.pph26Amount)),
+    lines: b.lines.map((l) => ({
+      id: l.id, label: `${l.chargeCode.code} ${l.chargeCode.name}`, note: l.description && l.description !== l.chargeCode.name ? l.description : null,
+      job: l.job?.number ?? b.job?.number ?? null, amount: Number(l.amount), reimburse: l.chargeCode.asReceipt, voucher: l.voucherLine?.voucher.number ?? null,
+    })),
+  }));
+  return focusId ? [...docs.filter((d) => d.id === focusId), ...docs.filter((d) => d.id !== focusId)] : docs;
+}
+
+const JOB_NO = { select: { number: true } } as const;
+type JobNo = { job: { number: string } | null } | null;
+
+/** Job baris voucher dokumen. Baris tanpa job (data lama) ikut job di kepala invoice/bill. */
+export function docLineJobs(v: { invoice: JobNo; bill: JobNo; docLines: { invoiceLine: JobNo; billLine: JobNo }[] }): string {
+  const head = (v.invoice ?? v.bill)?.job?.number ?? null;
+  return [...new Set(v.docLines.map((d) => (d.invoiceLine ?? d.billLine)?.job?.number ?? head).filter((x): x is string => !!x))].join(", ");
+}
+
+export type DocVoucherSummary = { id: string; number: string; date: string; total: number; proofNumber: string | null; jobs: string; lineCount: number };
+
+/** Voucher milik satu invoice atau bill, untuk kartu di halaman detail. */
+export async function vouchersOfDoc(db: PrismaClient, where: { invoiceId: string } | { billId: string }): Promise<DocVoucherSummary[]> {
+  const rows = await db.voucher.findMany({
+    where, orderBy: [{ date: "asc" }, { number: "asc" }],
+    include: { invoice: { select: { job: JOB_NO } }, bill: { select: { job: JOB_NO } }, docLines: { include: { invoiceLine: { select: { job: JOB_NO } }, billLine: { select: { job: JOB_NO } } } } },
+  });
+  return rows.map((v) => ({
+    id: v.id, number: v.number, date: v.date.toISOString(), total: Number(v.total), proofNumber: v.proofNumber, lineCount: v.docLines.length,
+    jobs: docLineJobs(v),
+  }));
+}

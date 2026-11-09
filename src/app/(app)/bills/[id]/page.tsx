@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Briefcase } from "lucide-react";
+import { Briefcase, Ticket } from "lucide-react";
 import { requireCan } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
 import { can } from "@/lib/rbac";
@@ -14,6 +14,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { BillStatusBadge } from "@/components/status-badge";
 import { Breadcrumbs } from "@/components/breadcrumbs";
+import { Button } from "@/components/ui/button";
+import { DocVouchersCard } from "@/components/doc-vouchers-card";
+import { vouchersOfDoc } from "@/lib/doc-vouchers";
 import { PayBillButton } from "../pay-bill-button";
 
 export const dynamic = "force-dynamic";
@@ -43,6 +46,9 @@ export default async function BillDetail({ params }: { params: Promise<{ id: str
   const isFx = bill.currency !== "IDR";
   const defaultPaymentRate = isFx ? await latestRate(prisma, bill.currency, new Date().toISOString().slice(0, 10)) : 1;
   const payable = bill.status !== "PAID" && bill.status !== "CANCELLED";
+  const vouchers = await vouchersOfDoc(prisma, { billId: bill.id });
+  // Voucher bill sekaligus mencatat pembayaran: hanya bill IDR yang masih punya sisa.
+  const canVoucher = canPay && can(user.role, "vouchers", "write") && !isFx && payable && outstanding > 0.5;
   const cash = await cashAccountOptions(prisma, "payment");
   const jobs = [...new Map(bill.lines.flatMap((l) => (l.job ? [[l.job.id, l.job] as const] : []))).values()];
   if (jobs.length === 0 && bill.job) jobs.push({ ...bill.job, hblNo: null, mblNo: null });
@@ -53,6 +59,7 @@ export default async function BillDetail({ params }: { params: Promise<{ id: str
         <Breadcrumbs items={[{ label: "Vendor Bill (AP)", href: "/bills" }, { label: bill.number }]} />
         <PageHeader title={bill.number} description={`${bill.vendor.name} · ${formatDate(bill.date)}`}>
           <BillStatusBadge status={bill.status} />
+          {canVoucher && <Button asChild variant="outline"><Link href={`/vouchers/new?bill=${bill.id}`}><Ticket /> Buat Voucher</Link></Button>}
           {canPay && payable && (
             <PayBillButton
               billId={bill.id}
@@ -144,6 +151,7 @@ export default async function BillDetail({ params }: { params: Promise<{ id: str
               </CardContent>
             </Card>
           )}
+          <DocVouchersCard vouchers={vouchers} settled={bill.status === "PAID"} />
           {journal && (
             <Card>
               <CardHeader><CardTitle className="text-base">Jurnal {journal.number}</CardTitle></CardHeader>

@@ -26,7 +26,7 @@ describe("formulir bukti SOP", () => {
     expect(() => validateProofForms([{ code: "BBK", docNo: "", revision: "", effectiveDate: "2026-02-30" }])).toThrow(/Effective Date/);
     expect(() => validateProofForms([{ code: "BBK", docNo: "", revision: "", effectiveDate: "1-Aug-18" }])).toThrow(/Effective Date/);
   });
-  it("enam formulir: kas/bank masuk-keluar, jurnal, voucher", () => {
-    expect(PROOF_FORMS.map((f) => f.code)).toEqual(["BBM", "BBK", "BKM", "BKK", "JU", "VC"]);
+  it("tujuh formulir: kas/bank masuk-keluar, jurnal, voucher pengeluaran dan penerimaan", () => {
+    expect(PROOF_FORMS.map((f) => f.code)).toEqual(["BBM", "BBK", "BKM", "BKK", "JU", "VC", "VM"]);
   });
 });

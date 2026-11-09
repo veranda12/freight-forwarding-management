@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Briefcase, Pencil, Printer } from "lucide-react";
+import { Briefcase, Pencil, Printer, Ticket } from "lucide-react";
 import { requireCan } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
 import { can } from "@/lib/rbac";
@@ -17,6 +17,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { InvoiceStatusBadge } from "@/components/status-badge";
 import { Breadcrumbs } from "@/components/breadcrumbs";
+import { DocVouchersCard } from "@/components/doc-vouchers-card";
+import { vouchersOfDoc } from "@/lib/doc-vouchers";
 
 export const dynamic = "force-dynamic";
 
@@ -47,6 +49,10 @@ export default async function InvoiceDetail({ params }: { params: Promise<{ id: 
   const ppnLabel = `${(Number(inv.ppnRate) * 100).toLocaleString("id-ID", { maximumFractionDigits: 2 })}%`;
   const reimburse = inv.lines.filter((l) => l.asReceipt).reduce((s, l) => s + Number(l.amount), 0);
   const canEdit = can(user.role, "invoices", "write") && !invoiceEditBlock(inv) && inv.costingLines.length > 0;
+  const vouchers = await vouchersOfDoc(prisma, { invoiceId: inv.id });
+  // Voucher invoice sekaligus mencatat penerimaan: hanya invoice IDR yang masih punya sisa.
+  const canVoucher = can(user.role, "vouchers", "write") && can(user.role, "payments", "write")
+    && inv.currency === "IDR" && inv.status !== "CANCELLED" && inv.status !== "PAID" && outstanding > 0.5;
 
   return (
     <div className="space-y-6">
@@ -58,6 +64,7 @@ export default async function InvoiceDetail({ params }: { params: Promise<{ id: 
             <a href={`/api/invoices/${inv.id}/pdf`} target="_blank" rel="noopener"><Printer /> Cetak Invoice</a>
           </Button>
           {canEdit && <Button asChild variant="outline"><Link href={`/invoices/${inv.id}/edit`}><Pencil /> Edit</Link></Button>}
+          {canVoucher && <Button asChild variant="outline"><Link href={`/vouchers/new?invoice=${inv.id}`}><Ticket /> Buat Voucher</Link></Button>}
           <InvoiceActions
             invoiceId={inv.id}
             currency={inv.currency}
@@ -145,6 +152,7 @@ export default async function InvoiceDetail({ params }: { params: Promise<{ id: 
               </CardContent>
             </Card>
           )}
+          <DocVouchersCard vouchers={vouchers} settled={inv.status === "PAID"} />
           {journal && (
             <Card>
               <CardHeader><CardTitle className="text-base">Jurnal {journal.number}</CardTitle></CardHeader>
