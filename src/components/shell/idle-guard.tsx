@@ -60,7 +60,11 @@ export function IdleGuard() {
       if (idleMs >= IDLE_TIMEOUT_SEC * 1000) {
         loggingOut.current = true;
         toast.dismiss(WARN_ID);
-        void signOut({ redirectTo: "/login?reason=idle" });
+        // Jangan pakai redirect dari next-auth: URL-nya disusun server dan bisa jadi localhost di balik proxy (ngrok).
+        // Pindah halaman relatif terhadap domain yang sedang dibuka.
+        void signOut({ redirect: false })
+          .catch(() => undefined)
+          .finally(() => window.location.assign("/login?reason=idle"));
         return;
       }
       if (idleMs >= (IDLE_TIMEOUT_SEC - IDLE_WARNING_SEC) * 1000) {

@@ -1,5 +1,6 @@
 "use server";
 
+import { redirect } from "next/navigation";
 import { AuthError } from "next-auth";
 import { signIn } from "@/auth";
 
@@ -9,12 +10,13 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
   const email = String(formData.get("email") ?? "");
   const password = String(formData.get("password") ?? "");
   try {
-    await signIn("credentials", { email, password, redirectTo: "/dashboard" });
+    // redirect: false lalu redirect relatif, supaya tetap di domain yang sedang dibuka (mis. ngrok), bukan localhost.
+    await signIn("credentials", { email, password, redirect: false });
   } catch (error) {
     if (error instanceof AuthError) {
       return { error: "Email atau password salah." };
     }
-    throw error; // biarkan NEXT_REDIRECT lewat
+    throw error;
   }
-  return undefined;
+  redirect("/dashboard");
 }

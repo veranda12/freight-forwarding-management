@@ -1,12 +1,13 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useEffect } from "react";
 import { useFormStatus } from "react-dom";
 import { AlertCircle, Loader2, LogIn } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { loginAction, type LoginState } from "./actions";
+import { TABS_STORAGE_KEY } from "@/config/session";
 
 const DEMO = [
   { role: "Admin", email: "admin@demo.com" },
@@ -29,6 +30,11 @@ function SubmitButton() {
 
 export function LoginForm() {
   const [state, formAction] = useActionState<LoginState, FormData>(loginAction, undefined);
+
+  // Login baru dimulai dengan tab bersih: tab dari sesi sebelumnya (logout atau habis karena idle) dibuang.
+  useEffect(() => {
+    try { sessionStorage.removeItem(TABS_STORAGE_KEY); } catch {}
+  }, []);
 
   return (
     <form action={formAction} className="space-y-4">

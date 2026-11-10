@@ -6,6 +6,7 @@ import { Search, Loader2, Briefcase, Users, Container, FileText, Truck } from "l
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverAnchor } from "@/components/ui/popover";
+import { useTabs } from "./tabs-context";
 
 type Result = {
   type: "job" | "customer" | "container" | "bl" | "stt";
@@ -18,6 +19,7 @@ const ICON = { job: Briefcase, customer: Users, container: Container, bl: FileTe
 
 export function GlobalSearch() {
   const router = useRouter();
+  const tabs = useTabs();
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -66,6 +68,7 @@ export function GlobalSearch() {
   function go(href: string) {
     setOpen(false);
     setQ("");
+    tabs?.markSwitch(href);
     router.push(href);
   }
 

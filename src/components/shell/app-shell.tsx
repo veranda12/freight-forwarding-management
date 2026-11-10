@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { GlobalSearch } from "./global-search";
 import { ThemeToggle } from "./theme-toggle";
-import { TabsProvider, TabBar } from "./tabs-context";
+import { TabsProvider, TabBar, TabPanels } from "./tabs-context";
 import { IdleGuard } from "./idle-guard";
 import { logoutAction } from "@/app/(app)/actions";
 
@@ -225,7 +225,7 @@ export function AppShell({
         <main className="flex-1 p-4 sm:p-6">
           <div className="mx-auto w-full max-w-[1400px] space-y-6">
             <TabBar />
-            {children}
+            <TabPanels>{children}</TabPanels>
           </div>
         </main>
       </div>
