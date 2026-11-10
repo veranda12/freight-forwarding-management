@@ -8,6 +8,7 @@ import {
   PROOF_KIND_LABEL, PROOF_MIN_QUERY, parseProofFilter, proofKindsFor, proofLineEntries, searchProofs, type ProofHit,
 } from "@/lib/proof-search";
 import { CANCEL_LABEL, entryActions } from "@/lib/proof-lines";
+import { billChangeState } from "@/lib/payables";
 import { invoiceEditBlock } from "@/lib/receivables";
 import { SOURCE_LABEL } from "@/lib/journal-filter";
 import { PageHeader } from "@/components/page-header";
@@ -66,10 +67,16 @@ export default async function ProofsPage({ searchParams }: { searchParams: Promi
     (invoiceIds.length ? await prisma.invoice.findMany({ where: { id: { in: invoiceIds } }, select: { id: true, status: true, amountPaid: true } }) : [])
       .map((i) => [i.id, invoiceEditBlock(i)] as const).filter((x): x is readonly [string, string] => !!x[1]),
   );
+  // Vendor bill: boleh edit/batal atau tidak bergantung datanya (sudah dibayar, ada voucher, revaluasi, tutup buku).
+  const billIds = [...new Set(entries.filter((e) => e.source === "BILL" && e.sourceId && !e.isReversal && !e.isReversed).map((e) => e.sourceId!))];
+  const billStates = new Map(await Promise.all(billIds.map(async (id) => [id, await billChangeState(prisma, id)] as const)));
   const groups: ProofLineGroup[] = entries.map((e) => {
         const a = entryActions(e, user.role);
         const invoiceBlock = e.source === "INVOICE" && a.editHref ? lockedInvoices.get(e.sourceId ?? "") : undefined;
         if (invoiceBlock) { a.editHref = null; a.editBlock = invoiceBlock; }
+        const bs = e.source === "BILL" ? billStates.get(e.sourceId ?? "") : undefined;
+        if (bs?.editBlock && a.editHref) { a.editHref = null; a.editBlock = bs.editBlock; }
+        if (bs?.cancelBlock && a.cancel) { a.cancel = null; a.cancelBlock = bs.cancelBlock; }
         return {
           id: e.id, date: e.date, number: e.number, source: SOURCE_LABEL[e.source] ?? e.source, user: e.user,
           status: e.isReversal ? "reversal" : e.isReversed ? "reversed" : "normal",

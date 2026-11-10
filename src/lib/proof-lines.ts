@@ -6,10 +6,11 @@ import { can } from "./rbac";
  * "hapus" = membatalkan dokumen asalnya lewat alur yang sudah ada (jurnal pembalik, nomor tetap tercatat).
  * Murni, tanpa Prisma, supaya aturan izinnya bisa diuji.
  */
-export type CancelKind = "invoice" | "receipt" | "vendorPayment" | "cashEntry" | "transfer" | "manual" | "voucher" | "tax";
+export type CancelKind = "invoice" | "bill" | "receipt" | "vendorPayment" | "cashEntry" | "transfer" | "manual" | "voucher" | "tax";
 
 export const CANCEL_LABEL: Record<CancelKind, string> = {
   invoice: "invoice",
+  bill: "vendor bill",
   receipt: "pelunasan invoice",
   vendorPayment: "pembayaran vendor",
   cashEntry: "bukti kas/bank",
@@ -53,17 +54,30 @@ export function entryPrintHref(e: ActionEntry): string {
 
 const NO_ACCESS = "Akun Anda tidak punya izin mengubah bukti ini.";
 
-/** Jurnal yang tidak punya fitur edit maupun batal: alasannya per sumber. */
-const FIXED: Partial<Record<JournalSource, string>> = {
-  BILL: "Vendor bill belum bisa diedit atau dibatalkan di aplikasi.",
-  DEBIT_NOTE: "Debit note belum bisa diedit atau dibatalkan di aplikasi.",
-  CREDIT_NOTE: "Credit note belum bisa diedit atau dibatalkan di aplikasi.",
-  FX: "Jurnal selisih kurs dibuat otomatis saat pelunasan, ikut batal bila pelunasannya dibatalkan.",
-  FX_REVAL: "Jurnal revaluasi kurs dibuat otomatis oleh sistem, tidak bisa diubah dari sini.",
-  DEPRECIATION: "Jurnal penyusutan dibuat otomatis oleh sistem, tidak bisa diubah dari sini.",
-  CLOSING: "Jurnal tutup buku dibuat otomatis oleh sistem, tidak bisa diubah dari sini.",
-  FLEET_COST: "Jurnal beban armada dibuat otomatis dari job, tidak bisa diubah dari sini.",
-};
+/**
+ * Jurnal yang tidak punya fitur edit maupun batal. Alasannya menjelaskan apa yang dicatat jurnal itu
+ * dan kenapa tidak bisa dibalik sepotong dari sini.
+ */
+function fixedReason(e: ActionEntry): string {
+  const ref = e.sourceId ?? "";
+  switch (e.source) {
+    case "DEBIT_NOTE":
+    case "CREDIT_NOTE":
+      return "Debit/Credit note saat ini hanya bisa dilihat. Fitur membuat, mengedit, dan membatalkannya belum ada di aplikasi.";
+    case "FX_REVAL":
+      return `Revaluasi kurs${ref ? ` per ${ref}` : ""} ikut mengubah nilai rupiah piutang, hutang, dan saldo rekening valas. Membalik jurnalnya saja akan membuat angka itu tidak cocok lagi, jadi revaluasi tidak dibatalkan dari sini.`;
+    case "DEPRECIATION":
+      return `Penyusutan${ref ? ` periode ${ref}` : ""} dihitung otomatis dari jadwal aset tetap. Fitur pembatalan penyusutan belum ada, jadi jurnalnya tidak bisa diubah.`;
+    case "CLOSING":
+      return `Jurnal tutup buku${ref ? ` tahun ${ref}` : ""} memindahkan saldo pendapatan dan beban ke laba ditahan. Membatalkannya berarti membuka lagi tahun yang sudah ditutup, dan fitur itu belum ada.`;
+    case "FLEET_COST":
+      return "Beban armada ini dicatat dari biaya job yang memakai armada sendiri. Fitur pembatalan beban armada belum ada, jadi jurnalnya tidak bisa diubah dari sini.";
+    case "FX":
+      return "Jurnal selisih kurs ini dibuat otomatis oleh sistem dan ikut dokumen asalnya, jadi tidak diubah sendiri.";
+    default:
+      return "Jurnal ini dibuat otomatis oleh sistem, jadi tidak diubah dari sini.";
+  }
+}
 
 const noEdit = (what: string) => `${what} tidak bisa diedit. Batalkan, lalu input ulang dengan data yang benar.`;
 
@@ -81,6 +95,10 @@ export function entryActions(e: ActionEntry, role: Role | null | undefined): Ent
     case "INVOICE":
       if (!can(role, "invoices", "write") || !e.sourceId) return none(NO_ACCESS);
       return ok(`/invoices/${e.sourceId}/edit`, null, "invoice", null);
+    case "BILL":
+      // Alasan yang bergantung data bill (sudah dibayar, ada voucher, tutup buku) ditambahkan halaman dari billChangeState.
+      if (!can(role, "bills", "write") || !e.sourceId) return none(NO_ACCESS);
+      return ok(`/bills/${e.sourceId}/edit`, null, "bill", null);
     case "RECEIPT":
       return ok(null, noEdit("Pelunasan invoice"), role === "ADMIN" && e.sourceId ? "receipt" : null, "Pembatalan pelunasan invoice khusus Admin.");
     case "PAYMENT":
@@ -90,13 +108,17 @@ export function entryActions(e: ActionEntry, role: Role | null | undefined): Ent
     case "BANK_TRANSFER":
       return ok(null, noEdit("Transfer antar rekening"), acc ? "transfer" : null, NO_ACCESS);
     case "MANUAL":
-      if (!isManualJournal(e)) return none("Jurnal ini dibuat otomatis (modal awal atau perolehan aset tetap), tidak bisa diubah dari sini.");
+      if (!isManualJournal(e)) {
+        return none(e.sourceId
+          ? "Jurnal perolehan aset tetap. Nilai aset dan jadwal penyusutannya bergantung pada jurnal ini, dan fitur pembatalan aset belum ada."
+          : "Jurnal saldo awal atau modal dari persiapan data, bukan transaksi harian. Koreksinya lewat Jurnal Umum.");
+      }
       return acc ? ok(`/accounting/manual-journal?edit=${e.id}`, null, "manual", null) : none(NO_ACCESS);
     case "VOUCHER":
       return ok(null, noEdit("Voucher yang sudah dibayar"), can(role, "vouchers", "write") && e.sourceId ? "voucher" : null, NO_ACCESS);
     case "TAX_REMIT":
       return ok(null, noEdit("Setoran pajak"), acc ? "tax" : null, NO_ACCESS);
     default:
-      return none(FIXED[e.source] ?? "Bukti ini tidak bisa diubah dari sini.");
+      return none(fixedReason(e));
   }
 }

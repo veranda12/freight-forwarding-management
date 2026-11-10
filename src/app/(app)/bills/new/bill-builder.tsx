@@ -15,28 +15,34 @@ import { EmptyState } from "@/components/empty-state";
 import { MoneyInput } from "@/components/money-input";
 import { SearchableSelect } from "@/components/searchable-select";
 import { formatIDR } from "@/lib/format";
-import { createBillAction } from "../actions";
+import { createBillAction, updateBillAction } from "../actions";
 
 export type BillLineOpt = {
   id: string; vendorId: string; vendor: string; isForeign: boolean; job: string; bl: string;
   charge: string; note: string | null; asReceipt: boolean; amount: number;
 };
 
-/** Satu bill untuk satu vendor. Biayanya boleh dari beberapa job, dipilih dengan ceklis. */
-export function BillBuilder({ lines, currencies, today }: { lines: BillLineOpt[]; currencies: { code: string; name: string }[]; today: string }) {
+/** Isian bill yang sedang diedit. Vendor tidak bisa diganti; biaya, tanggal, kurs, PPN, dan PPh bisa. */
+export type BillEditInit = {
+  billId: string; number: string; vendorId: string; selected: string[];
+  vendorRef: string; date: string; dueDate: string; currency: string; rate: string; ppn: string; pph23: string; pph26: string;
+};
+
+/** Satu bill untuk satu vendor. Biayanya boleh dari beberapa job, dipilih dengan ceklis. Dipakai juga untuk edit bill. */
+export function BillBuilder({ lines, currencies, today, edit }: { lines: BillLineOpt[]; currencies: { code: string; name: string }[]; today: string; edit?: BillEditInit }) {
   const router = useRouter();
   const [pending, start] = useTransition();
-  const [vendorId, setVendorId] = useState("");
+  const [vendorId, setVendorId] = useState(edit?.vendorId ?? "");
   const [jobFilter, setJobFilter] = useState<string[]>([]);
-  const [selected, setSelected] = useState<string[]>([]);
-  const [vendorRef, setVendorRef] = useState("");
-  const [date, setDate] = useState(today);
-  const [dueDate, setDueDate] = useState("");
-  const [currency, setCurrency] = useState("IDR");
-  const [rate, setRate] = useState("");
-  const [ppn, setPpn] = useState("");
-  const [pph23, setPph23] = useState("");
-  const [pph26, setPph26] = useState("");
+  const [selected, setSelected] = useState<string[]>(edit?.selected ?? []);
+  const [vendorRef, setVendorRef] = useState(edit?.vendorRef ?? "");
+  const [date, setDate] = useState(edit?.date ?? today);
+  const [dueDate, setDueDate] = useState(edit?.dueDate ?? "");
+  const [currency, setCurrency] = useState(edit?.currency ?? "IDR");
+  const [rate, setRate] = useState(edit?.rate ?? "");
+  const [ppn, setPpn] = useState(edit?.ppn ?? "");
+  const [pph23, setPph23] = useState(edit?.pph23 ?? "");
+  const [pph26, setPph26] = useState(edit?.pph26 ?? "");
 
   const vendors = useMemo(() => {
     const m = new Map<string, { id: string; label: string; count: number }>();
@@ -70,11 +76,18 @@ export function BillBuilder({ lines, currencies, today }: { lines: BillLineOpt[]
   }
 
   function save() {
+    const opts = {
+      currency, rate: rate.trim() ? Number(rate) : undefined, date, dueDate: dueDate || undefined, vendorRef,
+      ppn: Number(ppn) || 0, pph23: Number(pph23) || 0, pph26: Number(pph26) || 0,
+    };
     start(async () => {
-      const res = await createBillAction(vendorId, selected, {
-        currency, rate: rate.trim() ? Number(rate) : undefined, date, dueDate: dueDate || undefined, vendorRef,
-        ppn: Number(ppn) || 0, pph23: Number(pph23) || 0, pph26: Number(pph26) || 0,
-      });
+      if (edit) {
+        const res = await updateBillAction(edit.billId, selected, opts);
+        if (res.ok) { toast.success(`${edit.number} diperbarui, nomornya tetap.`); router.push(`/bills/${edit.billId}`); router.refresh(); }
+        else toast.error(res.error);
+        return;
+      }
+      const res = await createBillAction(vendorId, selected, opts);
       if (res.ok) { toast.success("Vendor bill dibuat."); router.push(`/bills/${res.id}`); router.refresh(); }
       else toast.error(res.error);
     });
@@ -86,7 +99,9 @@ export function BillBuilder({ lines, currencies, today }: { lines: BillLineOpt[]
         <CardHeader className="space-y-3">
           <CardTitle className="text-base">Pilih biaya</CardTitle>
           <div className="grid gap-3 sm:grid-cols-2">
-            <SearchableSelect value={vendorId} onChange={pickVendor} options={vendors} placeholder="Pilih vendor…" ariaLabel="Vendor" />
+            {edit
+              ? <Input value={own[0]?.vendor ?? ""} disabled aria-label="Vendor (tidak bisa diganti)" title="Vendor bill tidak bisa diganti. Batalkan bill lalu buat ulang untuk vendor lain." />
+              : <SearchableSelect value={vendorId} onChange={pickVendor} options={vendors} placeholder="Pilih vendor…" ariaLabel="Vendor" />}
             {vendorId
               ? <SearchableSelect value="" onChange={(job) => setJobFilter((x) => [...x, job])} options={jobOptions} placeholder="Filter job / B/L…" ariaLabel="Filter job atau B/L" />
               : <Input disabled placeholder="Filter job / B/L…" />}
@@ -131,7 +146,7 @@ export function BillBuilder({ lines, currencies, today }: { lines: BillLineOpt[]
       </Card>
 
       <Card className="h-fit">
-        <CardHeader><CardTitle className="text-base">Bill baru</CardTitle></CardHeader>
+        <CardHeader><CardTitle className="text-base">{edit ? `Edit ${edit.number}` : "Bill baru"}</CardTitle></CardHeader>
         <CardContent className="space-y-3 text-sm">
           <div className="space-y-1.5"><Label>No. tagihan vendor</Label><Input value={vendorRef} onChange={(e) => setVendorRef(e.target.value)} /></div>
           <div className="grid grid-cols-2 gap-3">
@@ -157,7 +172,8 @@ export function BillBuilder({ lines, currencies, today }: { lines: BillLineOpt[]
             <div className="flex justify-between"><span>{picked.length} biaya dari {jobs} job</span><span className="tabular-nums">{formatIDR(subtotal)}</span></div>
             <div className="flex justify-between font-semibold"><span>Yang dibayar ke vendor</span><span className="tabular-nums">{formatIDR(net)}</span></div>
           </div>
-          <Button className="w-full" onClick={save} disabled={pending || picked.length === 0 || !(net > 0)}>{pending ? <Loader2 className="animate-spin" /> : <Save />} Buat Bill</Button>
+          <Button className="w-full" onClick={save} disabled={pending || picked.length === 0 || !(net > 0)}>{pending ? <Loader2 className="animate-spin" /> : <Save />} {edit ? "Simpan Perubahan" : "Buat Bill"}</Button>
+          {edit && <p className="text-xs text-muted-foreground">Biaya yang tidak dicentang dilepas dari bill dan bisa di-bill lagi. Tanggal hanya bisa diubah di bulan yang sama.</p>}
         </CardContent>
       </Card>
     </div>

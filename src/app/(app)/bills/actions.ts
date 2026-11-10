@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { assertCan } from "@/lib/auth-helpers";
 import { writeAudit } from "@/lib/audit";
-import { createBillCore, recordVendorPaymentCore, type BillOpts, type VendorPaymentInput } from "@/lib/payables";
+import { cancelBillCore, createBillCore, recordVendorPaymentCore, updateBillCore, type BillOpts, type VendorPaymentInput } from "@/lib/payables";
 import { errorMessage } from "@/lib/action-error";
 
 type Result<T = object> = ({ ok: true } & T) | { ok: false; error: string };
@@ -38,5 +38,27 @@ export async function recordVendorPaymentAction(billId: string, input: VendorPay
     revalidatePath("/payments");
     revalidatePath("/accounting");
     return { ok: true };
+  } catch (e) { return fail(e); }
+}
+
+/** Edit vendor bill yang belum dibayar. Nomor bill dan jurnal tetap, isi lama tersimpan di riwayat perubahan. */
+export async function updateBillAction(billId: string, lineIds: string[], opts: BillOpts = {}): Promise<Result> {
+  const user = await assertCan("bills", "write");
+  try {
+    const r = await updateBillCore(prisma, billId, lineIds, opts);
+    await writeAudit({ entity: "VendorBill", entityId: billId, action: "EDIT", summary: `${r.number}: ${lineIds.length} biaya`, changes: r.changes, userId: user.id });
+    for (const p of ["/bills", `/bills/${billId}`, "/costing", "/accounting", "/proofs"]) revalidatePath(p);
+    return { ok: true };
+  } catch (e) { return fail(e); }
+}
+
+/** Batalkan vendor bill yang belum dibayar: jurnal dibalik, biaya job dibuka kembali. Alasan wajib. */
+export async function cancelBillAction(billId: string, reason: string): Promise<Result<{ reopened: number }>> {
+  const user = await assertCan("bills", "write");
+  try {
+    const r = await cancelBillCore(prisma, billId, reason, user.id);
+    await writeAudit({ entity: "VendorBill", entityId: billId, action: "CANCEL", summary: `${r.number}: ${reason.trim()} (${r.reopened} biaya dibuka kembali)`, userId: user.id });
+    for (const p of ["/bills", `/bills/${billId}`, "/costing", "/accounting", "/proofs"]) revalidatePath(p);
+    return { ok: true, reopened: r.reopened };
   } catch (e) { return fail(e); }
 }

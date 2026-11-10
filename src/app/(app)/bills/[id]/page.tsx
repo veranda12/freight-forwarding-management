@@ -18,8 +18,9 @@ import { Button } from "@/components/ui/button";
 import { DocVouchersCard } from "@/components/doc-vouchers-card";
 import { vouchersOfDoc } from "@/lib/doc-vouchers";
 import { PayBillButton } from "../pay-bill-button";
-import { vendorPaymentCancelState } from "@/lib/payables";
+import { billChangeState, vendorPaymentCancelState } from "@/lib/payables";
 import { CancelReceiptButton } from "../../payments/cancel-receipt-button";
+import { BillChangeButtons } from "../bill-change-buttons";
 
 export const dynamic = "force-dynamic";
 
@@ -60,6 +61,8 @@ export default async function BillDetail({ params }: { params: Promise<{ id: str
       cancelStates.set(a.payment.id, await vendorPaymentCancelState(prisma, a.payment.id));
     }
   }
+  // Edit dan Batalkan Bill untuk yang boleh menulis bill; bill yang sudah batal tidak punya tombol lagi.
+  const change = can(user.role, "bills", "write") && bill.status !== "CANCELLED" ? await billChangeState(prisma, bill.id) : null;
   const jobs = [...new Map(bill.lines.flatMap((l) => (l.job ? [[l.job.id, l.job] as const] : []))).values()];
   if (jobs.length === 0 && bill.job) jobs.push({ ...bill.job, hblNo: null, mblNo: null });
 
@@ -85,6 +88,11 @@ export default async function BillDetail({ params }: { params: Promise<{ id: str
             />
           )}
         </PageHeader>
+        {change && (
+          <div className="mt-3 flex justify-end">
+            <BillChangeButtons billId={bill.id} number={bill.number} editBlock={change.editBlock} cancelBlock={change.cancelBlock} note={change.anyBlock} />
+          </div>
+        )}
         {jobs.length > 0 && (
           <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
             {jobs.map((j) => (
@@ -128,11 +136,22 @@ export default async function BillDetail({ params }: { params: Promise<{ id: str
             <Row label="PPh 26 dipotong" value={`- ${formatIDR(Number(bill.pph26Amount))}`} muted />
             <Row label="Total hutang" value={formatIDR(Number(bill.total))} strong />
             <Row label="Dibayar" value={formatIDR(Number(bill.amountPaid))} muted />
-            <Row label="Sisa" value={formatIDR(outstanding)} strong />
+            {/* Bill batal: hutangnya sudah dihapus lewat jurnal pembalik, jadi tidak ada sisa yang harus dibayar. */}
+            <Row label="Sisa" value={bill.status === "CANCELLED" ? "Rp 0 (dibatalkan)" : formatIDR(outstanding)} strong />
           </div>
         </Card>
 
         <div className="space-y-4">
+          {bill.status === "CANCELLED" && (
+            <Card className="border-destructive/40">
+              <CardHeader><CardTitle className="text-base text-destructive">Bill dibatalkan</CardTitle></CardHeader>
+              <CardContent className="space-y-1 text-sm">
+                {bill.cancelledAt && <Row label="Tanggal batal" value={formatDate(bill.cancelledAt)} muted />}
+                <p className="text-muted-foreground">{bill.cancelReason ?? "Tidak ada alasan tercatat."}</p>
+                <p className="text-xs text-muted-foreground">Jurnal hutangnya sudah dibalik dan biaya job di bill ini sudah bisa di-bill ulang.</p>
+              </CardContent>
+            </Card>
+          )}
           <Card>
             <CardHeader><CardTitle className="text-base">Info</CardTitle></CardHeader>
             <CardContent className="space-y-2 text-sm">

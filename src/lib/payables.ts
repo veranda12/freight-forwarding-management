@@ -1,12 +1,12 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { accountMap, ACC } from "./coa";
 import { jktKey, r2 } from "./accounting-core";
-import { postJournal, reverseJournal, type JournalLineInput } from "./journal";
+import { postJournal, replaceJournal, reverseJournal, type JournalLineInput } from "./journal";
 import { cashProofCode, genDocNumber, genProofNumber, SEQ } from "./sequence";
 import { effectiveRate, IDR, latestRate } from "./fx";
 import { resolveCashAccount, assertCashCurrency } from "./cash-accounts";
 import { getLockKey } from "./period-lock";
-import { formatDate, TZ } from "./format";
+import { formatDate, formatIDR, TZ } from "./format";
 
 export type BillOpts = {
   currency?: string; rate?: number;
@@ -20,6 +20,60 @@ const money = (v: unknown, label: string) => {
   if (!Number.isFinite(n) || n < 0) throw new Error(`${label} harus angka nol atau lebih.`);
   return r2(n);
 };
+
+type BuyingLine = Prisma.CostingLineGetPayload<{ include: { chargeCode: true } }>;
+type JLine = { accountId: string; debit?: number; credit?: number; description?: string };
+
+/** Nilai bill dari baris buying dan isian kurs, PPN, dan PPh. Dipakai saat buat dan edit supaya rumusnya sama. */
+async function billAmounts(db: Db, lines: BuyingLine[], opts: BillOpts) {
+  const cur = (opts.currency || IDR).toUpperCase();
+  let rate = 1;
+  if (cur !== IDR) {
+    rate = Number(opts.rate) > 0 ? Number(opts.rate) : (effectiveRate(lines, cur) ?? (await latestRate(db, cur)) ?? 0);
+    if (!(rate > 0)) throw new Error(`Kurs ${cur} belum tersedia. Isi kurs bill secara manual.`);
+  }
+  const subtotal = r2(lines.reduce((s, l) => s + Number(l.actualIdr), 0));
+  const jasa = r2(lines.filter((l) => !l.asReceipt).reduce((s, l) => s + Number(l.actualIdr), 0));
+  const ppn = money(opts.ppn, "PPN");
+  const pph23 = money(opts.pph23, "PPh 23");
+  const pph26 = money(opts.pph26, "PPh 26");
+  const total = r2(subtotal + ppn - pph23 - pph26);
+  if (!(total > 0)) throw new Error("Nilai bill harus lebih dari 0.");
+  const foreignTotal = cur === IDR ? 0 : r2(total / rate);
+  // kurs tercatat = IDR tercatat / nominal valas (konsisten dengan pembulatan nominal valas)
+  const effRate = foreignTotal > 0 ? Number((total / foreignTotal).toFixed(6)) : 1;
+  return { cur, subtotal, jasa, ppn, pph23, pph26, total, foreignTotal, effRate };
+}
+
+/** Kolom nilai bill, baris bill, dan baris jurnal (beban per akun, reimburse, PPN masukan, hutang, PPh). */
+function billPosting(lines: BuyingLine[], a: Awaited<ReturnType<typeof billAmounts>>, acc: Record<string, string>, number: string, vendorName: string) {
+  const expByAccount: Record<string, number> = {};
+  for (const l of lines) {
+    const accId = l.asReceipt ? acc[ACC.REIMBURSE] : l.chargeCode.expenseAccountId ?? acc[ACC.EXP_OTHER];
+    expByAccount[accId] = r2((expByAccount[accId] ?? 0) + Number(l.actualIdr));
+  }
+  const fields = {
+    currency: a.cur, exchangeRate: new Prisma.Decimal(a.effRate.toFixed(6)), amountForeign: new Prisma.Decimal(a.foreignTotal),
+    subtotal: new Prisma.Decimal(a.subtotal),
+    pph23Base: new Prisma.Decimal(a.pph23 > 0 ? a.jasa : 0), pph23Amount: new Prisma.Decimal(a.pph23),
+    pph26Base: new Prisma.Decimal(a.pph26 > 0 ? a.jasa : 0), pph26Amount: new Prisma.Decimal(a.pph26),
+    ppnAmount: new Prisma.Decimal(a.ppn), total: new Prisma.Decimal(a.total),
+  };
+  const lineData = lines.map((l) => ({
+    chargeCodeId: l.chargeCodeId, description: l.chargeCode.name,
+    qty: l.qty, unitPrice: new Prisma.Decimal(Number(l.actualIdr) / (Number(l.qty) || 1)),
+    amount: new Prisma.Decimal(Number(l.actualIdr)), pph23: a.pph23 > 0 && !l.asReceipt, jobId: l.jobId,
+  }));
+  const jLines: JLine[] = [];
+  for (const [accId, amt] of Object.entries(expByAccount)) jLines.push({ accountId: accId, debit: amt, description: `Bill ${number}` });
+  if (a.ppn > 0) jLines.push({ accountId: acc[ACC.PPN_IN], debit: a.ppn, description: "PPN Masukan" });
+  jLines.push({ accountId: acc[ACC.AP], credit: a.total, description: `Bill ${number} - ${vendorName}` });
+  if (a.pph23 > 0) jLines.push({ accountId: acc[ACC.PPH23], credit: a.pph23, description: "PPh 23 dipotong" });
+  if (a.pph26 > 0) jLines.push({ accountId: acc[ACC.PPH26], credit: a.pph26, description: "PPh 26 dipotong" });
+  return { fields, lineData, jLines };
+}
+
+const billDate = (key: string) => new Date(`${key}T12:00:00+07:00`);
 
 /**
  * AP vendor bill untuk satu vendor dari baris buying yang dipilih, boleh dari beberapa job.
@@ -40,70 +94,178 @@ export async function createBillCore(db: PrismaClient, vendorId: string, lineIds
   if (lines.some((l) => l.billed || l.voucherId || l.recordedAt)) throw new Error("Ada biaya yang sudah di-bill atau masuk voucher. Muat ulang halaman.");
   if (lines.some((l) => l.job.status === "CANCELLED")) throw new Error("Ada job yang sudah dibatalkan.");
   const jobId = lines[0].jobId;
-
-  const cur = (opts.currency || IDR).toUpperCase();
-  let rate = 1;
-  if (cur !== IDR) {
-    rate = Number(opts.rate) > 0 ? Number(opts.rate) : (effectiveRate(lines, cur) ?? (await latestRate(db, cur)) ?? 0);
-    if (!(rate > 0)) throw new Error(`Kurs ${cur} belum tersedia. Isi kurs bill secara manual.`);
-  }
-
-  const subtotal = r2(lines.reduce((s, l) => s + Number(l.actualIdr), 0));
-  const jasa = r2(lines.filter((l) => !l.asReceipt).reduce((s, l) => s + Number(l.actualIdr), 0));
-  const ppn = money(opts.ppn, "PPN");
-  const pph23 = money(opts.pph23, "PPh 23");
-  const pph26 = money(opts.pph26, "PPh 26");
-  const total = r2(subtotal + ppn - pph23 - pph26);
-  if (!(total > 0)) throw new Error("Nilai bill harus lebih dari 0.");
-  const foreignTotal = cur === IDR ? 0 : r2(total / rate);
-  // kurs tercatat = IDR tercatat / nominal valas (konsisten dengan pembulatan nominal valas)
-  const effRate = foreignTotal > 0 ? Number((total / foreignTotal).toFixed(6)) : 1;
+  const a = await billAmounts(db, lines, opts);
 
   return db.$transaction(async (tx) => {
     const acc = await accountMap(tx);
-    const date = opts.date ? new Date(`${opts.date}T12:00:00+07:00`) : new Date();
-    const dueDate = opts.dueDate ? new Date(`${opts.dueDate}T12:00:00+07:00`) : new Date(date);
+    const date = opts.date ? billDate(opts.date) : new Date();
+    const dueDate = opts.dueDate ? billDate(opts.dueDate) : new Date(date);
     if (!opts.dueDate) dueDate.setDate(dueDate.getDate() + 30);
 
-    // Beban per akun (sesuai charge code), reimburse ke akun titipan, lalu PPN masukan dan PPh.
-    const expByAccount: Record<string, number> = {};
-    for (const l of lines) {
-      const accId = l.asReceipt ? acc[ACC.REIMBURSE] : l.chargeCode.expenseAccountId ?? acc[ACC.EXP_OTHER];
-      expByAccount[accId] = r2((expByAccount[accId] ?? 0) + Number(l.actualIdr));
-    }
-
     const number = await genDocNumber(tx, SEQ.BILL, date);
+    const { fields, lineData, jLines } = billPosting(lines, a, acc, number, vendor.name);
     const bill = await tx.vendorBill.create({
       data: {
         number, vendorId, jobId, date, dueDate, vendorRef: (opts.vendorRef ?? "").trim() || null,
-        currency: cur, exchangeRate: new Prisma.Decimal(effRate.toFixed(6)),
-        amountForeign: new Prisma.Decimal(foreignTotal), amountPaidForeign: new Prisma.Decimal(0),
-        subtotal: new Prisma.Decimal(subtotal),
-        pph23Base: new Prisma.Decimal(pph23 > 0 ? jasa : 0), pph23Amount: new Prisma.Decimal(pph23),
-        pph26Base: new Prisma.Decimal(pph26 > 0 ? jasa : 0), pph26Amount: new Prisma.Decimal(pph26),
-        ppnAmount: new Prisma.Decimal(ppn),
-        total: new Prisma.Decimal(total), amountPaid: new Prisma.Decimal(0), status: "UNPAID", postedAt: date,
-        lines: {
-          create: lines.map((l) => ({
-            chargeCodeId: l.chargeCodeId, description: l.chargeCode.name,
-            qty: l.qty, unitPrice: new Prisma.Decimal(Number(l.actualIdr) / (Number(l.qty) || 1)),
-            amount: new Prisma.Decimal(Number(l.actualIdr)), pph23: pph23 > 0 && !l.asReceipt, jobId: l.jobId,
-          })),
-        },
+        ...fields, amountPaidForeign: new Prisma.Decimal(0), amountPaid: new Prisma.Decimal(0), status: "UNPAID", postedAt: date,
+        lines: { create: lineData },
       },
     });
 
-    const jLines: { accountId: string; debit?: number; credit?: number; description?: string }[] = [];
-    for (const [accId, amt] of Object.entries(expByAccount)) jLines.push({ accountId: accId, debit: amt, description: `Bill ${number}` });
-    if (ppn > 0) jLines.push({ accountId: acc[ACC.PPN_IN], debit: ppn, description: "PPN Masukan" });
-    jLines.push({ accountId: acc[ACC.AP], credit: total, description: `Bill ${number} - ${vendor.name}` });
-    if (pph23 > 0) jLines.push({ accountId: acc[ACC.PPH23], credit: pph23, description: "PPh 23 dipotong" });
-    if (pph26 > 0) jLines.push({ accountId: acc[ACC.PPH26], credit: pph26, description: "PPh 26 dipotong" });
     const jeId = await postJournal(tx, { date, description: `Vendor Bill ${number} - ${vendor.name}`, source: "BILL", sourceId: bill.id, lines: jLines, createdById: userId });
     await tx.vendorBill.update({ where: { id: bill.id }, data: { journalEntryId: jeId } });
-    const marked = await tx.costingLine.updateMany({ where: { id: { in: lineIds }, billed: false, voucherId: null }, data: { billed: true } });
+    const marked = await tx.costingLine.updateMany({ where: { id: { in: lineIds }, billed: false, voucherId: null }, data: { billed: true, billId: bill.id } });
     if (marked.count !== lineIds.length) throw new Error("Biaya ini baru saja dipakai bill atau voucher lain. Muat ulang halaman.");
     return bill.id;
+  });
+}
+
+// ---------------------------------------------------------------- edit dan batal vendor bill
+
+/**
+ * Alasan bill tidak bisa diedit atau dibatalkan, atau null bila bisa. Murni.
+ * Urutannya: yang paling perlu ditindaklanjuti user lebih dulu (pembayaran, voucher), lalu kurs dan periode.
+ */
+export function billChangeBlock(b: {
+  status: string; amountPaid: number; currency: string; date: Date; vouchers: string[]; revalued: boolean; lockKey: string | null;
+}, action: "edit" | "cancel" | "any"): string | null {
+  const verb = action === "edit" ? "diedit" : action === "cancel" ? "dibatalkan" : "diedit atau dibatalkan";
+  if (b.status === "CANCELLED") return "Bill ini sudah dibatalkan.";
+  if (b.amountPaid > 0.005 || b.status === "PAID" || b.status === "PARTIAL") {
+    const paid = b.amountPaid > 0.005 ? ` ${formatIDR(b.amountPaid)}` : "";
+    return `Bill ini sudah dibayar${paid} ke vendor. Batalkan pembayarannya dulu (khusus Admin), baru bill bisa ${verb}.`;
+  }
+  if (b.vouchers.length) return `Bill ini sudah dibuatkan voucher ${b.vouchers.join(", ")}. Batalkan vouchernya dulu, baru bill bisa ${verb}.`;
+  if (b.revalued) return `Bill ${b.currency} ini sudah direvaluasi kurs, jadi nilai hutangnya tidak bisa ${verb} lagi.`;
+  if (b.lockKey && jktKey(b.date) <= b.lockKey) return `Periode ${monthLabel(b.date)} sudah tutup buku. Buka dulu periodenya di menu Tutup Buku.`;
+  return null;
+}
+
+/** Data bill untuk tombol Edit dan Batalkan: alasan blokir masing-masing. */
+export async function billChangeState(db: Db, billId: string) {
+  const bill = await db.vendorBill.findUnique({
+    where: { id: billId },
+    include: { vendor: { select: { name: true } }, lines: { select: { id: true, jobId: true, chargeCodeId: true, amount: true } } },
+  });
+  if (!bill) throw new Error("Bill tidak ditemukan.");
+  const vouchers = await db.voucher.findMany({ where: { billId, status: { not: "CANCELLED" } }, select: { number: true } });
+  // Bill valas yang sudah direvaluasi: hutang di jurnal asal tidak sama lagi dengan total sekarang.
+  const apLine = bill.journalEntryId
+    ? await db.journalLine.findFirst({ where: { entryId: bill.journalEntryId, account: { code: ACC.AP } }, select: { credit: true } })
+    : null;
+  const input = {
+    status: bill.status, amountPaid: Number(bill.amountPaid), currency: bill.currency, date: bill.date,
+    vouchers: vouchers.map((v) => v.number), revalued: !!apLine && Math.abs(Number(apLine.credit) - Number(bill.total)) > 0.5,
+    lockKey: await getLockKey(db),
+  };
+  // anyBlock: satu kalimat untuk ditampilkan bila edit dan batal sama-sama diblokir karena alasan yang sama.
+  return { bill, editBlock: billChangeBlock(input, "edit"), cancelBlock: billChangeBlock(input, "cancel"), anyBlock: billChangeBlock(input, "any") };
+}
+
+type BillForLink = { id: string; vendorId: string; lines: { jobId: string | null; chargeCodeId: string; amount: Prisma.Decimal }[] };
+
+/**
+ * Baris buying milik bill. Bill lama (sebelum ada tautan billId) dicocokkan lewat vendor, job, charge, dan nilai yang sama,
+ * yang sudah di-bill tapi belum milik bill lain. Bila ada baris yang tidak ketemu, bill tidak diubah otomatis. Hanya membaca.
+ */
+export async function billCostingIds(db: Db, bill: BillForLink): Promise<{ ids: string[]; legacy: boolean }> {
+  const linked = await db.costingLine.findMany({ where: { billId: bill.id }, select: { id: true } });
+  if (linked.length) return { ids: linked.map((l) => l.id), legacy: false };
+  const taken: string[] = [];
+  for (const l of bill.lines) {
+    const match = l.jobId
+      ? await db.costingLine.findFirst({
+          where: {
+            side: "BUYING", billed: true, billId: null, vendorId: bill.vendorId, jobId: l.jobId, chargeCodeId: l.chargeCodeId,
+            actualIdr: l.amount, id: { notIn: taken },
+          },
+          orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
+          select: { id: true },
+        })
+      : null;
+    if (!match) throw new Error("Sebagian biaya di bill lama ini tidak bisa dicocokkan dengan costing job-nya, jadi bill tidak bisa diubah otomatis. Hubungi admin.");
+    taken.push(match.id);
+  }
+  return { ids: taken, legacy: true };
+}
+
+/** Simpan tautan bill lama ke baris buying-nya sebelum diedit atau dibatalkan. */
+async function linkBillCostings(tx: Prisma.TransactionClient, bill: BillForLink) {
+  const r = await billCostingIds(tx, bill);
+  if (r.legacy) await tx.costingLine.updateMany({ where: { id: { in: r.ids } }, data: { billId: bill.id } });
+}
+
+/**
+ * Edit vendor bill yang belum dibayar: pilihan biaya, tanggal (bulan yang sama), jatuh tempo, no. tagihan vendor,
+ * kurs, PPN, dan PPh. Nomor bill dan nomor jurnal tetap; biaya yang dilepas bisa di-bill lagi.
+ */
+export async function updateBillCore(db: PrismaClient, billId: string, lineIds: string[], opts: BillOpts = {}) {
+  if (lineIds.length === 0) throw new Error("Pilih minimal satu biaya.");
+  return db.$transaction(async (tx) => {
+    const { bill, editBlock } = await billChangeState(tx, billId);
+    if (editBlock) throw new Error(editBlock);
+    if (!bill.journalEntryId) throw new Error("Bill ini tidak punya jurnal, jadi tidak bisa diedit.");
+    await linkBillCostings(tx, bill);
+
+    const lines = await tx.costingLine.findMany({
+      where: { id: { in: lineIds }, side: "BUYING" },
+      include: { chargeCode: true, job: { select: { status: true } } },
+      orderBy: [{ jobId: "asc" }, { sortOrder: "asc" }],
+    });
+    if (lines.length !== lineIds.length) throw new Error("Ada biaya yang tidak ditemukan. Muat ulang halaman.");
+    if (lines.some((l) => l.vendorId !== bill.vendorId)) throw new Error("Satu bill hanya untuk satu vendor.");
+    const added = lines.filter((l) => l.billId !== bill.id);
+    if (added.some((l) => l.billed || l.voucherId || l.recordedAt)) throw new Error("Ada biaya yang sudah di-bill atau masuk voucher lain. Muat ulang halaman.");
+    if (added.some((l) => l.job.status === "CANCELLED")) throw new Error("Ada job yang sudah dibatalkan.");
+
+    const date = opts.date ? billDate(opts.date) : bill.date;
+    if (jktKey(date).slice(0, 7) !== jktKey(bill.date).slice(0, 7)) throw new Error("Tanggal bill tidak bisa pindah bulan, karena bulan ada di nomor bill.");
+    const cur = (opts.currency || bill.currency).toUpperCase();
+    const rate = cur === bill.currency && !(Number(opts.rate) > 0) ? Number(bill.exchangeRate) : opts.rate;
+    const a = await billAmounts(tx, lines, { ...opts, currency: cur, rate });
+    const acc = await accountMap(tx);
+    const { fields, lineData, jLines } = billPosting(lines, a, acc, bill.number, bill.vendor.name);
+
+    await tx.costingLine.updateMany({ where: { billId: bill.id, id: { notIn: lineIds } }, data: { billed: false, billId: null } });
+    const marked = await tx.costingLine.updateMany({
+      where: { id: { in: lineIds }, OR: [{ billId: bill.id }, { billed: false, voucherId: null, recordedAt: null }] },
+      data: { billed: true, billId: bill.id },
+    });
+    if (marked.count !== lineIds.length) throw new Error("Biaya ini baru saja dipakai bill atau voucher lain. Muat ulang halaman.");
+    await tx.billLine.deleteMany({ where: { billId: bill.id } });
+    await tx.vendorBill.update({
+      where: { id: bill.id },
+      data: {
+        jobId: lines[0].jobId, date, postedAt: date,
+        ...(opts.dueDate ? { dueDate: billDate(opts.dueDate) } : {}),
+        ...(opts.vendorRef !== undefined ? { vendorRef: (opts.vendorRef ?? "").trim() || null } : {}),
+        ...fields, amountPaidForeign: new Prisma.Decimal(0), lines: { create: lineData },
+      },
+    });
+    const changes = await replaceJournal(tx, bill.journalEntryId, { date, description: `Vendor Bill ${bill.number} - ${bill.vendor.name}`, lines: jLines });
+    return { number: bill.number, changes };
+  });
+}
+
+/**
+ * Batalkan vendor bill yang belum dibayar. Jurnal hutang dibalik di tanggal bill, bill ditandai batal dengan alasannya,
+ * dan biaya job milik bill ini dibuka kembali sehingga bisa di-bill ulang. Nomor bill tetap tercatat.
+ */
+export async function cancelBillCore(db: PrismaClient, billId: string, reason: string, userId?: string) {
+  const why = reason.trim();
+  if (why.length < 3) throw new Error("Alasan pembatalan wajib diisi.");
+  return db.$transaction(async (tx) => {
+    const { bill, cancelBlock } = await billChangeState(tx, billId);
+    if (cancelBlock) throw new Error(cancelBlock);
+    await linkBillCostings(tx, bill);
+    const marked = await tx.vendorBill.updateMany({
+      where: { id: bill.id, status: { not: "CANCELLED" } },
+      data: { status: "CANCELLED", cancelledAt: new Date(), cancelReason: why },
+    });
+    if (marked.count === 0) throw new Error("Bill ini sudah dibatalkan.");
+    if (bill.journalEntryId) await reverseJournal(tx, bill.journalEntryId, { date: bill.date, reason: `Bill dibatalkan: ${why}`, createdById: userId });
+    const reopened = await tx.costingLine.updateMany({ where: { billId: bill.id }, data: { billed: false, billId: null } });
+    return { number: bill.number, reopened: reopened.count };
   });
 }
 

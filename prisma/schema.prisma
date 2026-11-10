@@ -933,6 +933,9 @@ model CostingLine {
   invoiceId         String?
   invoice           Invoice?   @relation("InvoiceCostings", fields: [invoiceId], references: [id], onDelete: SetNull)
   billed            Boolean    @default(false)
+  /// Vendor bill yang menagih baris buying ini. Edit/batal bill hanya membuka kembali baris miliknya.
+  billId            String?
+  bill              VendorBill? @relation("BillCostings", fields: [billId], references: [id], onDelete: SetNull)
   /// Voucher pengeluaran yang memuat baris buying ini. Baris terkunci sejak voucher dibuat.
   voucherId         String?
   voucher           Voucher?   @relation(fields: [voucherId], references: [id], onDelete: SetNull)
@@ -943,6 +946,7 @@ model CostingLine {
   @@index([jobId, side])
   @@index([invoiceId])
   @@index([voucherId])
+  @@index([billId])
 }
 
 /// Voucher pengeluaran biaya harian job. Dibuat Finance, nomor bukti BK atau KK terbentuk saat dibayar.
@@ -1112,12 +1116,15 @@ model VendorBill {
   notes             String?
   journalEntryId    String?
   postedAt          DateTime?
+  cancelReason      String?
+  cancelledAt       DateTime?
   createdAt         DateTime   @default(now())
   updatedAt         DateTime   @updatedAt
 
-  lines       BillLine[]
-  allocations PaymentAllocation[]
-  vouchers    Voucher[]
+  lines        BillLine[]
+  allocations  PaymentAllocation[]
+  vouchers     Voucher[]
+  costingLines CostingLine[] @relation("BillCostings")
 
   @@index([status])
   @@index([vendorId])

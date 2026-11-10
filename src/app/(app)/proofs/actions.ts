@@ -8,6 +8,7 @@ import { cancelInvoice } from "../invoices/actions";
 import { cancelReceiptAction, cancelVendorPaymentAction } from "../payments/actions";
 import { cancelCashEntryAction, cancelManualJournalAction, cancelTaxRemitAction, cancelTransferAction } from "../accounting/actions";
 import { cancelVoucherAction } from "../vouchers/actions";
+import { cancelBillAction } from "../bills/actions";
 
 type Result = { ok: true } | { ok: false; error: string };
 
@@ -30,6 +31,7 @@ export async function cancelProofAction(journalEntryId: string, reason: string):
   let r: { ok: boolean; error?: string };
   switch (kind) {
     case "invoice": r = await cancelInvoice(e.sourceId!); break;
+    case "bill": r = await cancelBillAction(e.sourceId!, why); break;
     case "receipt": r = await cancelReceiptAction(e.sourceId!, why); break;
     case "vendorPayment": r = await cancelVendorPaymentAction(e.sourceId!, why); break;
     case "cashEntry": r = await cancelCashEntryAction(e.id, why); break;

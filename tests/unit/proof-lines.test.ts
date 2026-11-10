@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { entryActions, MANUAL_TAG, type ActionEntry } from "@/lib/proof-lines";
+import { billChangeBlock } from "@/lib/payables";
 import { MANUAL_JOURNAL_TAG } from "@/lib/manual-journal";
 
 const e = (source: ActionEntry["source"], sourceId: string | null = "src1", extra: Partial<ActionEntry> = {}): ActionEntry =>
@@ -39,11 +40,12 @@ describe("entryActions", () => {
   });
 
   it("jurnal MANUAL otomatis (modal awal, aset) tidak diubah dari sini, ada alasannya", () => {
-    for (const id of ["asset1", null]) {
-      const a = entryActions(e("MANUAL", id), "ADMIN");
-      expect(a).toMatchObject({ editHref: null, cancel: null });
-      expect(a.cancelBlock).toMatch(/otomatis/);
-    }
+    const asset = entryActions(e("MANUAL", "asset1"), "ADMIN");
+    expect(asset).toMatchObject({ editHref: null, cancel: null });
+    expect(asset.cancelBlock).toMatch(/perolehan aset tetap/);
+    const opening = entryActions(e("MANUAL", null), "ADMIN");
+    expect(opening).toMatchObject({ editHref: null, cancel: null });
+    expect(opening.cancelBlock).toMatch(/saldo awal atau modal/);
   });
 
   it("voucher: batal saja, cetak PDF voucher", () => {
@@ -58,13 +60,35 @@ describe("entryActions", () => {
   });
 
   it("sumber tanpa fitur edit/batal: hanya cetak, setiap ikon abu-abu punya alasan", () => {
-    for (const s of ["BILL", "FX", "FX_REVAL", "DEPRECIATION", "CLOSING", "DEBIT_NOTE", "CREDIT_NOTE", "FLEET_COST"] as const) {
+    for (const s of ["FX", "FX_REVAL", "DEPRECIATION", "CLOSING", "DEBIT_NOTE", "CREDIT_NOTE", "FLEET_COST"] as const) {
       const a = entryActions(e(s), "ADMIN");
       expect(a).toMatchObject({ editHref: null, cancel: null });
       expect(a.editBlock).toBeTruthy();
       expect(a.cancelBlock).toBe(a.editBlock);
     }
-    expect(entryActions(e("BILL"), "ADMIN").cancelBlock).toMatch(/Vendor bill/);
+  });
+
+  it("vendor bill: Finance bisa edit dan batal, alasan blokir berdasarkan data bill", () => {
+    expect(entryActions(e("BILL", "b1"), "FINANCE")).toEqual({
+      editHref: "/bills/b1/edit", editBlock: null, cancel: "bill", cancelBlock: null, printHref: "/api/accounting/journals/je1/pdf",
+    });
+    expect(entryActions(e("BILL", "b1"), "MANAGEMENT").cancelBlock).toMatch(/izin/);
+    const d = new Date("2026-11-10T05:00:00Z");
+    const base = { status: "UNPAID", amountPaid: 0, currency: "IDR", date: d, vouchers: [] as string[], revalued: false, lockKey: null as string | null };
+    expect(billChangeBlock(base, "edit")).toBeNull();
+    expect(billChangeBlock({ ...base, status: "CANCELLED" }, "cancel")).toBe("Bill ini sudah dibatalkan.");
+    expect(billChangeBlock({ ...base, status: "PARTIAL", amountPaid: 300000 }, "cancel")).toMatch(/sudah dibayar Rp.*300\.000 ke vendor\. Batalkan pembayarannya dulu \(khusus Admin\), baru bill bisa dibatalkan/);
+    expect(billChangeBlock({ ...base, status: "PAID", amountPaid: 1 }, "edit")).toMatch(/baru bill bisa diedit/);
+    expect(billChangeBlock({ ...base, vouchers: ["SLG/VB/26/11/0001"] }, "edit")).toContain("voucher SLG/VB/26/11/0001. Batalkan vouchernya dulu");
+    expect(billChangeBlock({ ...base, currency: "USD", revalued: true }, "cancel")).toContain("Bill USD ini sudah direvaluasi kurs");
+    expect(billChangeBlock({ ...base, lockKey: "2026-11-30" }, "edit")).toMatch(/Periode November 2026 sudah tutup buku/);
+    expect(billChangeBlock({ ...base, lockKey: "2026-10-31" }, "edit")).toBeNull();
+  });
+
+  it("jurnal otomatis menyebut periodenya", () => {
+    expect(entryActions(e("CLOSING", "2025"), "ADMIN").cancelBlock).toContain("tahun 2025");
+    expect(entryActions(e("DEPRECIATION", "2026-10"), "ADMIN").cancelBlock).toContain("periode 2026-10");
+    expect(entryActions(e("FX_REVAL", "2026-10-31"), "ADMIN").cancelBlock).toContain("per 2026-10-31");
   });
 
   it("setiap aksi yang tidak tersedia selalu punya alasan", () => {
