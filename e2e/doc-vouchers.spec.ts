@@ -6,7 +6,7 @@ import { createInvoiceCore } from "../src/lib/receivables";
 /**
  * E2E voucher dari vendor bill dan invoice sebagai dokumen pencatatan (keputusan 2026-11-09): tombol di detail dokumen,
  * centang baris per job, tabel Kode COA otomatis, simpan TANPA pembayaran dan tanpa mengubah status dokumen, cetak,
- * batalkan dari daftar, menu Buat Voucher di area Accounting, form bertab, dan batas izin (termasuk kiriman ulang action).
+ * batalkan dari daftar, tombol Buat Voucher di Jurnal Penerimaan & Pengeluaran, form bertab, dan batas izin (termasuk kiriman ulang action).
  * Memeriksa UI sekaligus database: DATABASE_URL wajib DB uji yang sama dengan server (ditolak bila ffms / ffms_pgcheck).
  */
 
@@ -164,10 +164,11 @@ test.describe("Voucher dari invoice dan vendor bill", () => {
     await expect(page.getByRole("checkbox", { name: new RegExp(`${B.number.replace(/\//g, "\\/")}$`) })).toBeEnabled();
   });
 
-  test("Menu Buat Voucher di area Accounting: sidebar dan tombol di Jurnal Penerimaan & Pengeluaran", async ({ page }) => {
+  test("Buat Voucher lewat tombol di Jurnal Penerimaan & Pengeluaran, bukan menu sidebar", async ({ page }) => {
     await login(page, "finance@demo.com");
     await page.goto("/accounting/cash-entry");
-    await expect(page.locator("aside").getByRole("link", { name: "Buat Voucher" }).filter({ visible: true }).first()).toHaveAttribute("href", "/vouchers/new");
+    await expect(page.locator("aside").getByRole("link", { name: "Voucher", exact: true }).filter({ visible: true }).first()).toHaveAttribute("href", "/vouchers");
+    await expect(page.locator("aside").getByRole("link", { name: "Buat Voucher" })).toHaveCount(0);
     await page.locator("main").getByRole("link", { name: "Buat Voucher" }).filter({ visible: true }).click();
     await page.waitForURL("**/vouchers/new");
     await expect(page.getByRole("navigation", { name: "Sumber voucher" })).toBeVisible();

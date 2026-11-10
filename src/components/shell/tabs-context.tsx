@@ -7,7 +7,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { LayoutRouterContext } from "next/dist/shared/lib/app-router-context.shared-runtime";
 import { PathnameContext, PathParamsContext, SearchParamsContext } from "next/dist/shared/lib/hooks-client-context.shared-runtime";
 import { FileText, LayoutDashboard, MoreHorizontal, X } from "lucide-react";
-import { NAV } from "@/config/nav";
+import { NAV, groupItems } from "@/config/nav";
 import { TABS_STORAGE_KEY } from "@/config/session";
 import { cn } from "@/lib/utils";
 import {
@@ -37,7 +37,7 @@ export function useTabs() {
 
 /** Menu dengan href paling panjang yang cocok dengan path. */
 function navFor(path: string) {
-  return NAV.flatMap((g) => g.items)
+  return NAV.flatMap(groupItems)
     .filter((i) => path === i.href || path.startsWith(i.href + "/"))
     .sort((a, b) => b.href.length - a.href.length)[0];
 }

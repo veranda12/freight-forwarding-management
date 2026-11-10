@@ -4,7 +4,7 @@ import {
   Package, Percent, BookOpen, FileText, Briefcase, CalendarCheck, FileSignature,
   Calculator, Receipt, FileInput, StickyNote, Wallet, BookMarked, BarChart3,
   UserCog, Settings, History, MapPin, Truck, PackageCheck, Scale, Calculator as CalcIcon,
-  ArrowLeftRight, BookCheck, Landmark, GitCompare, RefreshCw, Banknote, ArrowDownUp, NotebookPen, ListChecks, Bug, Ticket, TicketPlus, FileSearch,
+  ArrowLeftRight, BookCheck, Landmark, GitCompare, RefreshCw, Banknote, ArrowDownUp, NotebookPen, ListChecks, Bug, Ticket, FileSearch,
 } from "lucide-react";
 
 export type NavItem = {
@@ -14,10 +14,22 @@ export type NavItem = {
   resource: Resource;
 };
 
-export type NavGroup = {
+export type NavSubGroup = {
   label: string;
   items: NavItem[];
 };
+
+export type NavGroup = {
+  label: string;
+  items: NavItem[];
+  /** Sub-grup yang bisa dibuka-tutup di dalam grup ini (tampil sesudah items). */
+  subgroups?: NavSubGroup[];
+};
+
+/** Semua menu dalam grup, termasuk yang ada di sub-grup. */
+export function groupItems(g: NavGroup): NavItem[] {
+  return [...g.items, ...(g.subgroups ?? []).flatMap((s) => s.items)];
+}
 
 export const NAV: NavGroup[] = [
   {
@@ -47,27 +59,44 @@ export const NAV: NavGroup[] = [
       { label: "Tarif Domestik", href: "/domestic/tariffs", icon: PackageCheck, resource: "domesticTariffs" },
     ],
   },
+  // Finance dibagi tiga sub-grup mengikuti alur: tagihan, lalu uang masuk/keluar, lalu pembukuan dan laporan.
+  // Buat Voucher tidak di sidebar: tombolnya ada di halaman Voucher, detail invoice/bill, dan Jurnal Penerimaan & Pengeluaran.
   {
     label: "Finance",
+    items: [],
+    subgroups: [
+  {
+    label: "Tagihan & Hutang",
     items: [
-      { label: "Cari Bukti", href: "/proofs", icon: FileSearch, resource: "proofs" },
       { label: "Costing", href: "/costing", icon: Calculator, resource: "costing" },
       { label: "Invoice (AR)", href: "/invoices", icon: Receipt, resource: "invoices" },
       { label: "Vendor Bill (AP)", href: "/bills", icon: FileInput, resource: "bills" },
-      { label: "Voucher", href: "/vouchers", icon: Ticket, resource: "vouchers" },
       { label: "Debit/Credit Note", href: "/notes", icon: StickyNote, resource: "notes" },
       { label: "Receipt & Payment", href: "/payments", icon: Wallet, resource: "payments" },
-      { label: "Accounting", href: "/accounting", icon: BookMarked, resource: "accounting" },
+    ],
+  },
+  {
+    label: "Kas & Bank",
+    items: [
       { label: "Jurnal Penerimaan & Pengeluaran", href: "/accounting/cash-entry", icon: ArrowDownUp, resource: "accounting" },
-      { label: "Buat Voucher", href: "/vouchers/new", icon: TicketPlus, resource: "vouchers" },
-      { label: "Jurnal Umum", href: "/accounting/manual-journal", icon: NotebookPen, resource: "accounting" },
+      { label: "Voucher", href: "/vouchers", icon: Ticket, resource: "vouchers" },
       { label: "Kasir All", href: "/accounting/kasir", icon: ListChecks, resource: "accounting" },
-      { label: "Arus Kas", href: "/accounting/cash-flow", icon: ArrowLeftRight, resource: "accounting" },
-      { label: "Tutup Buku", href: "/accounting/closing", icon: BookCheck, resource: "accounting" },
-      { label: "Aset Tetap", href: "/accounting/fixed-assets", icon: Building2, resource: "accounting" },
-      { label: "Pajak", href: "/accounting/tax", icon: Landmark, resource: "accounting" },
       { label: "Rekonsiliasi Bank", href: "/accounting/bank-rec", icon: GitCompare, resource: "accounting" },
+    ],
+  },
+  {
+    label: "Akuntansi",
+    items: [
+      { label: "Cari Bukti", href: "/proofs", icon: FileSearch, resource: "proofs" },
+      { label: "Jurnal Umum", href: "/accounting/manual-journal", icon: NotebookPen, resource: "accounting" },
+      { label: "Accounting", href: "/accounting", icon: BookMarked, resource: "accounting" },
+      { label: "Arus Kas", href: "/accounting/cash-flow", icon: ArrowLeftRight, resource: "accounting" },
+      { label: "Pajak", href: "/accounting/tax", icon: Landmark, resource: "accounting" },
+      { label: "Aset Tetap", href: "/accounting/fixed-assets", icon: Building2, resource: "accounting" },
       { label: "Revaluasi Kurs", href: "/accounting/fx", icon: RefreshCw, resource: "accounting" },
+      { label: "Tutup Buku", href: "/accounting/closing", icon: BookCheck, resource: "accounting" },
+    ],
+  },
     ],
   },
   {

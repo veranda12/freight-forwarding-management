@@ -38,7 +38,8 @@ test.describe("Demo Freight Forwarding Management System", () => {
     await login(page, "sales@demo.com");
     await openGroup(page, "Ekspor-Impor");
     await expect(page.getByRole("link", { name: "Quotation" })).toBeVisible();
-    await openGroup(page, "Finance"); // Sales melihat Costing dan Invoice, tetapi tidak Accounting
+    await openGroup(page, "Finance");
+    await openGroup(page, "Tagihan & Hutang"); // Sales melihat Costing dan Invoice, tetapi tidak Accounting
     await expect(page.getByRole("link", { name: "Costing" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Accounting" })).toHaveCount(0);
     // akses langsung via URL → dialihkan ke dashboard (bukan error)
@@ -71,6 +72,7 @@ test.describe("Demo Freight Forwarding Management System", () => {
   test("4. Finance: Trial Balance & Neraca seimbang", async ({ page }) => {
     await login(page, "finance@demo.com");
     await openGroup(page, "Finance");
+    await openGroup(page, "Akuntansi");
     await page.getByRole("link", { name: "Accounting", exact: true }).click();
     await expect(page.getByRole("tab", { name: "Trial Balance" })).toBeVisible();
     await expect(page.getByText("Balance ✓").first()).toBeVisible();
