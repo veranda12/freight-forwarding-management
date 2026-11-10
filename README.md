@@ -78,6 +78,11 @@ Master Data (Customer, Vendor, Overseas Agent, Port & Airport, Currency & Kurs, 
 
 **Import Excel** di daftar Customer, Vendor, dan Commodity: tombol *Import Excel* → *Unduh template* → isi sheet Data → *Periksa* (pratinjau per baris) → *Simpan*. Kolom Kode kosong = data baru, terisi = memperbarui data itu (sel kosong tidak mengubah apa pun). Maks. 1.000 baris / 2 MB per file (.xlsx).
 
+**Export Excel** di daftar Invoice dan Vendor Bill: file berisi sheet *Ringkasan* (satu baris per dokumen, baris TOTAL tanpa dokumen Cancelled) dan *Rincian* (satu baris per item). Nilai dalam IDR seperti pembukuan; dokumen valas punya kolom Mata Uang, Kurs, dan Nilai Valas.
+- Invoice: tombol *Export Excel* → pilih periode tanggal invoice (bawaan bulan berjalan) dan status → *Unduh*. Boleh untuk yang bisa membuka daftar Invoice (Finance, Sales).
+- Vendor Bill: tombol *Export Excel* memakai filter yang sedang aktif di halaman (termasuk bawaan "Belum lunas"), semua halaman. Bill lintas job diekspor utuh beserta semua barisnya. Hanya Finance.
+- Maks. 5.000 dokumen per file; lebih dari itu diminta mempersempit filter.
+
 ## 6. Prinsip Teknis
 
 - Uang = `Decimal(18,2)`, kurs = `Decimal(18,6)` — tidak pernah float.
