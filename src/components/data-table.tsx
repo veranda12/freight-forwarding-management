@@ -42,6 +42,8 @@ interface DataTableProps<TData, TValue> {
   toolbar?: React.ReactNode;
   emptyTitle?: string;
   facets?: Facet[];
+  /** Sembunyikan kotak cari bawaan, bila halaman punya pencarian sendiri di server. */
+  hideSearch?: boolean;
 }
 
 const PAGE_SIZES = [25, 50, 100];
@@ -57,6 +59,7 @@ export function DataTable<TData, TValue>({
   toolbar,
   emptyTitle,
   facets,
+  hideSearch,
 }: DataTableProps<TData, TValue>) {
   const [sorting, setSorting] = React.useState<SortingState>([]);
   const [globalFilter, setGlobalFilter] = React.useState("");
@@ -92,7 +95,7 @@ export function DataTable<TData, TValue>({
   return (
     <div className="space-y-2">
       <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
-        <div className="relative w-full sm:max-w-xs">
+        {!hideSearch && <div className="relative w-full sm:max-w-xs">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={globalFilter}
@@ -100,7 +103,7 @@ export function DataTable<TData, TValue>({
             placeholder={searchPlaceholder}
             className="pl-9"
           />
-        </div>
+        </div>}
 
         {facets?.map((f) => {
           const col = table.getColumn(f.columnId);
