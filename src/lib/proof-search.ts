@@ -373,3 +373,36 @@ export async function proofJournals(db: Db, ids: readonly string[]): Promise<Rec
   });
   return Object.fromEntries(rows.map((e) => [e.id, [toJournal(e), ...(e.reversedBy ? [toJournal(e.reversedBy)] : [])]]));
 }
+
+// ---------------------------------------------------------------- baris jurnal (tampilan Cari Bukti)
+
+export type ProofLineEntry = {
+  id: string; number: string; date: string; description: string;
+  source: Prisma.JournalEntryGetPayload<{ select: { source: true } }>["source"];
+  sourceId: string | null; isReversal: boolean; isReversed: boolean; user: string;
+  lines: ProofJournalLine[];
+};
+
+const LINE_ENTRY_SELECT = {
+  id: true, number: true, date: true, description: true, source: true, sourceId: true, isReversal: true, isReversed: true,
+  createdBy: { select: { name: true } }, lines: LINE_SELECT,
+} satisfies Prisma.JournalEntrySelect;
+
+/**
+ * Jurnal dari bukti yang ditemukan, ditambah jurnal pembaliknya, lengkap dengan user penginput.
+ * Urut tanggal lalu nomor; jurnal yang sama dari dua jenis bukti hanya muncul sekali.
+ */
+export async function proofLineEntries(db: Db, ids: readonly string[]): Promise<ProofLineEntry[]> {
+  const unique = [...new Set(ids)];
+  if (!unique.length) return [];
+  const rows = await db.journalEntry.findMany({
+    where: { OR: [{ id: { in: unique } }, { reversalOfId: { in: unique } }] },
+    select: LINE_ENTRY_SELECT,
+    orderBy: [{ date: "desc" }, { number: "desc" }],
+  });
+  return rows.map((e) => ({
+    id: e.id, number: e.number, date: e.date.toISOString(), description: e.description, source: e.source, sourceId: e.sourceId,
+    isReversal: e.isReversal, isReversed: e.isReversed, user: e.createdBy?.name ?? "-",
+    lines: e.lines.map((l) => ({ code: l.account.code, name: l.account.name, description: l.description, debit: n(l.debit), credit: n(l.credit) })),
+  }));
+}
