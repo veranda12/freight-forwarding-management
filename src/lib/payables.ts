@@ -1,10 +1,12 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { accountMap, ACC } from "./coa";
 import { jktKey, r2 } from "./accounting-core";
-import { postJournal, type JournalLineInput } from "./journal";
+import { postJournal, reverseJournal, type JournalLineInput } from "./journal";
 import { cashProofCode, genDocNumber, genProofNumber, SEQ } from "./sequence";
 import { effectiveRate, IDR, latestRate } from "./fx";
 import { resolveCashAccount, assertCashCurrency } from "./cash-accounts";
+import { getLockKey } from "./period-lock";
+import { formatDate, TZ } from "./format";
 
 export type BillOpts = {
   currency?: string; rate?: number;
@@ -219,4 +221,88 @@ export async function recordVendorPaymentTx(tx: Prisma.TransactionClient, billId
 /** Pembayaran ke vendor dalam transaksinya sendiri. */
 export async function recordVendorPaymentCore(db: PrismaClient, billId: string, input: VendorPaymentInput, userId?: string): Promise<void> {
   await db.$transaction((tx) => recordVendorPaymentTx(tx, billId, input, userId));
+}
+
+type Db = PrismaClient | Prisma.TransactionClient;
+const monthLabel = (d: Date) => d.toLocaleDateString("id-ID", { month: "long", year: "numeric", timeZone: TZ });
+
+/** Alasan pembayaran vendor bill tidak bisa dibatalkan, atau null bila bisa. Murni. */
+export function vendorPaymentCancelBlock(p: {
+  direction: string; hasBill: boolean; cancelledAt: Date | null; date: Date; lockKey: string | null;
+  reconciled: boolean; reconciledAt: Date | null; fxRevalAfter: boolean; voucherNumber: string | null;
+}): string | null {
+  if (p.direction !== "PAYMENT" || !p.hasBill) return "Yang bisa dibatalkan di sini hanya pembayaran vendor bill.";
+  if (p.cancelledAt) return "Pembayaran ini sudah dibatalkan.";
+  if (p.voucherNumber) return `Pembayaran ini tercatat lewat voucher ${p.voucherNumber}. Koreksi lewat Jurnal Umum.`;
+  if (p.reconciled) {
+    const when = p.reconciledAt ? ` pada ${formatDate(p.reconciledAt)}` : "";
+    return `Pembayaran ini sudah direkonsiliasi${when}. Buka dulu rekonsiliasinya di menu Rekonsiliasi Bank.`;
+  }
+  if (p.lockKey && jktKey(p.date) <= p.lockKey) return `Periode ${monthLabel(p.date)} sudah tutup buku. Buka dulu periodenya di menu Tutup Buku.`;
+  if (p.fxRevalAfter) return "Bill valas ini sudah direvaluasi kurs setelah tanggal pembayaran, jadi pembayarannya tidak bisa dibatalkan.";
+  return null;
+}
+
+/** Data pembayaran vendor untuk tombol Batalkan Pembayaran: alasan blokir dan bill yang ikut terdampak. */
+export async function vendorPaymentCancelState(db: Db, paymentId: string) {
+  const pay = await db.payment.findUnique({
+    where: { id: paymentId },
+    include: {
+      voucher: { select: { number: true } },
+      allocations: { include: { bill: { select: { id: true, number: true, currency: true, amountPaid: true, amountPaidForeign: true, status: true } } } },
+    },
+  });
+  if (!pay) throw new Error("Pembayaran tidak ditemukan.");
+  const journal = pay.journalEntryId
+    ? await db.journalEntry.findUnique({ where: { id: pay.journalEntryId }, include: { lines: { select: { reconciledAt: true, statementLine: { select: { id: true } } } } } })
+    : null;
+  const recon = journal?.lines.filter((l) => l.reconciledAt || l.statementLine) ?? [];
+  const fx = pay.allocations.some((a) => a.bill && a.bill.currency !== IDR)
+    ? await db.journalEntry.count({ where: { source: "FX_REVAL", isReversed: false, isReversal: false, date: { gte: pay.date } } })
+    : 0;
+  const block = vendorPaymentCancelBlock({
+    direction: pay.direction, hasBill: pay.allocations.some((a) => a.bill), cancelledAt: pay.cancelledAt, date: pay.date,
+    lockKey: await getLockKey(db), reconciled: recon.length > 0, reconciledAt: recon.find((l) => l.reconciledAt)?.reconciledAt ?? null,
+    fxRevalAfter: fx > 0, voucherNumber: pay.voucher?.number ?? null,
+  });
+  const bills = pay.allocations.flatMap((a) => (a.bill ? [a.bill.number] : []));
+  return { pay, block, bills };
+}
+
+/**
+ * Batalkan pembayaran vendor bill (khusus Admin). Jurnal pembayaran dibalik di tanggal yang sama,
+ * pembayaran tetap tersimpan dengan tanda batal, dan bill kembali belum lunas sehingga bisa dibayar ulang
+ * dengan nomor bukti baru. Isi bill dan biaya job tidak berubah.
+ */
+export async function cancelVendorPaymentCore(db: PrismaClient, paymentId: string, reason: string, userId?: string) {
+  const why = reason.trim();
+  if (why.length < 3) throw new Error("Alasan pembatalan wajib diisi.");
+  return db.$transaction(async (tx) => {
+    const { pay, block, bills } = await vendorPaymentCancelState(tx, paymentId);
+    if (block) throw new Error(block);
+    const marked = await tx.payment.updateMany({
+      where: { id: pay.id, cancelledAt: null },
+      data: { cancelledAt: new Date(), cancelReason: why, cancelledById: userId ?? null },
+    });
+    if (marked.count === 0) throw new Error("Pembayaran ini sudah dibatalkan.");
+    if (pay.journalEntryId) await reverseJournal(tx, pay.journalEntryId, { date: pay.date, reason: `Pembayaran dibatalkan: ${why}`, createdById: userId });
+
+    for (const a of pay.allocations) {
+      const bill = a.bill;
+      if (!bill) continue;
+      const paid = Math.max(0, r2(Number(bill.amountPaid) - Number(a.amount)));
+      const paidF = Math.max(0, r2(Number(bill.amountPaidForeign) - Number(a.amountForeign)));
+      await tx.vendorBill.update({
+        where: { id: bill.id },
+        data: { amountPaid: new Prisma.Decimal(paid), amountPaidForeign: new Prisma.Decimal(paidF), status: paid > 0.5 ? "PARTIAL" : "UNPAID" },
+      });
+    }
+    await tx.auditLog.create({
+      data: {
+        entity: "Payment", entityId: pay.id, action: "CANCEL", summary: `Pembayaran ${pay.number} dibatalkan: ${why}`, userId: userId ?? null,
+        changes: { bills, amount: Number(pay.amount) },
+      },
+    });
+    return { number: pay.number, bills };
+  });
 }

@@ -8,6 +8,8 @@ export type RateItem = {
   chargeCodeId: string;
   chargeCode: { code: string; name: string; asReceipt: boolean };
   containerTypeId: string | null;
+  /** Kosong = tarif standar. Diisi = tarif khusus customer (pemanggil hanya mengirim baris milik customer job). */
+  customerId?: string | null;
   basis: "PER_CONTAINER" | "PER_BL" | "PER_KM_OVER" | "OVERWEIGHT";
   condition: "ALWAYS" | "RED_LANE" | "OPTIONAL";
   price: number;
@@ -65,7 +67,8 @@ const ton = (kg: number) => (kg / 1000).toLocaleString("en-US", { maximumFractio
 
 /**
  * Selling charge dari rate card untuk satu job (murni, tanpa DB).
- * Tarif per container memakai baris khusus tipe container bila ada, selain itu baris umum (tanpa tipe).
+ * Urutan tarif yang dipakai per charge: khusus customer dan tipe container, khusus customer semua tipe,
+ * standar tipe container, lalu standar semua tipe. Charge yang hanya punya tarif customer ikut ditagih juga.
  * Baris OPTIONAL tidak dibuat; baris RED_LANE hanya untuk jalur merah.
  *
  * Surcharge dihitung per container: jarak container bila diisi (selain itu jarak job) dan berat kotornya.
@@ -88,8 +91,10 @@ export function buildRateCardCharges(items: RateItem[], groups: ContainerGroup[]
     if (!byKey.has(k)) { byKey.set(k, []); order.push(k); }
     byKey.get(k)!.push(i);
   }
+  const typeMatch = (r: RateItem, g: ContainerGroup) => !!r.containerTypeId && r.containerTypeId === g.containerTypeId;
   const rateFor = (rows: RateItem[], g: ContainerGroup) =>
-    rows.find((r) => r.containerTypeId && r.containerTypeId === g.containerTypeId) ?? rows.find((r) => !r.containerTypeId);
+    rows.find((r) => r.customerId && typeMatch(r, g)) ?? rows.find((r) => r.customerId && !r.containerTypeId)
+    ?? rows.find((r) => !r.customerId && typeMatch(r, g)) ?? rows.find((r) => !r.customerId && !r.containerTypeId);
 
   const unitsOf = (g: ContainerGroup): ContainerUnit[] =>
     g.units?.length ? g.units : Array.from({ length: g.count }, () => ({ containerNo: "", distanceKm: null, weightKg: null }));
@@ -139,7 +144,8 @@ export function buildRateCardCharges(items: RateItem[], groups: ContainerGroup[]
     const first = rows[0];
     const base = { chargeCodeId: first.chargeCodeId, asReceipt: first.chargeCode.asReceipt };
     if (first.basis === "PER_BL") {
-      out.push({ ...base, qty: 1, unitPrice: r2(first.price), taxable: first.taxable, unitLabel: "B/L", description: null });
+      const bl = rows.find((r) => r.customerId) ?? first;
+      out.push({ ...base, qty: 1, unitPrice: r2(bl.price), taxable: bl.taxable, unitLabel: "B/L", description: null });
       continue;
     }
     if (SURCHARGE.has(first.basis)) {
@@ -176,7 +182,7 @@ export function buildRateCardCharges(items: RateItem[], groups: ContainerGroup[]
 
 export function toRateItem(r: {
   id: string; chargeCodeId: string; chargeCode: { code: string; name: string; asReceipt: boolean }; containerTypeId: string | null;
-  basis: RateItem["basis"]; condition: RateItem["condition"]; price: Prisma.Decimal | number; thresholdKm: number | null;
+  customerId?: string | null; basis: RateItem["basis"]; condition: RateItem["condition"]; price: Prisma.Decimal | number; thresholdKm: number | null;
   thresholdKg: number | null; taxable: boolean; sortOrder: number;
 }): RateItem {
   return { ...r, price: Number(r.price) };
@@ -197,7 +203,8 @@ export async function applyRateCard(db: PrismaClient, jobId: string): Promise<nu
     const billedRateCard = await tx.costingLine.count({ where: { jobId, fromRateCard: true, invoiced: true } });
     if (billedRateCard > 0) throw new Error("Charge rate card job ini sudah ditagih. Batalkan invoicenya dulu untuk menghitung ulang.");
 
-    const items = await tx.rateCardItem.findMany({ where: { isActive: true }, include: { chargeCode: true } });
+    // Tarif standar ditambah tarif khusus customer job ini; tarif customer lain tidak ikut.
+    const items = await tx.rateCardItem.findMany({ where: { isActive: true, OR: [{ customerId: null }, { customerId: job.customerId }] }, include: { chargeCode: true } });
     if (items.length === 0) throw new Error("Rate card masih kosong.");
     const charges = buildRateCardCharges(items.map(toRateItem), groupContainers(job.containers), job.customsLane, job.distanceKm == null ? null : Number(job.distanceKm));
 

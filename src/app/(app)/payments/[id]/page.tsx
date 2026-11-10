@@ -9,6 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Breadcrumbs } from "@/components/breadcrumbs";
 import { receiptCancelState } from "@/lib/receivables";
+import { vendorPaymentCancelState } from "@/lib/payables";
 import { CancelReceiptButton } from "../cancel-receipt-button";
 
 export const dynamic = "force-dynamic";
@@ -39,7 +40,9 @@ export default async function PaymentDetail({ params }: { params: Promise<{ id: 
   const journal = pay.journalEntryId
     ? await prisma.journalEntry.findUnique({ where: { id: pay.journalEntryId }, include: { lines: { include: { account: true } }, reversedBy: { include: { lines: { include: { account: true } } } } } })
     : null;
-  const cancelState = user.role === "ADMIN" && pay.direction === "RECEIPT" && !pay.cancelledAt ? await receiptCancelState(prisma, pay.id) : null;
+  const cancelable = user.role === "ADMIN" && !pay.cancelledAt;
+  const cancelState = cancelable && pay.direction === "RECEIPT" ? await receiptCancelState(prisma, pay.id) : null;
+  const vendorCancel = cancelable && pay.direction === "PAYMENT" && pay.allocations.some((a) => a.bill) ? await vendorPaymentCancelState(prisma, pay.id) : null;
 
   const isReceipt = pay.direction === "RECEIPT";
   const party = pay.customer ? `${pay.customer.name} (${pay.customer.code})` : pay.vendor ? `${pay.vendor.name} (${pay.vendor.code})` : "-";
@@ -53,6 +56,7 @@ export default async function PaymentDetail({ params }: { params: Promise<{ id: 
           <Badge variant={isReceipt ? "secondary" : "outline"}>{isReceipt ? "Penerimaan" : "Pembayaran"}</Badge>
           {pay.cancelledAt && <Badge variant="outline" className="text-destructive">BATAL</Badge>}
           {cancelState && <CancelReceiptButton paymentId={pay.id} number={pay.number} block={cancelState.block} otherInvoices={cancelState.invoices.length > 1 ? cancelState.invoices : []} size="default" />}
+          {vendorCancel && <CancelReceiptButton kind="vendor" paymentId={pay.id} number={pay.number} block={vendorCancel.block} otherInvoices={vendorCancel.bills.length > 1 ? vendorCancel.bills : []} size="default" />}
         </PageHeader>
       </div>
 
@@ -107,7 +111,7 @@ export default async function PaymentDetail({ params }: { params: Promise<{ id: 
           </Card>
           {pay.cancelledAt && (
             <Card>
-              <CardHeader><CardTitle className="text-base text-destructive">Pelunasan dibatalkan</CardTitle></CardHeader>
+              <CardHeader><CardTitle className="text-base text-destructive">{isReceipt ? "Pelunasan" : "Pembayaran"} dibatalkan</CardTitle></CardHeader>
               <CardContent className="space-y-2 text-sm">
                 <Row label="Tanggal batal" value={formatDate(pay.cancelledAt)} muted />
                 <Row label="Oleh" value={pay.cancelledBy?.name ?? "-"} muted />

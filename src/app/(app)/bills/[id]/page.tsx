@@ -18,6 +18,8 @@ import { Button } from "@/components/ui/button";
 import { DocVouchersCard } from "@/components/doc-vouchers-card";
 import { vouchersOfDoc } from "@/lib/doc-vouchers";
 import { PayBillButton } from "../pay-bill-button";
+import { vendorPaymentCancelState } from "@/lib/payables";
+import { CancelReceiptButton } from "../../payments/cancel-receipt-button";
 
 export const dynamic = "force-dynamic";
 
@@ -32,7 +34,7 @@ export default async function BillDetail({ params }: { params: Promise<{ id: str
       vendor: { select: { name: true, code: true, isForeign: true } },
       job: { select: { id: true, number: true } },
       lines: { include: { chargeCode: true, job: { select: { id: true, number: true, hblNo: true, mblNo: true } } } },
-      allocations: { include: { payment: { select: { id: true, number: true, date: true } } } },
+      allocations: { include: { payment: { select: { id: true, number: true, date: true, cancelledAt: true, cancelReason: true } } } },
     },
   });
   if (!bill) notFound();
@@ -50,6 +52,14 @@ export default async function BillDetail({ params }: { params: Promise<{ id: str
   // Voucher bill hanya catatan (tanpa jurnal): bill IDR yang tidak dibatalkan, lunas atau belum.
   const canVoucher = can(user.role, "vouchers", "write") && !isFx && bill.status !== "CANCELLED";
   const cash = await cashAccountOptions(prisma, "payment");
+  // Tombol Batalkan Pembayaran per pembayaran aktif, khusus Admin.
+  const cancelStates = new Map<string, Awaited<ReturnType<typeof vendorPaymentCancelState>>>();
+  if (user.role === "ADMIN") {
+    for (const a of bill.allocations) {
+      if (a.payment.cancelledAt || cancelStates.has(a.payment.id)) continue;
+      cancelStates.set(a.payment.id, await vendorPaymentCancelState(prisma, a.payment.id));
+    }
+  }
   const jobs = [...new Map(bill.lines.flatMap((l) => (l.job ? [[l.job.id, l.job] as const] : []))).values()];
   if (jobs.length === 0 && bill.job) jobs.push({ ...bill.job, hblNo: null, mblNo: null });
 
@@ -141,13 +151,23 @@ export default async function BillDetail({ params }: { params: Promise<{ id: str
           {bill.allocations.length > 0 && (
             <Card>
               <CardHeader><CardTitle className="text-base">Pembayaran</CardTitle></CardHeader>
-              <CardContent className="space-y-2 text-sm">
-                {bill.allocations.map((a) => (
-                  <div key={a.id} className="flex justify-between gap-2">
-                    <Link href={`/payments/${a.payment.id}`} className="text-primary hover:underline">{a.payment.number} · {formatDate(a.payment.date)}</Link>
-                    <span className="tabular-nums">{formatIDR(Number(a.amount))}</span>
-                  </div>
-                ))}
+              <CardContent className="space-y-3 text-sm">
+                {bill.allocations.map((a) => {
+                  const st = cancelStates.get(a.payment.id);
+                  const off = a.payment.cancelledAt ? "line-through opacity-60" : "";
+                  return (
+                    <div key={a.id} className="space-y-1.5">
+                      <div className="flex justify-between gap-2">
+                        <Link href={`/payments/${a.payment.id}`} className={`text-primary hover:underline ${off}`}>{a.payment.number} · {formatDate(a.payment.date)}</Link>
+                        <span className={`tabular-nums ${off}`}>{formatIDR(Number(a.amount))}</span>
+                      </div>
+                      {a.payment.cancelledAt && (
+                        <p className="text-xs text-muted-foreground"><Badge variant="outline" className="mr-1.5 text-[10px] text-destructive">BATAL</Badge>{formatDate(a.payment.cancelledAt)} · {a.payment.cancelReason}</p>
+                      )}
+                      {st && <CancelReceiptButton kind="vendor" paymentId={a.payment.id} number={a.payment.number} block={st.block} otherInvoices={st.bills.filter((n) => n !== bill.number)} />}
+                    </div>
+                  );
+                })}
               </CardContent>
             </Card>
           )}

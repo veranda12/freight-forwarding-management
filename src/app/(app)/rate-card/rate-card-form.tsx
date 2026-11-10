@@ -18,14 +18,20 @@ export type RateCardInitial = Omit<RateCardInput, "price" | "thresholdKm" | "thr
 };
 
 const ALL = "__all__";
+const STD = "__std__";
 
 /** Dialog tambah atau ubah satu tarif di rate card. */
-export function RateCardForm({ charges, containerTypes, initial }: { charges: Opt[]; containerTypes: Opt[]; initial?: RateCardInitial }) {
+export function RateCardForm({ charges, containerTypes, customers, initial, defaultCustomerId = null }: {
+  charges: Opt[]; containerTypes: Opt[]; customers: Opt[]; initial?: RateCardInitial;
+  /** Tambah tarif dari tampilan satu customer: customer itu langsung terpilih. */
+  defaultCustomerId?: string | null;
+}) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [open, setOpen] = useState(false);
   const fromInitial = (): RateCardInput => ({
-    chargeCodeId: initial?.chargeCodeId ?? "", containerTypeId: initial?.containerTypeId ?? null, basis: initial?.basis ?? "PER_CONTAINER",
+    chargeCodeId: initial?.chargeCodeId ?? "", containerTypeId: initial?.containerTypeId ?? null,
+    customerId: initial ? initial.customerId : defaultCustomerId, basis: initial?.basis ?? "PER_CONTAINER",
     condition: initial?.condition ?? "ALWAYS", price: initial ? String(initial.price) : "", thresholdKm: initial?.thresholdKm == null ? "" : String(initial.thresholdKm),
     thresholdTon: initial?.thresholdKg == null ? "" : String(initial.thresholdKg / 1000),
     taxable: initial?.taxable ?? false, note: initial?.note ?? "", sortOrder: String(initial?.sortOrder ?? 0), isActive: initial?.isActive ?? true,
@@ -59,6 +65,21 @@ export function RateCardForm({ charges, containerTypes, initial }: { charges: Op
               <SelectTrigger aria-label="Charge"><SelectValue placeholder="Pilih charge…" /></SelectTrigger>
               <SelectContent>{charges.map((c) => <SelectItem key={c.id} value={c.id}>{c.label}</SelectItem>)}</SelectContent>
             </Select>
+          </div>
+          <div className="space-y-1.5 sm:col-span-2">
+            <Label>Customer</Label>
+            <Select value={f.customerId ?? STD} onValueChange={(v) => set({ customerId: v === STD ? null : v })}>
+              <SelectTrigger aria-label="Customer"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value={STD}>Standar (semua customer)</SelectItem>
+                {customers.map((c) => <SelectItem key={c.id} value={c.id}>{c.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            {f.customerId && (
+              <p className="text-xs text-muted-foreground">
+                Tarif khusus menggantikan tarif standar charge yang sama untuk customer ini. Charge lain tetap memakai tarif standar.
+              </p>
+            )}
           </div>
           <div className="space-y-1.5">
             <Label>Dasar hitung</Label>

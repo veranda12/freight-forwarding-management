@@ -19,6 +19,7 @@ import {
 import { GlobalSearch } from "./global-search";
 import { ThemeToggle } from "./theme-toggle";
 import { TabsProvider, TabBar } from "./tabs-context";
+import { IdleGuard } from "./idle-guard";
 import { logoutAction } from "@/app/(app)/actions";
 
 type ShellUser = { name: string; email: string; role: Role };
@@ -148,6 +149,7 @@ export function AppShell({
 
   return (
     <TabsProvider>
+      <IdleGuard />
     <div className="flex min-h-screen bg-background">
       {/* Sidebar desktop */}
       <aside

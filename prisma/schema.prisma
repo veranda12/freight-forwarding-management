@@ -413,6 +413,7 @@ model Customer {
   invoices          Invoice[]
   payments          Payment[]
   warehouses        Warehouse[]
+  rateCardItems     RateCardItem[]
 
   @@index([name])
 }
@@ -1533,6 +1534,9 @@ model RateCardItem {
   /// Kosong = berlaku untuk semua ukuran container.
   containerTypeId String?
   containerType   ContainerType?  @relation(fields: [containerTypeId], references: [id])
+  /// Kosong = tarif standar semua customer. Diisi = tarif khusus customer itu, menggantikan tarif standar yang setara.
+  customerId      String?
+  customer        Customer?       @relation(fields: [customerId], references: [id], onDelete: Restrict)
   basis           TariffBasis
   condition       TariffCondition @default(ALWAYS)
   price           Decimal         @default(0) @db.Decimal(18, 2)
@@ -1547,4 +1551,5 @@ model RateCardItem {
   createdAt       DateTime        @default(now())
 
   @@index([chargeCodeId])
+  @@index([customerId])
 }

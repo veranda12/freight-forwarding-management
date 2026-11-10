@@ -1,4 +1,5 @@
 import type { NextAuthConfig } from "next-auth";
+import { IDLE_TIMEOUT_SEC } from "@/config/session";
 
 /**
  * Konfigurasi dasar Auth.js yang edge-safe (tanpa Prisma/bcrypt).
@@ -9,7 +10,9 @@ export const authConfig = {
   pages: {
     signIn: "/login",
   },
-  session: { strategy: "jwt" },
+  // Sesi habis setelah 10 menit tanpa request. Setiap request lewat middleware memperpanjangnya (sliding),
+  // jadi tidak perlu refresh token. Idle di browser (tanpa request) ditangani IdleGuard.
+  session: { strategy: "jwt", maxAge: IDLE_TIMEOUT_SEC },
   callbacks: {
     authorized({ auth, request: { nextUrl } }) {
       const isLoggedIn = !!auth?.user;

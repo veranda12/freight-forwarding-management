@@ -3,10 +3,13 @@ import { Ship } from "lucide-react";
 import { auth } from "@/auth";
 import { PRODUCT } from "@/config/product";
 import { LoginForm } from "./login-form";
+import { IDLE_TIMEOUT_SEC } from "@/config/session";
 
-export default async function LoginPage() {
+/** `?reason=idle`: datang dari logout otomatis karena tidak ada aktivitas. */
+export default async function LoginPage({ searchParams }: { searchParams: Promise<{ reason?: string }> }) {
   const session = await auth();
   if (session?.user) redirect("/dashboard");
+  const { reason } = await searchParams;
 
   return (
     <div className="grid min-h-screen lg:grid-cols-2">
@@ -48,6 +51,11 @@ export default async function LoginPage() {
             <h2 className="text-2xl font-semibold tracking-tight">Selamat datang</h2>
             <p className="text-sm text-muted-foreground">Masuk untuk melanjutkan ke dashboard.</p>
           </div>
+          {reason === "idle" && (
+            <p role="status" className="rounded-md border bg-muted/40 px-3 py-2 text-sm">
+              Sesi berakhir karena tidak ada aktivitas selama {IDLE_TIMEOUT_SEC / 60} menit. Silakan masuk lagi.
+            </p>
+          )}
           <LoginForm />
         </div>
       </div>

@@ -37,7 +37,10 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
   let excluded: PdfExcludedLine[] = [];
   // Biaya khusus jalur merah dicetak sebagai "Excluded" bila job bukan jalur merah, seperti contoh invoice clearance.
   if (job?.customsLane && job.customsLane !== "RED" && inv.lines.some((l) => l.section === "LOCAL")) {
-    const red = await prisma.rateCardItem.findMany({ where: { isActive: true, condition: "RED_LANE" }, include: { chargeCode: true }, orderBy: { sortOrder: "asc" } });
+    const red = await prisma.rateCardItem.findMany({
+      where: { isActive: true, condition: "RED_LANE", OR: [{ customerId: null }, { customerId: inv.customerId }] },
+      include: { chargeCode: true }, orderBy: { sortOrder: "asc" },
+    });
     const seen = new Set<string>();
     // Tarifnya tidak dicetak (permintaan client), cukup nama biaya dan keterangan "Excluded".
     excluded = red.filter((r) => !seen.has(r.chargeCodeId) && seen.add(r.chargeCodeId)).map((r) => ({

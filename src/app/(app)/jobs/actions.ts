@@ -10,6 +10,8 @@ import { genJobNumber } from "@/lib/sequence";
 import { computeChargeable } from "@/lib/chargeable";
 import { getWeightRules } from "@/lib/weight-rules";
 import { assertJobEditable, closeJobIfSettled, getJobLock } from "@/lib/job-lock";
+import { assertBlUnique } from "@/lib/job-bl";
+import { errorMessage } from "@/lib/action-error";
 
 type JobInput = Record<string, unknown>;
 const s = (v: unknown) => { const x = typeof v === "string" ? v.trim() : v == null ? "" : String(v); return x !== "" ? x : null; };
@@ -24,6 +26,9 @@ export async function createJob(input: JobInput): Promise<{ ok: boolean; error?:
   const isAir = mode === "AIR";
   const isFcl = mode === "SEA_FCL";
   if (mode === "SEA_LCL" && !(num(input.packages)! > 0 && num(input.volumeCbm)! > 0)) return { ok: false, error: "Sea LCL wajib mengisi jumlah koli dan volume." };
+  try {
+    await assertBlUnique(prisma, { air: isAir, master: s(input.mblNo), house: s(input.hblNo) });
+  } catch (e) { return { ok: false, error: errorMessage(e, "No. B/L tidak valid.") }; }
   const rules = await getWeightRules("INTERNATIONAL");
 
   const id = await prisma.$transaction(async (tx) => {
@@ -92,6 +97,9 @@ export async function updateJobBlAction(jobId: string, input: { master: string; 
   if (!job) return { ok: false, error: "Job tidak ditemukan." };
   const lock = await getJobLock(prisma, jobId);
   if (lock) return { ok: false, error: lock };
+  try {
+    await assertBlUnique(prisma, { air: job.mode === "AIR", master: s(input.master), house: s(input.house) }, jobId);
+  } catch (e) { return { ok: false, error: errorMessage(e, "No. B/L tidak valid.") }; }
   const data = job.mode === "AIR" ? { mawbNo: s(input.master), hawbNo: s(input.house) } : { mblNo: s(input.master), hblNo: s(input.house) };
   await prisma.job.update({ where: { id: jobId }, data });
   await writeAudit({ entity: "Job", entityId: jobId, action: "UPDATE_BL", summary: `${job.number}: ${s(input.master) ?? "-"} / ${s(input.house) ?? "-"}`, userId: user.id });

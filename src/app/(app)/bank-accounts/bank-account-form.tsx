@@ -79,7 +79,7 @@ export function BankAccountForm({ initial, currencies }: { initial?: BankAccount
             <>
               <div className="space-y-1.5"><Label>Nama bank</Label><Input value={f.bankName} onChange={(e) => set({ bankName: e.target.value })} placeholder="Bank Central Asia (BCA)" /></div>
               <div className="space-y-1.5"><Label>Nomor rekening</Label><Input value={f.accountNo} onChange={(e) => set({ accountNo: e.target.value })} placeholder="0881234568" /></div>
-              <div className="space-y-1.5"><Label>Atas nama</Label><Input value={f.accountHolder} onChange={(e) => set({ accountHolder: e.target.value })} placeholder="PT Samudra Lintas Logistik" /></div>
+              <div className="space-y-1.5"><Label>Atas nama</Label><Input value={f.accountHolder} onChange={(e) => set({ accountHolder: e.target.value })} placeholder="Nama pemilik rekening" /></div>
               <div className="space-y-1.5"><Label>Cabang</Label><Input value={f.branch} onChange={(e) => set({ branch: e.target.value })} placeholder="KCP Tanjung Priok" /></div>
             </>
           )}

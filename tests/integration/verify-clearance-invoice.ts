@@ -23,11 +23,13 @@ async function main() {
   await seedClearance(db, { demo: true });
   await seedClearance(db, { demo: true }); // idempoten
   ok((await db.job.count({ where: { mblNo: "MEDUY1234567" } })) === 1, "seed clearance idempoten (1 job demo)");
-  ok((await db.rateCardItem.count()) === 18, `rate card berisi 18 tarif (${await db.rateCardItem.count()})`);
+  // 18 tarif awal + OVWT (overweight 20GP, 9 Nov).
+  ok((await db.rateCardItem.count()) === 19, `rate card berisi 19 tarif (${await db.rateCardItem.count()})`);
 
   const job = await db.job.findFirstOrThrow({ where: { mblNo: "MEDUY1234567" }, include: { invoices: { include: { lines: { include: { chargeCode: true } } } } } });
   const inv = job.invoices[0];
-  ok(n(inv.total) === 49_847_370 && n(inv.ppnAmount) === 0, `invoice demo ${inv.number} total ${inv.total}, PPN ${inv.ppnAmount}`);
+  // PPN 1,1% hanya dari pendapatan (24.450.000), reimburse tidak (aturan SLG 6 Nov).
+  ok(n(inv.total) === 50_116_320 && n(inv.ppnAmount) === 268_950, `invoice demo ${inv.number} total ${inv.total}, PPN ${inv.ppnAmount}`);
   const sec = (s: string) => inv.lines.filter((l) => l.section === s).reduce((t, l) => t + n(l.amount), 0);
   ok(sec("LOCAL") === 30_786_023, `seksi A Local & Port ${sec("LOCAL")}`);
   ok(sec("DOCUMENTATION") === 18_129_347, `seksi B Documentation ${sec("DOCUMENTATION")}`);
@@ -39,8 +41,8 @@ async function main() {
   ok(line("EXTTRUCK").note === "Container CAIU1234567", "extended trucking membawa nomor container");
   const je = await db.journalEntry.findUniqueOrThrow({ where: { id: inv.journalEntryId! }, include: { lines: true } });
   const d = je.lines.reduce((t, l) => t + n(l.debit), 0), k = je.lines.reduce((t, l) => t + n(l.credit), 0);
-  ok(Math.abs(d - k) < 0.01 && d === 49_847_370, `jurnal invoice seimbang D ${d} = K ${k}`);
-  ok(n(job.revenueIdr) === 49_847_370, `revenue job ${job.revenueIdr}`);
+  ok(Math.abs(d - k) < 0.01 && d === 50_116_320, `jurnal invoice seimbang D ${d} = K ${k}`);
+  ok(n(job.revenueIdr) === 24_450_000, `revenue job tanpa reimburse ${job.revenueIdr}`);
   ok(Math.round((inv.dueDate.getTime() - inv.date.getTime()) / 86400000) === 5, "jatuh tempo 5 hari (TOP customer)");
   ok((await err(() => applyRateCard(db, job.id))).includes("sudah ditagih"), "rate card tidak bisa dihitung ulang setelah ditagih");
 
@@ -50,7 +52,8 @@ async function main() {
     data: {
       number: await genJobNumber(tx, modeDirKey("SEA_FCL", "IMPORT")), mode: "SEA_FCL", direction: "IMPORT", customerId: job.customerId,
       customsLane: "RED", distanceKm: 25,
-      containers: { create: [{ containerNo: "TEST0000001", containerTypeId: t["20GP"] }, { containerNo: "TEST0000002", containerTypeId: t["20GP"] }, { containerNo: "TEST0000003", containerTypeId: t["40HC"] }] },
+      // Berat di bawah batas overweight 20GP (23 ton), supaya yang diuji di sini hanya surcharge jarak.
+      containers: { create: [{ containerNo: "TEST0000001", containerTypeId: t["20GP"], grossWeightKg: 20_000 }, { containerNo: "TEST0000002", containerTypeId: t["20GP"], grossWeightKg: 20_000 }, { containerNo: "TEST0000003", containerTypeId: t["40HC"], grossWeightKg: 20_000 }] },
     },
   }));
   const created = await applyRateCard(db, red.id);

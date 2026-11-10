@@ -5,6 +5,7 @@ import { can } from "@/lib/rbac";
 import { requireCan } from "@/lib/auth-helpers";
 import { getDashboardData, getWorklist } from "@/lib/analytics";
 import { formatIDR } from "@/lib/format";
+import { prisma } from "@/lib/prisma";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ShipmentBarChart, RevenueCostChart, TopCustomerChart, ModePieChart } from "@/components/charts";
@@ -14,7 +15,7 @@ export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
   const user = await requireCan("dashboard", "read");
-  const [d, wl] = await Promise.all([getDashboardData(), getWorklist()]);
+  const [d, wl, company] = await Promise.all([getDashboardData(), getWorklist(), prisma.companySetting.findFirst({ select: { name: true } })]);
   const role = user.role;
 
   const isOps = ["ADMIN", "OPERATION", "MANAGEMENT", "SALES"].includes(role);
@@ -37,7 +38,7 @@ export default async function DashboardPage() {
     <div className="space-y-5">
       <PageHeader
         title={`Halo, ${user.name?.split(" ")[0] ?? ""}`}
-        description="Ringkasan operasional PT Samudra Lintas Logistik — antrian yang butuh aksi lebih dulu."
+        description={`Ringkasan operasional${company?.name ? ` ${company.name}` : ""}, antrian yang butuh aksi lebih dulu.`}
       />
 
       {/* KPI strip — compact, bukan kartu raksasa */}

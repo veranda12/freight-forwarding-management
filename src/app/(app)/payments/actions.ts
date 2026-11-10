@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { assertCan } from "@/lib/auth-helpers";
 import { cancelReceiptCore } from "@/lib/receivables";
+import { cancelVendorPaymentCore } from "@/lib/payables";
 import { errorMessage } from "@/lib/action-error";
 
 /** Batalkan pelunasan invoice. Khusus Admin, alasan wajib diisi. */
@@ -16,5 +17,18 @@ export async function cancelReceiptAction(paymentId: string, reason: string): Pr
     return { ok: true, reopened: r.reopened };
   } catch (e) {
     return { ok: false, error: errorMessage(e, "Gagal membatalkan pelunasan.") };
+  }
+}
+
+/** Batalkan pembayaran vendor bill. Khusus Admin, alasan wajib diisi. */
+export async function cancelVendorPaymentAction(paymentId: string, reason: string): Promise<{ ok: boolean; error?: string }> {
+  const user = await assertCan("payments", "write");
+  if (user.role !== "ADMIN") return { ok: false, error: "Hanya Admin yang bisa membatalkan pembayaran vendor." };
+  try {
+    await cancelVendorPaymentCore(prisma, paymentId, reason, user.id);
+    for (const p of ["/payments", `/payments/${paymentId}`, "/bills", "/accounting/kasir", "/costing"]) revalidatePath(p);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: errorMessage(e, "Gagal membatalkan pembayaran.") };
   }
 }
