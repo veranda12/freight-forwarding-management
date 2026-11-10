@@ -25,7 +25,10 @@ export type ProofLineGroup = {
   user: string;
   status: "normal" | "reversed" | "reversal";
   editHref: string | null;
+  /** Alasan bila edit tidak tersedia, tampil sebagai keterangan ikon abu-abu. */
+  editBlock: string | null;
   cancel: { kind: CancelKind; label: string } | null;
+  cancelBlock: string | null;
   printHref: string | null;
   lines: { code: string; name: string; description: string; debit: number; credit: number }[];
 };
@@ -42,6 +45,11 @@ export function ProofLinesTable({ groups }: { groups: ProofLineGroup[] }) {
   const totalDebit = groups.filter((g) => g.status === "normal").reduce((s, g) => s + g.lines.reduce((a, l) => a + l.debit, 0), 0);
 
   return (
+    <div className="space-y-2">
+    <p className="text-xs text-muted-foreground">
+      Ikon abu-abu berarti aksi itu tidak bisa dipakai untuk bukti tersebut. Arahkan kursor ke ikonnya (atau klik) untuk melihat alasannya.
+      Batal tidak menghapus bukti: sistem membuat jurnal pembalik dan nomor bukti tetap tercatat.
+    </p>
     <div className="overflow-x-auto rounded-md border scrollbar-thin">
       <Table>
         <TableHeader>
@@ -87,12 +95,12 @@ export function ProofLinesTable({ groups }: { groups: ProofLineGroup[] }) {
                           <Button asChild size="icon" variant="ghost" className="h-8 w-8" title={`Edit ${g.number}`}>
                             <Link href={g.editHref} aria-label={`Edit ${g.number}`}><Pencil className="h-4 w-4" /></Link>
                           </Button>
-                        ) : <span className="h-8 w-8" />}
+                        ) : <Unavailable icon={Pencil} label={`Edit ${g.number}`} reason={g.editBlock} />}
                         {g.cancel ? (
                           <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive hover:text-destructive" title={`Batalkan ${g.number}`} aria-label={`Batalkan ${g.number}`} onClick={() => setTarget(g)}>
                             <Trash2 className="h-4 w-4" />
                           </Button>
-                        ) : <span className="h-8 w-8" />}
+                        ) : <Unavailable icon={Trash2} label={`Batalkan ${g.number}`} reason={g.cancelBlock} />}
                         {g.printHref ? (
                           <Button asChild size="icon" variant="ghost" className="h-8 w-8" title={`Cetak ${g.number}`}>
                             <a href={g.printHref} target="_blank" rel="noopener" aria-label={`Cetak ${g.number}`}><Printer className="h-4 w-4" /></a>
@@ -115,6 +123,24 @@ export function ProofLinesTable({ groups }: { groups: ProofLineGroup[] }) {
       </Table>
       <CancelDialog target={target} onClose={() => setTarget(null)} />
     </div>
+    </div>
+  );
+}
+
+/** Ikon aksi yang tidak tersedia: abu-abu, alasannya muncul saat kursor diarahkan atau saat diklik. */
+function Unavailable({ icon: Icon, label, reason }: { icon: typeof Pencil; label: string; reason: string | null }) {
+  const why = reason ?? "Tidak tersedia untuk bukti ini.";
+  return (
+    <button
+      type="button"
+      aria-disabled
+      aria-label={`${label}: ${why}`}
+      title={why}
+      onClick={() => toast.info(why)}
+      className="inline-flex h-8 w-8 cursor-help items-center justify-center rounded-md text-muted-foreground/40 hover:bg-muted"
+    >
+      <Icon className="h-4 w-4" />
+    </button>
   );
 }
 

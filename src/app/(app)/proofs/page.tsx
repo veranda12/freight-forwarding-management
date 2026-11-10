@@ -62,17 +62,19 @@ export default async function ProofsPage({ searchParams }: { searchParams: Promi
   const entries = canJournal ? await proofLineEntries(prisma, entryIds) : [];
   // Invoice yang sudah ada pembayaran tidak bisa diedit, jadi ikon edit tidak ditampilkan.
   const invoiceIds = entries.filter((e) => e.source === "INVOICE" && e.sourceId).map((e) => e.sourceId!);
-  const lockedInvoices = new Set(
+  const lockedInvoices = new Map(
     (invoiceIds.length ? await prisma.invoice.findMany({ where: { id: { in: invoiceIds } }, select: { id: true, status: true, amountPaid: true } }) : [])
-      .filter((i) => invoiceEditBlock(i)).map((i) => i.id),
+      .map((i) => [i.id, invoiceEditBlock(i)] as const).filter((x): x is readonly [string, string] => !!x[1]),
   );
   const groups: ProofLineGroup[] = entries.map((e) => {
         const a = entryActions(e, user.role);
-        if (e.source === "INVOICE" && lockedInvoices.has(e.sourceId ?? "")) a.editHref = null;
+        const invoiceBlock = e.source === "INVOICE" && a.editHref ? lockedInvoices.get(e.sourceId ?? "") : undefined;
+        if (invoiceBlock) { a.editHref = null; a.editBlock = invoiceBlock; }
         return {
           id: e.id, date: e.date, number: e.number, source: SOURCE_LABEL[e.source] ?? e.source, user: e.user,
           status: e.isReversal ? "reversal" : e.isReversed ? "reversed" : "normal",
-          editHref: a.editHref, cancel: a.cancel ? { kind: a.cancel, label: CANCEL_LABEL[a.cancel] } : null, printHref: a.printHref,
+          editHref: a.editHref, editBlock: a.editBlock, cancel: a.cancel ? { kind: a.cancel, label: CANCEL_LABEL[a.cancel] } : null, cancelBlock: a.cancelBlock,
+          printHref: a.printHref,
           lines: e.lines.map((l) => ({ code: l.code, name: l.name, description: l.description || e.description, debit: l.debit, credit: l.credit })),
         };
       });
