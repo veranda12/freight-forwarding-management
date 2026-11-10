@@ -7,7 +7,10 @@ import { prisma } from "@/lib/prisma";
 import { formatIDR } from "@/lib/format";
 import { PageHeader } from "@/components/page-header";
 import { StatStrip } from "@/components/stat-strip";
+import { jktKey } from "@/lib/accounting-core";
+import { monthRange } from "@/lib/doc-export-filter";
 import { InvoicesTable, type InvoiceRow } from "./invoices-table";
+import { ExportInvoicesButton } from "./export-invoices-button";
 
 export const dynamic = "force-dynamic";
 
@@ -38,10 +41,12 @@ export default async function InvoicesPage() {
   const outstanding = rows.filter((r) => r.status !== "PAID" && r.status !== "CANCELLED").reduce((s, r) => s + (r.total - r.paid), 0);
   const overdue = rows.filter((r) => r.status === "OVERDUE").reduce((s, r) => s + (r.total - r.paid), 0);
   const paid = rows.filter((r) => r.status === "PAID").reduce((s, r) => s + r.total, 0);
+  const month = monthRange(jktKey(new Date()));
 
   return (
     <div className="space-y-6">
       <PageHeader title="Invoice (AR)" description={`${rows.length} invoice`}>
+        <ExportInvoicesButton defaultFrom={month.from} defaultTo={month.to} />
         {can(user.role, "invoices", "write") && <Button asChild><Link href="/invoices/new"><Plus /> Buat Invoice</Link></Button>}
       </PageHeader>
       <StatStrip items={[

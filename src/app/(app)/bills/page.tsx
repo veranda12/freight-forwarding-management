@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Plus } from "lucide-react";
+import { FileSpreadsheet, Plus } from "lucide-react";
 import { requireCan } from "@/lib/auth-helpers";
 import { Button } from "@/components/ui/button";
 import { prisma } from "@/lib/prisma";
@@ -56,6 +56,11 @@ export default async function BillsPage({ searchParams }: { searchParams: Promis
   return (
     <div className="space-y-6">
       <PageHeader title="Vendor Bill (AP)" description="Tagihan vendor per job: yang perlu dibayar perusahaan">
+        <Button asChild variant="outline">
+          <a href={`/api/bills/export${filterQuery(f, 1)}`} download title="Sesuai filter yang aktif, semua halaman. Bill lintas job diekspor utuh.">
+            <FileSpreadsheet /> Export Excel
+          </a>
+        </Button>
         {can(user.role, "bills", "write") && <Button asChild><Link href="/bills/new"><Plus /> Buat Bill</Link></Button>}
       </PageHeader>
 
