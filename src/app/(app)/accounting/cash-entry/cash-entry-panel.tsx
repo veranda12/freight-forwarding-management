@@ -9,7 +9,8 @@ import { ArrowDownLeft, ArrowUpRight, Ban, Loader2, Pencil, Plus, Printer, Trash
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
+import { Badge, badgeVariants } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -37,6 +38,11 @@ let seq = 0;
 const newRow = (amount = ""): Row => ({ key: ++seq, counterAccountId: "", amount, description: "" });
 const LABEL = { IN: "Jurnal Penerimaan", OUT: "Jurnal Pengeluaran" } as const;
 const dateKeyOf = (iso: string) => new Date(new Date(iso).getTime() + 7 * 3600 * 1000).toISOString().slice(0, 10);
+/** Sisi jurnal per arah: rekening kas/bank dan akun lawan. Ejaan "Debet" sama dengan baris pajak di dialog ini. */
+const SIDE = { OUT: { cash: "Kredit", counter: "Debet" }, IN: { cash: "Debet", counter: "Kredit" } } as const;
+const SideBadge = ({ side }: { side: "Debet" | "Kredit" }) => (
+  <span className={cn(badgeVariants({ variant: "muted" }), "px-1.5 py-0 text-[11px] font-medium")}>{side}</span>
+);
 
 export function CashEntryPanel({ cashAccounts, defaultCashId, inAccounts, outAccounts, entries, today, canWrite, prefill, rates, closedMonths, editId }: {
   cashAccounts: CashOpt[]; defaultCashId: string | null; inAccounts: Opt[]; outAccounts: Opt[]; entries: Entry[];
@@ -121,24 +127,27 @@ export function CashEntryPanel({ cashAccounts, defaultCashId, inAccounts, outAcc
                   <Button type="button" variant={f.direction === "IN" ? "default" : "outline"} className="flex-1" onClick={() => { set({ direction: "IN" }); setRows([newRow()]); setTaxRows([]); }}><ArrowDownLeft /> Jurnal Penerimaan</Button>
                 </div>
               )}
-              <div className="space-y-1.5">
-                <Label>{f.direction === "OUT" ? "Dibayar dari" : "Diterima di"}</Label>
+              {/* Urutan permintaan client: No. Bukti–Tanggal, rekening, tujuan–nominal, tambah baris, keterangan. */}
+              <div className="space-y-1.5"><Label htmlFor="ce-proof">No. Bukti</Label><Input id="ce-proof" readOnly value={editing?.number ?? preview} placeholder="Pilih rekening dulu" className="bg-muted/40" /></div>
+              <div className="space-y-1.5"><Label htmlFor="ce-date">Tanggal transaksi</Label><Input id="ce-date" type="date" value={f.dateKey} onChange={(e) => set({ dateKey: e.target.value })} /></div>
+              <div className={isFx ? "space-y-1.5" : "space-y-1.5 sm:col-span-2"}>
+                <Label className="flex items-center gap-2">{f.direction === "OUT" ? "Dibayar dari" : "Diterima di"} <SideBadge side={SIDE[f.direction].cash} /></Label>
                 <Select value={f.bankAccountId} onValueChange={(v) => set({ bankAccountId: v, rate: "" })}>
                   <SelectTrigger><SelectValue placeholder="Pilih kas atau rekening" /></SelectTrigger>
                   <SelectContent>{cashChoices.map((a) => <SelectItem key={a.id} value={a.id}>{a.label}{a.currency && a.currency !== "IDR" ? ` (${a.currency})` : ""}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
-              <div className="space-y-1.5"><Label>No. Bukti</Label><Input readOnly value={editing?.number ?? preview} placeholder="Pilih rekening dulu" className="bg-muted/40" /></div>
-              <div className="space-y-1.5"><Label>Tanggal transaksi</Label><Input type="date" value={f.dateKey} onChange={(e) => set({ dateKey: e.target.value })} /></div>
-              {isFx ? (
+              {isFx && (
                 <div className="space-y-1.5">
-                  <Label>Kurs (IDR per 1 {cur})</Label>
-                  <Input type="number" min={0} value={f.rate} onChange={(e) => set({ rate: e.target.value })} placeholder={rates[cur] ? `otomatis ${rates[cur]}` : "isi kurs"} />
+                  <Label htmlFor="ce-rate">Kurs (IDR per 1 {cur})</Label>
+                  <Input id="ce-rate" type="number" min={0} value={f.rate} onChange={(e) => set({ rate: e.target.value })} placeholder={rates[cur] ? `otomatis ${rates[cur]}` : "isi kurs"} />
                 </div>
-              ) : <div />}
-              <div className="space-y-1.5 sm:col-span-2"><Label>Keterangan</Label><Input value={f.description} onChange={(e) => set({ description: e.target.value })} placeholder={f.direction === "OUT" ? "Biaya admin bank Oktober" : "Bunga jasa giro Oktober"} /></div>
+              )}
               <div className="space-y-2 sm:col-span-2">
-                <Label>{f.direction === "OUT" ? "Tujuan pembayaran" : "Sumber penerimaan"}</Label>
+                <div className="grid gap-2 sm:grid-cols-[1fr_9rem_2.25rem]">
+                  <Label className="flex items-center gap-2">{f.direction === "OUT" ? "Tujuan pembayaran" : "Sumber penerimaan"} <SideBadge side={SIDE[f.direction].counter} /></Label>
+                  <Label className="hidden text-right sm:block" aria-hidden>Nominal</Label>
+                </div>
                 {rows.map((r) => (
                   <div key={r.key} className="grid gap-2 sm:grid-cols-[1fr_9rem_2.25rem]">
                     <div className="space-y-1">
@@ -155,6 +164,7 @@ export function CashEntryPanel({ cashAccounts, defaultCashId, inAccounts, outAcc
                 </div>
                 {isFx && <p className="text-xs text-muted-foreground">Dicatat di buku: {formatIDR(Math.round(total * rateNum * 100) / 100)}</p>}
               </div>
+              <div className="space-y-1.5 sm:col-span-2"><Label htmlFor="ce-desc">Keterangan</Label><Input id="ce-desc" value={f.description} onChange={(e) => set({ description: e.target.value })} placeholder={f.direction === "OUT" ? "Biaya admin bank Oktober" : "Bunga jasa giro Oktober"} /></div>
               {/* Baris pajak di kedua arah; jenis dan sisinya mengikuti arah (penerimaan: PPN Keluaran Kredit, PPh 23 Debet). */}
               <div className="sm:col-span-2">
                 <TaxRowsEditor key={f.direction} flow={f.direction} rows={taxRows} onChange={setTaxRows} base={total} format={(n) => (isFx ? formatMoney(n, cur, 2) : formatIDR(n))} />
