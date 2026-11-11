@@ -210,6 +210,15 @@ export async function applyRateCard(db: PrismaClient, jobId: string): Promise<nu
     const charges = buildRateCardCharges(items.map(toRateItem), groupContainers(job.containers), job.customsLane, job.distanceKm == null ? null : Number(job.distanceKm));
 
     await tx.costingLine.deleteMany({ where: { jobId, side: "SELLING", fromRateCard: true, invoiced: false } });
+    // Baris Rp 0 yang dibuat dari biaya buying saat tarif belum bisa dihitung (mis. container belum ada)
+    // diganti hasil rate card untuk charge yang sama, supaya tidak dobel.
+    const generatedCodes = [...new Set(charges.map((c) => c.chargeCodeId))];
+    await tx.costingLine.deleteMany({
+      where: {
+        jobId, side: "SELLING", fromRateCard: false, invoiced: false, buyingLineId: null,
+        actualIdr: 0, unitLabel: null, chargeCodeId: { in: generatedCodes },
+      },
+    });
     // Baris rate card yang sudah diubah manual (misalnya angka kuitansi) dipertahankan, tidak dibuat dobel.
     // Surcharge jarak/overweight bisa punya beberapa baris per tipe (beda jarak atau berat), jadi dicocokkan juga dengan keterangannya.
     const manual = await tx.costingLine.findMany({

@@ -84,6 +84,16 @@ async function main() {
   l = await sellOf(LOLO);
   ok(l.length === 1 && l[0].buyingLineId === null, `LOLO bukan reimburse lagi: selling tersambung dilepas, nama tetap ada (${l.length} baris)`);
 
+  // 9. Buying non-reimburse sebelum container ada: selling Rp 0, lalu rate card menggantinya (tidak dobel).
+  const job2 = await db.job.create({ data: { number: `JOB/UJI-SYNC2/${stamp}`, mode: "SEA_FCL", direction: "IMPORT", status: "ARRIVED", customerId: customer.id, customsLane: "GREEN" } });
+  await addJobCharge(db, job2.id, buy(CC, 1_500_000, false));
+  let cc2 = await db.costingLine.findMany({ where: { jobId: job2.id, side: "SELLING", chargeCodeId: CC } });
+  ok(cc2.length === 1 && Number(cc2[0].actualIdr) === 0, "tanpa container: CC muncul di selling Rp 0");
+  await db.jobContainer.create({ data: { jobId: job2.id, containerNo: `SYNC${stamp % 1e7}9`, containerTypeId: t40.id, grossWeightKg: 10000, distanceKm: 20 } });
+  await applyRateCard(db, job2.id);
+  cc2 = await db.costingLine.findMany({ where: { jobId: job2.id, side: "SELLING", chargeCodeId: CC } });
+  ok(cc2.length === 1 && Number(cc2[0].unitPrice) === 2_000_000, `setelah container + rate card: CC 1 baris @ ${Number(cc2[0]?.unitPrice)}`);
+
   const jobAfter = await db.job.findUniqueOrThrow({ where: { id: job.id } });
   ok(Number(jobAfter.revenueIdr) > 0, `revenue job dihitung ulang (${Number(jobAfter.revenueIdr)})`);
 
