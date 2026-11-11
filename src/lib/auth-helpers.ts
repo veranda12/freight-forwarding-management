@@ -2,6 +2,17 @@ import { redirect } from "next/navigation";
 import type { Role } from "@prisma/client";
 import { auth } from "@/auth";
 import { can, type Action, type Resource } from "./rbac";
+import { currentContext } from "./security/context";
+import { recordSecurityEvent } from "./security/events";
+
+/** Catat akses tanpa izin (dicek di server). Volume dibatasi per user di recordSecurityEvent. */
+export async function recordAccessDenied(user: { id: string; role: Role } | null, resource: string, action: string, statusCode = 403, path?: string) {
+  await recordSecurityEvent({
+    type: "ACCESS_DENIED", userId: user?.id ?? null, statusCode, ctx: await currentContext(path ? { path } : {}),
+    reason: `Role ${user?.role ?? "-"} tidak punya izin ${action} pada ${resource}`,
+    metadata: { resource, action, role: user?.role ?? null },
+  });
+}
 
 export type SessionUser = {
   id: string;
@@ -31,6 +42,7 @@ export async function requireCan(
 ): Promise<SessionUser> {
   const user = await requireUser();
   if (!can(user.role, resource, action)) {
+    await recordAccessDenied(user, resource, action);
     // Akses halaman tanpa izin → arahkan ke dashboard (hindari error page saat demo).
     redirect(opts.redirectTo ?? "/dashboard");
   }
@@ -40,6 +52,7 @@ export async function requireCan(
 export async function assertCan(resource: Resource, action: Action = "write"): Promise<SessionUser> {
   const user = await requireUser();
   if (!can(user.role, resource, action)) {
+    await recordAccessDenied(user, resource, action);
     throw new ForbiddenError(resource, action);
   }
   return user;

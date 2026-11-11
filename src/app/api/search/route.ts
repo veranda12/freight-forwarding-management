@@ -3,6 +3,8 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { can } from "@/lib/rbac";
 import type { Role } from "@prisma/client";
+import { inspectInput } from "@/lib/security/inspect";
+import { contextFromHeaders } from "@/lib/security/context";
 
 export async function GET(req: NextRequest) {
   const session = await auth();
@@ -10,6 +12,12 @@ export async function GET(req: NextRequest) {
 
   const q = req.nextUrl.searchParams.get("q")?.trim() ?? "";
   if (q.length < 2) return NextResponse.json([]);
+  // Prisma memakai parameter binding, jadi q aman untuk query. Pemeriksaan ini hanya mencatat indikasi.
+  const check = await inspectInput({
+    where: "pencarian global", fields: { q: q.slice(0, 200) }, kinds: { q: "search" }, userId: session.user.id,
+    ctx: contextFromHeaders(req.headers, { method: "GET", path: req.nextUrl.pathname }),
+  });
+  if (check.blocked) return NextResponse.json([], { status: 400 });
 
   const like = { contains: q, mode: "insensitive" as const };
   const canDomestic = can((session.user as { role?: Role }).role, "domestic", "read");

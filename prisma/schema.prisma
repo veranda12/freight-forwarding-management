@@ -277,6 +277,8 @@ model User {
 
   accounts          Account[]
   sessions          Session[]
+  securityEvents    SecurityEvent[]
+  knownDevices      KnownDevice[]
   salesCustomers    Customer[]     @relation("CustomerSalesPic")
   salesJobs         Job[]          @relation("JobSalesPic")
   quotations        Quotation[]    @relation("QuotationOwner")
@@ -1571,4 +1573,127 @@ model RateCardItem {
 
   @@index([chargeCodeId])
   @@index([customerId])
+}
+
+// ============================================================
+// SECURITY MONITORING
+// ============================================================
+
+/// Event keamanan (append-only). Status penanganan disimpan terpisah di SecurityEventReview.
+/// Waktu disimpan UTC. Aplikasi single-tenant, jadi tidak ada tenantId.
+model SecurityEvent {
+  id          String   @id @default(cuid())
+  createdAt   DateTime @default(now())
+  type        String // LOGIN_SUCCESS, LOGIN_FAILED, ... lihat src/lib/security/types.ts
+  severity    String // INFO | LOW | MEDIUM | HIGH
+  reason      String?
+  /// APP (dideteksi aplikasi) atau WAF (dikirim adapter WAF)
+  source      String   @default("APP")
+  ruleId      String?
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  /// HMAC email/username untuk korelasi login gagal; email mentah tidak disimpan.
+  accountHash String?
+  accountMask String?
+  ip          String   @default("unknown")
+  country     String?
+  region      String?
+  city        String?
+  geoSource   String?
+  browser     String?
+  os          String?
+  deviceType  String?
+  /// HMAC identifier perangkat (cookie), bukan nilai cookie.
+  deviceHash  String?
+  method      String?
+  path        String?
+  statusCode  Int?
+  requestId   String?
+  metadata    Json?
+  /// Kunci deduplikasi (mis. id event WAF). Unik bila diisi.
+  dedupKey    String?  @unique
+
+  review SecurityEventReview?
+
+  @@index([createdAt])
+  @@index([type, createdAt])
+  @@index([severity, createdAt])
+  @@index([userId, createdAt])
+  @@index([ip, createdAt])
+  @@index([accountHash, createdAt])
+}
+
+/// Status penanganan event oleh admin. Tanpa baris = NEW. Riwayat perubahan dicatat di AuditLog.
+model SecurityEventReview {
+  eventId     String        @id
+  event       SecurityEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  status      String        @default("NEW") // NEW | IN_REVIEW | RESOLVED
+  note        String?
+  updatedById String?
+  updatedAt   DateTime      @updatedAt
+
+  @@index([status])
+}
+
+/// Perangkat yang pernah dipakai login (berdasarkan cookie acak bertanda tangan).
+model KnownDevice {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deviceHash String
+  browser    String?
+  os         String?
+  deviceType String?
+  lastIp     String?
+  country    String?
+  firstSeen  DateTime @default(now())
+  lastSeen   DateTime @default(now())
+
+  @@unique([userId, deviceHash])
+}
+
+/// Penghitung rate limit bersama (atomik lewat INSERT ... ON CONFLICT), aman untuk banyak instance.
+model RateLimitBucket {
+  key          String    @id
+  count        Int       @default(0)
+  windowStart  DateTime  @default(now())
+  blockedUntil DateTime?
+  /// Event RATE_LIMIT_EXCEEDED sudah dicatat untuk blokir yang sedang berlaku (cegah banjir log).
+  loggedBlock  Boolean   @default(false)
+
+  @@index([windowStart])
+}
+
+/// Cache geolokasi IP bersama.
+model GeoIpCache {
+  ip        String   @id
+  country   String?
+  region    String?
+  city      String?
+  source    String
+  fetchedAt DateTime @default(now())
+}
+
+/// Konfigurasi keamanan (satu baris "default"). Perubahan dicatat sebagai SECURITY_SETTINGS_CHANGED.
+model SecuritySetting {
+  id                String   @id @default("default")
+  loginMaxFailures  Int      @default(5)
+  loginWindowMin    Int      @default(10)
+  loginBlockMin     Int      @default(15)
+  ipMaxFailures     Int      @default(30)
+  /// LOG_ONLY: indikasi SQLi/XSS hanya dicatat. BLOCK: input ditolak pada titik yang mendukung.
+  detectionMode     String   @default("LOG_ONLY")
+  retentionDays     Int      @default(90)
+  /// Severity minimum untuk notifikasi eksternal (webhook), bila dikonfigurasi.
+  notifyMinSeverity String   @default("HIGH")
+  notifyCooldownMin Int      @default(30)
+  updatedAt         DateTime @updatedAt
+  updatedById       String?
+}
+
+/// Jejak notifikasi untuk deduplikasi dan cooldown.
+model SecurityAlert {
+  dedupKey   String   @id
+  lastSentAt DateTime
+  count      Int      @default(1)
 }

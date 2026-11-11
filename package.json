@@ -13,6 +13,7 @@
     "db:seed": "prisma db seed",
     "db:studio": "prisma studio",
     "kurs:sync": "tsx scripts/sync-kurs.ts",
+    "security:cleanup": "tsx scripts/security-cleanup.ts",
     "db:reset": "prisma migrate reset --force",
     "test": "vitest run",
     "test:watch": "vitest",

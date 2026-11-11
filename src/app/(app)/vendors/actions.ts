@@ -6,6 +6,7 @@ import { assertCan } from "@/lib/auth-helpers";
 import { writeAudit } from "@/lib/audit";
 import { vendorSchema } from "@/lib/validators";
 import { clean, pad } from "@/lib/crud";
+import { inspectInput, BLOCKED_INPUT_MESSAGE } from "@/lib/security/inspect";
 import type { EntityActionResult } from "@/components/crud/entity-form";
 
 async function nextCode(): Promise<string> {
@@ -19,6 +20,7 @@ export async function saveVendor(values: Record<string, unknown>): Promise<Entit
   const parsed = vendorSchema.safeParse(values);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message };
   const d = parsed.data;
+  if ((await inspectInput({ where: "form Vendor", fields: { ...d }, userId: user.id })).blocked) return { ok: false, error: BLOCKED_INPUT_MESSAGE };
   const id = clean(values.id);
   const rawRate = values.pph26Rate;
   const pph26Rate = rawRate === "" || rawRate === null || rawRate === undefined ? null : Number(rawRate);

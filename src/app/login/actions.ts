@@ -14,6 +14,10 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
     await signIn("credentials", { email, password, redirect: false });
   } catch (error) {
     if (error instanceof AuthError) {
+      // Pesan generik: tidak membedakan akun terdaftar atau tidak.
+      if ((error as AuthError & { code?: string }).code === "rate_limited") {
+        return { error: "Terlalu banyak percobaan masuk. Coba lagi beberapa menit lagi." };
+      }
       return { error: "Email atau password salah." };
     }
     throw error;

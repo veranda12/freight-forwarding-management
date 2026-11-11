@@ -10,6 +10,9 @@ import { PageHeader } from "@/components/page-header";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ShipmentBarChart, RevenueCostChart, TopCustomerChart, ModePieChart } from "@/components/charts";
 import { WorklistPanel } from "./worklist-panel";
+import Link from "next/link";
+import { ShieldAlert } from "lucide-react";
+import { pendingAlerts } from "@/lib/security/queries";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +20,8 @@ export default async function DashboardPage() {
   const user = await requireCan("dashboard", "read");
   const [d, wl, company] = await Promise.all([getDashboardData(), getWorklist(), prisma.companySetting.findFirst({ select: { name: true } })]);
   const role = user.role;
+  // Notifikasi keamanan hanya untuk yang berhak membaca log keamanan (Admin).
+  const secAlerts = can(role, "security", "read") ? await pendingAlerts(3).catch(() => []) : [];
 
   const isOps = ["ADMIN", "OPERATION", "MANAGEMENT", "SALES"].includes(role);
   const isDocs = ["ADMIN", "DOCUMENTATION", "OPERATION", "MANAGEMENT"].includes(role);
@@ -40,6 +45,14 @@ export default async function DashboardPage() {
         title={`Halo, ${user.name?.split(" ")[0] ?? ""}`}
         description={`Ringkasan operasional${company?.name ? ` ${company.name}` : ""}, antrian yang butuh aksi lebih dulu.`}
       />
+
+      {secAlerts.length > 0 && (
+        <Link href="/security?status=NEW" className="flex flex-wrap items-center gap-2 rounded-lg border border-destructive/40 bg-destructive/5 px-4 py-2.5 text-sm hover:bg-destructive/10">
+          <ShieldAlert className="h-4 w-4 text-destructive" />
+          <span className="font-medium text-destructive">Aktivitas keamanan penting belum ditangani.</span>
+          <span className="min-w-0 max-w-full truncate text-muted-foreground">Terbaru: {secAlerts[0].reason ?? secAlerts[0].type}</span>
+        </Link>
+      )}
 
       {/* KPI strip — compact, bukan kartu raksasa */}
       <Card>

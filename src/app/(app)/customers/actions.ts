@@ -6,6 +6,7 @@ import { assertCan } from "@/lib/auth-helpers";
 import { writeAudit } from "@/lib/audit";
 import { customerSchema, type CustomerInput } from "@/lib/validators";
 import { Prisma } from "@prisma/client";
+import { inspectInput, BLOCKED_INPUT_MESSAGE } from "@/lib/security/inspect";
 
 async function nextCustomerCode(): Promise<string> {
   const last = await prisma.customer.findFirst({ orderBy: { code: "desc" }, where: { code: { startsWith: "CUST" } }, select: { code: true } });
@@ -20,6 +21,7 @@ export async function createCustomer(input: CustomerInput): Promise<{ ok: boolea
   const parsed = customerSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Data tidak valid" };
   const d = parsed.data;
+  if ((await inspectInput({ where: "form Customer", fields: { ...d }, userId: user.id })).blocked) return { ok: false, error: BLOCKED_INPUT_MESSAGE };
   const code = await nextCustomerCode();
   const c = await prisma.customer.create({
     data: {
@@ -40,6 +42,7 @@ export async function updateCustomer(id: string, input: CustomerInput): Promise<
   const parsed = customerSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Data tidak valid" };
   const d = parsed.data;
+  if ((await inspectInput({ where: "form Customer", fields: { ...d }, userId: user.id })).blocked) return { ok: false, error: BLOCKED_INPUT_MESSAGE };
   await prisma.customer.update({
     where: { id },
     data: {

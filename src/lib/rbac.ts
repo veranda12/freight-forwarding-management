@@ -31,6 +31,7 @@ export type Resource =
   | "users"
   | "settings"
   | "audit"
+  | "security"
   | "domestic"
   | "domesticTariffs"
   | "weightRules";
@@ -85,11 +86,17 @@ const MATRIX: Record<Resource, { read: Role[]; write: Role[] }> = {
   users: { read: [], write: [] },
   settings: { read: ["FINANCE"], write: [] },
   audit: { read: [], write: [] },
+  // Log keamanan dan konfigurasinya: khusus Admin (MANAGEMENT tidak ikut read-only semua).
+  security: { read: [], write: [] },
 };
+
+/** Resource yang hanya boleh diakses Admin, termasuk untuk baca. */
+const ADMIN_ONLY: Resource[] = ["security"];
 
 export function can(role: Role | undefined | null, resource: Resource, action: Action = "read"): boolean {
   if (!role) return false;
   if (role === "ADMIN") return true;
+  if (ADMIN_ONLY.includes(resource)) return false;
   const entry = MATRIX[resource];
   if (!entry) return false;
   if (action === "read") {

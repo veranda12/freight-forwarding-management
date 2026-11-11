@@ -3,13 +3,18 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { can } from "@/lib/rbac";
 import { logFile } from "@/lib/logger";
+import { recordAccessDenied } from "@/lib/auth-helpers";
 
 export const runtime = "nodejs";
 
 /** Unduh file log satu hari (admin). */
 export async function GET(_req: NextRequest, ctx: { params: Promise<{ day: string }> }) {
   const session = await auth();
-  if (!can((session?.user as { role?: any } | undefined)?.role, "audit", "read")) return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  const user = session?.user as { id: string; role: any } | undefined;
+  if (!can(user?.role, "audit", "read")) {
+    await recordAccessDenied(user ?? null, "audit", "read", user ? 403 : 401, _req.nextUrl.pathname);
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  }
   const { day } = await ctx.params;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return NextResponse.json({ error: "invalid day" }, { status: 400 });
   try {
