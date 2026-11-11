@@ -19,7 +19,7 @@ import { createBillAction, updateBillAction } from "../actions";
 
 export type BillLineOpt = {
   id: string; vendorId: string; vendor: string; isForeign: boolean; job: string; bl: string;
-  charge: string; note: string | null; asReceipt: boolean; amount: number;
+  charge: string; note: string | null; asReceipt: boolean; amount: number; ppnIdr: number;
 };
 
 /** Isian bill yang sedang diedit. Vendor tidak bisa diganti; biaya, tanggal, kurs, PPN, dan PPh bisa. */
@@ -40,7 +40,8 @@ export function BillBuilder({ lines, currencies, today, edit }: { lines: BillLin
   const [dueDate, setDueDate] = useState(edit?.dueDate ?? "");
   const [currency, setCurrency] = useState(edit?.currency ?? "IDR");
   const [rate, setRate] = useState(edit?.rate ?? "");
-  const [ppn, setPpn] = useState(edit?.ppn ?? "");
+  // PPN masukan: bawaan = jumlah PPN baris buying yang dipilih, sampai Finance mengetik sendiri.
+  const [ppnTyped, setPpnTyped] = useState<string | null>(edit ? edit.ppn : null);
   const [pph23, setPph23] = useState(edit?.pph23 ?? "");
   const [pph26, setPph26] = useState(edit?.pph26 ?? "");
 
@@ -63,6 +64,9 @@ export function BillBuilder({ lines, currencies, today, edit }: { lines: BillLin
   const shown = jobFilter.length ? own.filter((l) => jobFilter.includes(l.job)) : own;
   const picked = own.filter((l) => selected.includes(l.id));
   const subtotal = picked.reduce((s, l) => s + l.amount, 0);
+  const linePpn = Math.round(picked.filter((l) => !l.asReceipt).reduce((s, l) => s + l.ppnIdr, 0));
+  const ppn = ppnTyped ?? (linePpn > 0 ? String(linePpn) : "");
+  const setPpn = (v: string) => setPpnTyped(v);
   const net = subtotal + (Number(ppn) || 0) - (Number(pph23) || 0) - (Number(pph26) || 0);
   const isForeign = own[0]?.isForeign ?? false;
   const jobs = new Set(picked.map((l) => l.job)).size;
@@ -165,7 +169,16 @@ export function BillBuilder({ lines, currencies, today, edit }: { lines: BillLin
             </div>
             {currency !== "IDR" && <div className="space-y-1.5"><Label>Kurs</Label><Input type="number" value={rate} onChange={(e) => setRate(e.target.value)} placeholder="otomatis" /></div>}
           </div>
-          <div className="space-y-1.5"><Label>PPN masukan (IDR)</Label><MoneyInput value={ppn} onChange={setPpn} placeholder="0" /></div>
+          <div className="space-y-1.5">
+            <Label>PPN masukan (IDR)</Label>
+            <MoneyInput value={ppn} onChange={setPpn} placeholder="0" />
+            {linePpn > 0 && (
+              <p className="text-xs text-muted-foreground">
+                Dari PPN baris biaya: {formatIDR(linePpn)}
+                {ppnTyped !== null && Number(ppnTyped) !== linePpn && <> · <button type="button" className="text-primary hover:underline" onClick={() => setPpnTyped(null)}>pakai nilai ini</button></>}
+              </p>
+            )}
+          </div>
           <div className="space-y-1.5"><Label>PPh 23 dipotong (IDR)</Label><MoneyInput value={pph23} onChange={setPph23} placeholder="0" /></div>
           {isForeign && <div className="space-y-1.5"><Label>PPh 26 dipotong (IDR)</Label><MoneyInput value={pph26} onChange={setPph26} placeholder="0" /></div>}
           <div className="space-y-1 rounded-md bg-muted/40 px-3 py-2">

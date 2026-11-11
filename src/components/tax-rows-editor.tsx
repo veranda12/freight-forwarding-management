@@ -8,10 +8,25 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { MoneyInput } from "@/components/money-input";
 import { isPpnKind, TAX_KINDS_BY_FLOW, TAX_ROW_ACCOUNT, TAX_ROW_LABEL, type TaxFlow } from "@/lib/tax-rows";
 
-export type TaxRowDraft = { key: number; kind: string; amount: string; description: string };
+/** auto: dibuat dari PPN baris buying (diperbarui saat pilihan biaya berubah). */
+export type TaxRowDraft = { key: number; kind: string; amount: string; description: string; auto?: boolean };
 
 let seq = 0;
 export const newTaxRow = (kind = "PPH23", amount = "", description = ""): TaxRowDraft => ({ key: ++seq, kind, amount, description });
+
+/**
+ * Baris PPN Masukan dari PPN yang diisi di baris buying, dikelompokkan per tarif.
+ * Baris pajak yang diketik Finance (PPh, atau PPN tambahan) tetap dipertahankan.
+ */
+export function syncLinePpnRows(rows: TaxRowDraft[], lines: { ppnRate: number | null; ppnIdr: number; reimburse: boolean }[]): TaxRowDraft[] {
+  const manual = rows.filter((r) => !r.auto);
+  const byRate = new Map<number, number>();
+  for (const l of lines) if (!l.reimburse && l.ppnIdr > 0 && l.ppnRate) byRate.set(l.ppnRate, (byRate.get(l.ppnRate) ?? 0) + l.ppnIdr);
+  const auto = [...byRate.entries()].map(([rate, amt]) => ({
+    ...newTaxRow("PPN_IN", String(Math.round(amt)), `PPN Masukan ${String(rate).replace(".", ",")}%`), auto: true,
+  }));
+  return [...auto, ...manual];
+}
 
 /** Jenis baris pajak bawaan saat tombol Tambah ditekan. */
 export const defaultTaxKind = (flow: TaxFlow) => (flow === "IN" ? "PPN_OUT" : "PPH23");
@@ -64,14 +79,19 @@ export function TaxRowsEditor({ rows, onChange, base, nonReimburse = base, forma
       </div>
       {disabledReason && <p className="text-xs text-muted-foreground">{disabledReason}</p>}
       {rows.map((r) => (
-        <div key={r.key} className="grid gap-2 sm:grid-cols-[12.5rem_1fr_9rem_2.25rem]">
-          <Select value={r.kind} onValueChange={(v) => set(r.key, { kind: v })}>
-            <SelectTrigger aria-label="Jenis pajak"><SelectValue /></SelectTrigger>
-            <SelectContent>{TAX_KINDS_BY_FLOW[flow].map((k) => <SelectItem key={k} value={k}>{TAX_ROW_LABEL[k]} ({SIDE_LABEL[TAX_ROW_ACCOUNT[k].side]})</SelectItem>)}</SelectContent>
-          </Select>
-          <Input aria-label="Keterangan pajak" value={r.description} onChange={(e) => set(r.key, { description: e.target.value })} placeholder="mis. PPh 23 Bengkel Sinar Glugur 4/11" />
-          <MoneyInput aria-label="Nominal pajak" value={r.amount} onChange={(v) => set(r.key, { amount: v })} placeholder="Nominal" className="text-right" />
+        // Dua baris (jenis pajak, lalu keterangan + nominal) supaya muat di kartu sempit maupun lebar.
+        <div key={r.key} className="grid grid-cols-[minmax(0,1fr)_minmax(0,9rem)_2.25rem] gap-2 rounded-md border p-2">
+          <div className="col-span-2">
+            <Select value={r.kind} onValueChange={(v) => set(r.key, { kind: v })}>
+              <SelectTrigger aria-label="Jenis pajak"><SelectValue /></SelectTrigger>
+              <SelectContent>{TAX_KINDS_BY_FLOW[flow].map((k) => <SelectItem key={k} value={k}>{TAX_ROW_LABEL[k]} ({SIDE_LABEL[TAX_ROW_ACCOUNT[k].side]})</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
           <Button type="button" size="icon" variant="ghost" aria-label="Hapus baris pajak" onClick={() => onChange(rows.filter((x) => x.key !== r.key))}><Trash2 /></Button>
+          <Input aria-label="Keterangan pajak" value={r.description} onChange={(e) => set(r.key, { description: e.target.value })} placeholder="mis. PPh 23 Bengkel Sinar Glugur 4/11" />
+          <div className="col-span-2">
+            <MoneyInput aria-label="Nominal pajak" value={r.amount} onChange={(v) => set(r.key, { amount: v })} placeholder="Nominal" className="text-right" />
+          </div>
         </div>
       ))}
       {rows.length > 0 && (

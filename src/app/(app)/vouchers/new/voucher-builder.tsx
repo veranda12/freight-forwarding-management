@@ -12,11 +12,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/components/empty-state";
 import { formatIDR } from "@/lib/format";
 import { createVoucherAction } from "../actions";
-import { TaxRowsEditor, taxSummary, type TaxRowDraft } from "@/components/tax-rows-editor";
+import { TaxRowsEditor, syncLinePpnRows, taxSummary, type TaxRowDraft } from "@/components/tax-rows-editor";
+
 
 export type VoucherJob = {
   id: string; number: string; bl: string; customer: string;
-  lines: { id: string; label: string; note: string | null; vendorId: string | null; vendor: string | null; amount: number; reimburse: boolean }[];
+  lines: { id: string; label: string; note: string | null; vendorId: string | null; vendor: string | null; amount: number; reimburse: boolean; ppnRate: number | null; ppnIdr: number }[];
 };
 
 export function VoucherBuilder({ jobs, today, closedMonths }: { jobs: VoucherJob[]; today: string; closedMonths: string[] }) {
@@ -48,6 +49,7 @@ export function VoucherBuilder({ jobs, today, closedMonths }: { jobs: VoucherJob
     const next = base.includes(lineId) ? base.filter((v) => v !== lineId) : [...base, lineId];
     setJobId(next.length ? j.id : null);
     setSelected(next);
+    setTaxRows((rows) => syncLinePpnRows(base === selected ? rows : rows.filter((r) => !r.auto), j.lines.filter((l) => next.includes(l.id))));
     if (!payee && line?.vendor) setPayee(line.vendor);
   }
 

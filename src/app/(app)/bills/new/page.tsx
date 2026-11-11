@@ -25,7 +25,7 @@ export default async function NewBillPage() {
     id: l.id, vendorId: l.vendor!.id, vendor: l.vendor!.name, isForeign: !!l.vendor!.isForeign,
     job: l.job.number, bl: [l.job.hblNo, l.job.mblNo, l.job.hawbNo, l.job.mawbNo].filter(Boolean).join(" / "),
     charge: `${l.chargeCode.code} ${l.chargeCode.name}`, note: l.description !== l.chargeCode.code ? l.description : null,
-    asReceipt: l.asReceipt, amount: Number(l.actualIdr),
+    asReceipt: l.asReceipt, amount: Number(l.actualIdr), ppnIdr: Number(l.ppnIdr),
   }));
   return (
     <div className="space-y-6">

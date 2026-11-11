@@ -20,14 +20,28 @@ const num = (v: unknown) => { const n = parseFloat(String(v ?? "")); return Numb
 
 export async function createJob(input: JobInput): Promise<{ ok: boolean; error?: string; id?: string }> {
   const user = await assertCan("jobs", "write");
-  const mode = s(input.mode); const direction = s(input.direction); const customerId = s(input.customerId);
-  if (!mode || !direction || !customerId) return { ok: false, error: "Mode, arah, dan customer wajib diisi." };
+  const mode = s(input.mode); const direction = s(input.direction);
+  if (!mode || !direction) return { ok: false, error: "Mode dan arah wajib diisi." };
+  // Shipper/Consignee dipilih dari master Customer; yang tidak ditagih boleh nama manual.
+  // Customer job = perusahaan pihak yang ditagih.
+  const billTo = s(input.billTo) === "CONSIGNEE" ? "CONSIGNEE" : s(input.billTo) === "SHIPPER" ? "SHIPPER" : null;
+  if (!billTo) return { ok: false, error: "Pilih tagihan ditujukan ke Shipper atau Consignee." };
+  const partyIds = [s(input.shipperId), s(input.consigneeId)].filter((x): x is string => !!x);
+  const companies = new Map((await prisma.customer.findMany({
+    where: { id: { in: partyIds }, isActive: true }, select: { id: true, name: true, address: true, city: true },
+  })).map((c) => [c.id, c]));
+  const shipper = companies.get(s(input.shipperId) ?? "");
+  const consignee = companies.get(s(input.consigneeId) ?? "");
+  const billed = billTo === "SHIPPER" ? shipper : consignee;
+  if (!billed) return { ok: false, error: `Pilih perusahaan ${billTo === "SHIPPER" ? "Shipper" : "Consignee"} dari daftar Customer, karena tagihan dikirim ke pihak ini.` };
+  const customerId = billed.id;
+  const addr = (c?: { address: string | null; city: string | null }) => (c ? [c.address, c.city].filter(Boolean).join(", ") || null : null);
   if (direction !== "EXPORT" && direction !== "IMPORT") return { ok: false, error: "Arah Ekspor-Impor hanya Export/Import. Kargo antar kota dibuat di menu Domestik." };
   const isAir = mode === "AIR";
   const isFcl = mode === "SEA_FCL";
   if (mode === "SEA_LCL" && !(num(input.packages)! > 0 && num(input.volumeCbm)! > 0)) return { ok: false, error: "Sea LCL wajib mengisi jumlah koli dan volume." };
   try {
-    await assertBlUnique(prisma, { air: isAir, master: s(input.mblNo), house: s(input.hblNo) });
+    await assertBlUnique(prisma, { air: isAir, master: s(input.mblNo), house: isAir ? s(input.hblNo) : null });
   } catch (e) { return { ok: false, error: errorMessage(e, "No. B/L tidak valid.") }; }
   const rules = await getWeightRules("INTERNATIONAL");
 
@@ -40,9 +54,10 @@ export async function createJob(input: JobInput): Promise<{ ok: boolean; error?:
     const job = await tx.job.create({
       data: {
         number, mode: mode as any, direction: direction as any, status: "DRAFT",
-        customerId, salesPicId: s(input.salesPicId) ?? user.id,
+        // salesPicId = user yang menginput job (tampil sebagai "Diinput oleh").
+        customerId, billTo, salesPicId: user.id,
         incoterm: s(input.incoterm),
-        mblNo: !isAir ? s(input.mblNo) : null, hblNo: !isAir ? s(input.hblNo) : null,
+        mblNo: !isAir ? s(input.mblNo) : null, hblNo: null,
         mawbNo: isAir ? s(input.mblNo) : null, hawbNo: isAir ? s(input.hblNo) : null,
         polId: !isAir ? s(input.polId) : null, podId: !isAir ? s(input.podId) : null,
         originAirportId: isAir ? s(input.originAirportId) : null, destAirportId: isAir ? s(input.destAirportId) : null,
@@ -53,7 +68,9 @@ export async function createJob(input: JobInput): Promise<{ ok: boolean; error?:
         volumeCbm: vol != null ? new Prisma.Decimal(vol) : null,
         chargeableWeight: cw != null ? new Prisma.Decimal(cw) : null,
         packages: pkg != null ? Math.round(pkg) : null, packageType: s(input.packageType),
-        shipperName: s(input.shipperName), consigneeName: s(input.consigneeName), notifyName: s(input.notifyName),
+        shipperName: shipper?.name ?? s(input.shipperName), shipperAddress: addr(shipper),
+        consigneeName: consignee?.name ?? s(input.consigneeName), consigneeAddress: addr(consignee),
+        notifyName: s(input.notifyName),
         milestones: { create: [{ code: "CREATED", title: "Job dibuat", isDone: true, actualAt: new Date(), sortOrder: 0, userId: user.id }] },
       },
     });

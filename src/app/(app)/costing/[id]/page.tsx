@@ -123,7 +123,7 @@ function CostTable({
   rows: {
     id: string; side: string; chargeCodeId: string; chargeCode: { code: string; name: string }; description: string | null;
     vendorId: string | null; vehicleId: string | null; vendor: { name: string } | null; vehicle: { plate: string } | null;
-    currency: string; exchangeRate: any; qty: any; unitPrice: any; amountForeign: any; actualIdr: any; taxable: boolean;
+    currency: string; exchangeRate: any; qty: any; unitPrice: any; amountForeign: any; actualIdr: any; ppnRate: any; ppnIdr: any; taxable: boolean;
     asReceipt: boolean; unitLabel: string | null; invoiced: boolean; billed: boolean; recordedAt: Date | null;
     voucherId: string | null; voucher: { number: string } | null; invoice: { number: string; status: string } | null;
   }[];
@@ -165,7 +165,10 @@ function CostTable({
                   <TableCell className="whitespace-nowrap">{formatNumber(Number(r.qty), 0)}{r.unitLabel && <span className="text-muted-foreground"> × {r.unitLabel}</span>}</TableCell>
                   <TableCell>{formatMoney(Number(r.unitPrice), r.currency, r.currency === "IDR" ? 0 : 2)}</TableCell>
                   <TableCell>{formatMoney(Number(r.amountForeign), r.currency, r.currency === "IDR" ? 0 : 2)}</TableCell>
-                  <TableCell className="text-right tabular-nums">{formatIDR(Number(r.actualIdr))}</TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {formatIDR(Number(r.actualIdr))}
+                    {Number(r.ppnIdr) > 0 && <p className="text-xs text-muted-foreground">+ PPN {String(Number(r.ppnRate)).replace(".", ",")}% {formatIDR(Number(r.ppnIdr))}</p>}
+                  </TableCell>
                   <TableCell><span className={cn("text-xs", locked ? "text-muted-foreground" : "text-warning")}>{status}</span></TableCell>
                   {recordable && (
                     <TableCell className="text-right">
@@ -181,6 +184,7 @@ function CostTable({
                           <ChargeForm jobId={jobId} side={side} options={chargeOptions} initial={{
                             id: r.id, chargeCodeId: r.chargeCodeId, description: r.description, qty: Number(r.qty), unitPrice: Number(r.unitPrice),
                             currency: r.currency, rate: Number(r.exchangeRate), asReceipt: r.asReceipt, vendorId: r.vendorId, vehicleId: r.vehicleId,
+                            ppnRate: r.ppnRate == null ? null : Number(r.ppnRate),
                           }} />
                           <DeleteChargeButton lineId={r.id} label={r.chargeCode.code} />
                         </span>

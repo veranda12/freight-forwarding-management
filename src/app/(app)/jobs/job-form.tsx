@@ -14,6 +14,7 @@ import {
 import { MODE_LABELS, DIRECTION_LABELS } from "@/lib/enums";
 import { computeChargeable, type WeightRuleInput } from "@/lib/chargeable";
 import { formatNumber } from "@/lib/format";
+import { SearchableSelect } from "@/components/searchable-select";
 import { createJob } from "./actions";
 
 type Opt = { id: string; label: string };
@@ -21,19 +22,22 @@ export type JobWeightRules = Record<string, WeightRuleInput>;
 const BASIS = { ACTUAL: "berat aktual", VOLUME: "berat volume", MIN_VOLUME: "volume minimum", MINIMUM: "berat minimum" } as const;
 
 export function JobForm({
-  customers, sales, ports, airports, weightRules,
+  shippers, consignees, ports, airports, weightRules,
 }: {
-  customers: Opt[]; sales: Opt[]; ports: Opt[]; airports: Opt[]; weightRules: JobWeightRules;
+  shippers: Opt[]; consignees: Opt[]; ports: Opt[]; airports: Opt[]; weightRules: JobWeightRules;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [f, setF] = useState<Record<string, string>>({
-    mode: "SEA_FCL", direction: "EXPORT", customerId: "", salesPicId: "", incoterm: "FOB",
+    mode: "SEA_FCL", direction: "EXPORT", incoterm: "FOB",
     polId: "", podId: "", originAirportId: "", destAirportId: "",
     vesselName: "", voyageNo: "", flightNo: "", etd: "", eta: "", mblNo: "", hblNo: "",
     grossWeightKg: "", volumeCbm: "", chargeableWeight: "", packages: "", packageType: "",
-    shipperName: "", consigneeName: "", notifyName: "",
+    shipperId: "", shipperName: "", consigneeId: "", consigneeName: "", notifyName: "",
   });
+  // Ditagihkan ke: bawaan Ekspor = Shipper, Impor = Consignee, sampai user memilih sendiri.
+  const [billTo, setBillTo] = useState<"" | "SHIPPER" | "CONSIGNEE">("");
+  const bill = billTo || (f.direction === "IMPORT" ? "CONSIGNEE" : "SHIPPER");
   const set = (k: string, v: string) => setF((p) => ({ ...p, [k]: v }));
   const isAir = f.mode === "AIR";
   const isFcl = f.mode === "SEA_FCL";
@@ -48,10 +52,13 @@ export function JobForm({
   const chargeable = cwManual || !auto ? f.chargeableWeight : auto.chargeableKg ? String(auto.chargeableKg) : "";
 
   function submit() {
-    if (!f.customerId) { toast.error("Pilih customer."); return; }
+    if (!(bill === "SHIPPER" ? f.shipperId : f.consigneeId)) {
+      toast.error(`Pilih perusahaan ${bill === "SHIPPER" ? "Shipper" : "Consignee"} dari daftar, karena tagihan dikirim ke pihak ini.`);
+      return;
+    }
     if (isLcl && !(Number(f.packages) > 0 && Number(f.volumeCbm) > 0)) { toast.error("Sea LCL wajib mengisi jumlah koli dan volume."); return; }
     start(async () => {
-      const res = await createJob({ ...f, chargeableWeight: chargeable });
+      const res = await createJob({ ...f, billTo: bill, chargeableWeight: chargeable });
       if (res.ok && res.id) { toast.success("Job dibuat."); router.push(`/jobs/${res.id}`); router.refresh(); }
       else toast.error(res.error ?? "Gagal.");
     });
@@ -65,8 +72,6 @@ export function JobForm({
           <Sel label="Mode" value={f.mode} onChange={(v) => set("mode", v)} options={Object.entries(MODE_LABELS).map(([id, label]) => ({ id, label }))} />
           <Sel label="Arah" value={f.direction} onChange={(v) => set("direction", v)} options={Object.entries(DIRECTION_LABELS).map(([id, label]) => ({ id, label }))} />
           <Sel label="Incoterm" value={f.incoterm} onChange={(v) => set("incoterm", v)} options={["FOB", "CIF", "CFR", "EXW", "DAP", "FCA"].map((x) => ({ id: x, label: x }))} />
-          <div className="sm:col-span-2"><Sel label="Customer" value={f.customerId} onChange={(v) => set("customerId", v)} options={customers} placeholder="Pilih customer…" /></div>
-          <Sel label="Sales PIC" value={f.salesPicId} onChange={(v) => set("salesPicId", v)} options={sales} placeholder="(otomatis = Anda)" />
         </CardContent>
       </Card>
 
@@ -94,7 +99,8 @@ export function JobForm({
             </>
           )}
           <Fld label={isAir ? "MAWB" : "Master B/L"}><Input value={f.mblNo} onChange={(e) => set("mblNo", e.target.value)} placeholder="Boleh diisi nanti" /></Fld>
-          <Fld label={isAir ? "HAWB" : "House B/L"}><Input value={f.hblNo} onChange={(e) => set("hblNo", e.target.value)} placeholder="Boleh diisi nanti" /></Fld>
+          {/* House B/L tidak dipakai untuk sea; HAWB tetap untuk udara. */}
+          {isAir && <Fld label="HAWB"><Input value={f.hblNo} onChange={(e) => set("hblNo", e.target.value)} placeholder="Boleh diisi nanti" /></Fld>}
           <Fld label="ETD"><Input type="date" value={f.etd} onChange={(e) => set("etd", e.target.value)} /></Fld>
           <Fld label="ETA"><Input type="date" value={f.eta} onChange={(e) => set("eta", e.target.value)} /></Fld>
           <Fld label="Gross Weight (kg)"><Input type="number" value={f.grossWeightKg} onChange={(e) => set("grossWeightKg", e.target.value)} /></Fld>
@@ -128,9 +134,23 @@ export function JobForm({
       <Card>
         <CardHeader><CardTitle className="text-base">Parties</CardTitle></CardHeader>
         <CardContent className="grid gap-4 sm:grid-cols-3">
-          <Fld label="Shipper"><Input value={f.shipperName} onChange={(e) => set("shipperName", e.target.value)} /></Fld>
-          <Fld label="Consignee"><Input value={f.consigneeName} onChange={(e) => set("consigneeName", e.target.value)} /></Fld>
+          <PartyField
+            label="Shipper" options={shippers} billed={bill === "SHIPPER"}
+            id={f.shipperId} name={f.shipperName}
+            onPick={(v) => setF((p) => ({ ...p, shipperId: v, shipperName: "" }))}
+            onType={(v) => setF((p) => ({ ...p, shipperId: "", shipperName: v }))}
+          />
+          <PartyField
+            label="Consignee" options={consignees} billed={bill === "CONSIGNEE"}
+            id={f.consigneeId} name={f.consigneeName}
+            onPick={(v) => setF((p) => ({ ...p, consigneeId: v, consigneeName: "" }))}
+            onType={(v) => setF((p) => ({ ...p, consigneeId: "", consigneeName: v }))}
+          />
           <Fld label="Notify Party"><Input value={f.notifyName} onChange={(e) => set("notifyName", e.target.value)} /></Fld>
+          <Sel
+            label="Ditagihkan ke" value={bill} onChange={(v) => setBillTo(v as "SHIPPER" | "CONSIGNEE")}
+            options={[{ id: "SHIPPER", label: "Shipper" }, { id: "CONSIGNEE", label: "Consignee" }]}
+          />
         </CardContent>
       </Card>
 
@@ -138,6 +158,29 @@ export function JobForm({
         <Button onClick={submit} disabled={pending}>{pending ? <Loader2 className="animate-spin" /> : <Save />} Simpan Job</Button>
         <Button variant="ghost" onClick={() => router.push("/jobs")}>Batal</Button>
       </div>
+    </div>
+  );
+}
+
+/** Perusahaan dari master Customer. Pihak yang tidak ditagih boleh diketik manual (mis. shipper luar negeri). */
+function PartyField({ label, options, billed, id, name, onPick, onType }: {
+  label: string; options: Opt[]; billed: boolean; id: string; name: string; onPick: (v: string) => void; onType: (v: string) => void;
+}) {
+  const [manual, setManual] = useState(false);
+  const typing = manual && !billed;
+  return (
+    <div className="space-y-1.5">
+      <Label>{label}{billed && <span className="ml-1 text-xs font-normal text-primary">(ditagih)</span>}</Label>
+      {typing
+        ? <Input value={name} onChange={(e) => onType(e.target.value)} placeholder="Nama perusahaan" aria-label={label} />
+        : <SearchableSelect value={id} onChange={onPick} options={options} placeholder="Pilih perusahaan…" ariaLabel={label} />}
+      {billed ? (
+        <p className="text-xs text-muted-foreground">Pihak yang ditagih wajib dipilih dari daftar Customer.</p>
+      ) : (
+        <button type="button" className="text-xs text-primary hover:underline" onClick={() => { if (typing) onType(""); else onPick(""); setManual(!typing); }}>
+          {typing ? "Pilih dari daftar perusahaan" : "Tidak ada di daftar? Ketik manual"}
+        </button>
+      )}
     </div>
   );
 }

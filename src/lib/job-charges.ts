@@ -21,7 +21,13 @@ export type JobChargeInput = {
   /** Hanya untuk BUYING: vendor, atau armada sendiri. */
   vendorId?: string | null;
   vehicleId?: string | null;
+  /** Hanya BUYING non-reimburse: tarif PPN masukan dalam persen (mis. 11 atau 1.1). Kosong/0 = tanpa PPN.
+   *  undefined = tidak diubah (dipakai pemanggil lain seperti rate card). */
+  ppnRate?: number | string | null;
 };
+
+/** Nilai PPN dalam rupiah penuh dari nilai IDR baris dan tarif persen. */
+export const ppnOf = (idr: number, ratePct: number) => Math.round((idr * ratePct) / 100);
 
 type Tx = Prisma.TransactionClient;
 
@@ -38,7 +44,16 @@ export function validateJobCharge(input: JobChargeInput) {
   if (currency !== "IDR" && rate != null && !(rate > 0)) throw new Error("Kurs harus lebih dari 0.");
   const vendorId = input.side === "BUYING" ? input.vendorId || null : null;
   const vehicleId = input.side === "BUYING" && !vendorId ? input.vehicleId || null : null;
+  let ppnRate: number | null | undefined = undefined;
+  if (input.ppnRate !== undefined) {
+    const raw = input.ppnRate === "" || input.ppnRate == null ? 0 : Number(input.ppnRate);
+    if (!Number.isFinite(raw) || raw < 0 || raw > 100) throw new Error("Tarif PPN harus antara 0 dan 100 persen.");
+    if (raw > 0 && input.side !== "BUYING") throw new Error("PPN per baris hanya untuk buying (PPN masukan).");
+    if (raw > 0 && input.asReceipt) throw new Error("Biaya reimburse tidak dikenai PPN masukan. Hapus centang Reimburse atau kosongkan PPN.");
+    ppnRate = raw > 0 ? Math.round(raw * 1000) / 1000 : null;
+  }
   return {
+    ppnRate,
     side: input.side, chargeCodeId: input.chargeCodeId, qty: r2(qty), unitPrice: r2(unitPrice), currency, rate,
     taxable: !!input.taxable, vendorId, vehicleId, description: (input.description ?? "").trim() || null,
     asReceipt: input.asReceipt == null ? null : !!input.asReceipt, unitLabel: (input.unitLabel ?? "").trim() || null,
@@ -79,12 +94,19 @@ async function lineData(tx: Tx, v: ReturnType<typeof validateJobCharge>) {
   if (!rate || !(rate > 0)) throw new Error(`Kurs ${v.currency} belum tersedia. Isi kurs secara manual.`);
   const amountForeign = r2(v.qty * v.unitPrice);
   const idr = r2(amountForeign * rate);
+  const asReceipt = v.asReceipt ?? cc.asReceipt;
+  if (v.ppnRate && asReceipt) throw new Error("Biaya reimburse tidak dikenai PPN masukan. Hapus centang Reimburse atau kosongkan PPN.");
+  const ppn = v.ppnRate === undefined ? {} : {
+    ppnRate: v.ppnRate == null ? null : new Prisma.Decimal(v.ppnRate),
+    ppnIdr: new Prisma.Decimal(v.ppnRate ? ppnOf(idr, v.ppnRate) : 0),
+  };
   return {
+    ...ppn,
     side: v.side, chargeCodeId: v.chargeCodeId, description: v.description ?? cc.code,
     vendorId: v.vendorId, vehicleId: v.vehicleId, currency: v.currency,
     exchangeRate: new Prisma.Decimal(rate), qty: new Prisma.Decimal(v.qty), unitPrice: new Prisma.Decimal(v.unitPrice),
     amountForeign: new Prisma.Decimal(amountForeign), estimatedIdr: new Prisma.Decimal(idr), actualIdr: new Prisma.Decimal(idr),
-    taxable: v.taxable, asReceipt: v.asReceipt ?? cc.asReceipt, ...(v.unitLabel ? { unitLabel: v.unitLabel } : {}),
+    taxable: v.taxable, asReceipt, ...(v.unitLabel ? { unitLabel: v.unitLabel } : {}),
   };
 }
 

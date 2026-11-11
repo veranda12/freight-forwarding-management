@@ -17,8 +17,11 @@ export type ChargeOpt = { id: string; code: string; name: string; asReceipt: boo
 export type ChargeFormOptions = { charges: ChargeOpt[]; currencies: string[]; rates: Record<string, number>; vendors: Opt[]; vehicles: Opt[] };
 export type ChargeInitial = {
   id: string; chargeCodeId: string; description: string | null; qty: number; unitPrice: number; currency: string;
-  rate: number; asReceipt: boolean; vendorId: string | null; vehicleId: string | null;
+  rate: number; asReceipt: boolean; vendorId: string | null; vehicleId: string | null; ppnRate: number | null;
 };
+
+/** Tarif PPN yang sering dipakai; tarif lain bisa diketik. */
+const PPN_PRESETS = ["1.1", "1.2", "11", "12"];
 
 const NONE = "__none__";
 
@@ -29,12 +32,13 @@ export function ChargeForm({ jobId, side, options, initial }: { jobId: string; s
   const [open, setOpen] = useState(false);
   const blank = {
     chargeCodeId: "", description: "", qty: "1", unitPrice: "", currency: "IDR", rate: "", asReceipt: false,
-    source: "VENDOR" as "VENDOR" | "OWN_FLEET", vendorId: NONE, vehicleId: NONE,
+    source: "VENDOR" as "VENDOR" | "OWN_FLEET", vendorId: NONE, vehicleId: NONE, ppnRate: "",
   };
   const fromInitial = (i: ChargeInitial) => ({
     chargeCodeId: i.chargeCodeId, description: i.description ?? "", qty: String(i.qty), unitPrice: String(i.unitPrice),
     currency: i.currency, rate: i.currency === "IDR" ? "" : String(i.rate), asReceipt: i.asReceipt,
     source: (i.vehicleId ? "OWN_FLEET" : "VENDOR") as "VENDOR" | "OWN_FLEET", vendorId: i.vendorId ?? NONE, vehicleId: i.vehicleId ?? NONE,
+    ppnRate: i.ppnRate ? String(i.ppnRate) : "",
   });
   const [f, setF] = useState(initial ? fromInitial(initial) : blank);
   const set = (p: Partial<typeof f>) => setF((x) => ({ ...x, ...p }));
@@ -42,6 +46,9 @@ export function ChargeForm({ jobId, side, options, initial }: { jobId: string; s
   const rate = f.currency === "IDR" ? 1 : Number(f.rate) || options.rates[f.currency] || 0;
   const idr = (Number(f.qty) || 0) * (Number(f.unitPrice) || 0) * rate;
   const label = side === "SELLING" ? "selling" : "buying";
+  const withPpn = side === "BUYING" && !f.asReceipt;
+  const ppnRate = withPpn ? Number(f.ppnRate) || 0 : 0;
+  const ppnIdr = Math.round((idr * ppnRate) / 100);
 
   function submit() {
     start(async () => {
@@ -50,6 +57,7 @@ export function ChargeForm({ jobId, side, options, initial }: { jobId: string; s
         currency: f.currency, rate: f.currency === "IDR" ? null : f.rate || null, taxable: !f.asReceipt, asReceipt: f.asReceipt,
         vendorId: side === "BUYING" && f.source === "VENDOR" && f.vendorId !== NONE ? f.vendorId : null,
         vehicleId: side === "BUYING" && f.source === "OWN_FLEET" && f.vehicleId !== NONE ? f.vehicleId : null,
+        ...(side === "BUYING" ? { ppnRate: withPpn ? f.ppnRate || null : null } : {}),
       };
       const res = initial ? await updateJobChargeAction(initial.id, input) : await addJobChargeAction(jobId, input);
       if (res.ok) {
@@ -126,8 +134,34 @@ export function ChargeForm({ jobId, side, options, initial }: { jobId: string; s
           <label className="flex items-center gap-2 text-sm sm:col-span-2">
             <input type="checkbox" checked={f.asReceipt} onChange={(e) => set({ asReceipt: e.target.checked })} className="h-4 w-4" /> Reimburse (as receipt), tidak masuk pendapatan dan margin
           </label>
+          {side === "BUYING" && (
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label htmlFor="cf-ppn">PPN masukan (%)</Label>
+              <div className="flex flex-wrap items-center gap-2">
+                <Input id="cf-ppn" type="number" min={0} max={100} step="0.01" className="w-28" value={withPpn ? f.ppnRate : ""}
+                  disabled={!withPpn} onChange={(e) => set({ ppnRate: e.target.value })} placeholder="0" />
+                {withPpn && PPN_PRESETS.map((p) => (
+                  <Button key={p} type="button" size="sm" variant={f.ppnRate === p ? "default" : "outline"} className="h-8 px-2.5"
+                    onClick={() => set({ ppnRate: f.ppnRate === p ? "" : p })}>{p.replace(".", ",")}%</Button>
+                ))}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {withPpn
+                  ? "Kosongkan bila tagihan vendor tanpa PPN. Nilainya otomatis masuk PPN Masukan saat dibuat voucher atau vendor bill."
+                  : "Biaya reimburse tidak dikenai PPN masukan."}
+              </p>
+            </div>
+          )}
         </div>
-        <p className="rounded-md bg-muted/50 px-3 py-2 text-sm">Nilai IDR: <span className="font-semibold tabular-nums">{formatIDR(idr)}</span></p>
+        <div className="space-y-0.5 rounded-md bg-muted/50 px-3 py-2 text-sm">
+          <p>Nilai IDR: <span className="font-semibold tabular-nums">{formatIDR(idr)}</span></p>
+          {ppnIdr > 0 && (
+            <>
+              <p>PPN {String(ppnRate).replace(".", ",")}%: <span className="font-semibold tabular-nums">{formatIDR(ppnIdr)}</span></p>
+              <p>Total dibayar ke vendor: <span className="font-semibold tabular-nums">{formatIDR(idr + ppnIdr)}</span></p>
+            </>
+          )}
+        </div>
         <DialogFooter>
           <DialogClose asChild><Button variant="ghost">Batal</Button></DialogClose>
           <Button onClick={submit} disabled={pending || !f.chargeCodeId}>{pending ? <Loader2 className="animate-spin" /> : null} Simpan</Button>

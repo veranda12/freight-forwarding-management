@@ -175,7 +175,8 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
                   <Field label={isAir ? "Dest. Airport" : "Port of Discharge"}>{dest ? `${dest.name}` : "-"}</Field>
                   <Field label="Incoterm">{job.incoterm}</Field>
                   {isAir ? <Field label="Flight No">{job.flightNo}</Field> : <Field label="Vessel / Voyage">{job.vesselName} {job.voyageNo}</Field>}
-                  <Field label="Sales PIC">{job.salesPic?.name}</Field>
+                  <Field label="Diinput oleh">{job.salesPic?.name}</Field>
+                  <Field label="Ditagihkan ke">{job.billTo === "SHIPPER" ? `Shipper · ${job.customer.name}` : job.billTo === "CONSIGNEE" ? `Consignee · ${job.customer.name}` : job.customer.name}</Field>
                   <Field label="Gross Weight">{job.grossWeightKg ? `${formatNumber(Number(job.grossWeightKg), 0)} kg` : "-"}</Field>
                   <Field label="Volume">{job.volumeCbm ? `${formatNumber(Number(job.volumeCbm), 2)} CBM` : "-"}</Field>
                   {job.chargeableWeight && <Field label="Chargeable Weight">{`${formatNumber(Number(job.chargeableWeight), 0)} kg`}</Field>}
@@ -199,7 +200,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
                     <Field label="HAWB">{job.hawbNo}</Field>
                   </> : <>
                     <Field label="Master B/L">{job.mblNo}</Field>
-                    <Field label="House B/L">{job.hblNo}</Field>
+                    {job.hblNo && <Field label="House B/L">{job.hblNo}</Field>}
                   </>}
                   <Field label="Dibuka">{formatDate(job.openedAt)}</Field>
                   <Field label="Ditutup">{formatDate(job.closedAt)}</Field>
@@ -243,8 +244,8 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
         <TabsContent value="parties">
           <div className="grid gap-4 md:grid-cols-3">
             {[
-              { label: "Shipper", name: job.shipperName, addr: job.shipperAddress },
-              { label: "Consignee", name: job.consigneeName, addr: job.consigneeAddress },
+              { label: job.billTo === "SHIPPER" ? "Shipper · ditagih" : "Shipper", name: job.shipperName, addr: job.shipperAddress },
+              { label: job.billTo === "CONSIGNEE" ? "Consignee · ditagih" : "Consignee", name: job.consigneeName, addr: job.consigneeAddress },
               { label: "Notify Party", name: job.notifyName, addr: job.notifyAddress },
             ].map((p) => (
               <Card key={p.label}>

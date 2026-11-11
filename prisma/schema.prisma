@@ -751,6 +751,8 @@ model Job {
   quotation   Quotation?     @relation(fields: [quotationId], references: [id])
 
   // parties (snapshot text + optional refs)
+  /// Pihak yang ditagih: SHIPPER atau CONSIGNEE. customerId = perusahaan pihak tersebut.
+  billTo           String?
   shipperName      String?
   shipperAddress   String?
   consigneeName    String?
@@ -922,6 +924,10 @@ model CostingLine {
   amountForeign     Decimal    @default(0) @db.Decimal(18, 2)
   estimatedIdr      Decimal    @default(0) @db.Decimal(18, 2)
   actualIdr         Decimal    @default(0) @db.Decimal(18, 2)
+  /// PPN masukan baris buying: tarif (persen, boleh berbeda per tagihan vendor) dan nilainya dalam IDR.
+  /// Terisi otomatis sebagai PPN Masukan (1400) saat baris ini masuk voucher atau vendor bill.
+  ppnRate           Decimal?   @db.Decimal(6, 3)
+  ppnIdr            Decimal    @default(0) @db.Decimal(18, 2)
   taxable           Boolean    @default(true)
   asReceipt         Boolean    @default(false)
   /// Satuan untuk cetakan, misalnya 40HC, B/L, km.
