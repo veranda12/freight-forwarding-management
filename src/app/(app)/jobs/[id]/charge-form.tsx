@@ -77,7 +77,9 @@ export function ChargeForm({ jobId, side, options, initial }: { jobId: string; s
         <DialogHeader>
           <DialogTitle>{initial ? `Ubah charge ${label}` : `Tambah charge ${label}`}</DialogTitle>
           <DialogDescription>
-            {side === "SELLING" ? "Baris selling ditagih ke customer lewat menu Invoice." : "Baris buying dibayar lewat Voucher atau Vendor Bill, atau dicatat sebagai beban armada sendiri."}
+            {side === "SELLING"
+              ? "Baris selling ditagih ke customer lewat menu Invoice."
+              : "Baris buying dibayar lewat Voucher atau Vendor Bill. Otomatis muncul di Selling: reimburse dengan nominal sama, biaya lain dengan tarif rate card."}
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-3 sm:grid-cols-2">

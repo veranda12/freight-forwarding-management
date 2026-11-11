@@ -24,7 +24,7 @@ async function main() {
   await seedClearance(db, { demo: true }); // idempoten
   ok((await db.job.count({ where: { mblNo: "MEDUY1234567" } })) === 1, "seed clearance idempoten (1 job demo)");
   // 18 tarif awal + OVWT (overweight 20GP, 9 Nov).
-  ok((await db.rateCardItem.count()) === 19, `rate card berisi 19 tarif (${await db.rateCardItem.count()})`);
+  ok((await db.rateCardItem.count()) === 20, `rate card berisi 20 tarif (${await db.rateCardItem.count()})`);
 
   const job = await db.job.findFirstOrThrow({ where: { mblNo: "MEDUY1234567" }, include: { invoices: { include: { lines: { include: { chargeCode: true } } } } } });
   const inv = job.invoices[0];
@@ -60,8 +60,9 @@ async function main() {
   let rl = await db.costingLine.findMany({ where: { jobId: red.id }, include: { chargeCode: true } });
   const get = (code: string, unit: string) => rl.find((l) => l.chargeCode.code === code && l.unitLabel === unit);
   ok(n(get("CC", "20GP")?.unitPrice) === 1_800_000 && n(get("CC", "20GP")?.qty) === 2, "20GP: clearance 2 x 1.800.000");
-  ok(n(get("GREEN", "20GP")?.unitPrice) === 1_500_000 && n(get("TRUCK", "20GP")?.unitPrice) === 2_900_000, "20GP: green light 1.500.000, trucking 2.900.000");
-  ok(n(get("REDLINE", "40HC")?.actualIdr) === 3_000_000 && n(get("BEHANDLE", "20GP")?.actualIdr) === 5_400_000, "jalur merah: red line dan behandle ikut dihitung");
+  ok(!rl.some((l) => l.chargeCode.code === "GREEN") && n(get("TRUCK", "20GP")?.unitPrice) === 2_900_000, "jalur merah: tanpa green light, trucking 20GP 2.900.000");
+  ok(n(get("REDLINE", "40HC")?.actualIdr) === 4_500_000 && n(get("REDLINE", "20GP")?.actualIdr) === 8_600_000 && n(get("BEHANDLE", "20GP")?.actualIdr) === 5_400_000,
+    "jalur merah: red line 40HC 4.500.000, 20GP 2 x 4.300.000, behandle ikut dihitung");
   ok(!rl.some((l) => l.chargeCode.code === "XDIST"), "jarak 25 km tidak kena surcharge");
   ok(created === rl.length, `${created} baris dibuat`);
 

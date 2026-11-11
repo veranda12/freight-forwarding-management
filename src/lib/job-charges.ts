@@ -1,6 +1,7 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { latestRate } from "./fx";
 import { rebuildInvoice } from "./receivables";
+import { removeSellingOfBuying, syncSellingFromBuying } from "./selling-sync";
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -117,6 +118,7 @@ export async function addJobCharge(db: PrismaClient, jobId: string, input: JobCh
     if (job.status === "CLOSED") throw new Error("Job sudah Closed. Admin perlu membuka job dulu untuk menambah biaya.");
     const last = await tx.costingLine.aggregate({ where: { jobId }, _max: { sortOrder: true } });
     const line = await tx.costingLine.create({ data: { jobId, ...(await lineData(tx, v)), sortOrder: (last._max.sortOrder ?? -1) + 1 } });
+    if (v.side === "BUYING") await syncSellingFromBuying(tx, line.id);
     await recalcJobTotals(tx, jobId);
     return line.id;
   });
@@ -133,6 +135,7 @@ export async function updateJobCharge(db: PrismaClient, lineId: string, input: J
     if (line.side !== v.side) throw new Error("Sisi selling atau buying tidak bisa diubah. Hapus lalu tambah baris baru.");
     // Baris yang diubah manual tidak lagi ditimpa saat rate card dihitung ulang.
     await tx.costingLine.update({ where: { id: lineId }, data: { ...(await lineData(tx, v)), fromRateCard: false } });
+    if (line.side === "BUYING") await syncSellingFromBuying(tx, lineId);
     await recalcJobTotals(tx, line.jobId);
     // Invoice yang belum dibayar ikut diperbarui, nomornya tetap.
     if (line.invoiceId) await rebuildInvoice(tx, line.invoiceId);
@@ -150,9 +153,11 @@ export async function deleteJobCharge(db: PrismaClient, lineId: string) {
     if (line.invoiceId && (await tx.costingLine.count({ where: { invoiceId: line.invoiceId } })) <= 1) {
       throw new Error("Ini baris terakhir di invoice. Batalkan invoicenya kalau tidak jadi ditagih.");
     }
+    const sellingInvoice = line.side === "BUYING" ? await removeSellingOfBuying(tx, lineId) : null;
     await tx.costingLine.delete({ where: { id: lineId } });
     await recalcJobTotals(tx, line.jobId);
     if (line.invoiceId) await rebuildInvoice(tx, line.invoiceId);
+    if (sellingInvoice) await rebuildInvoice(tx, sellingInvoice);
     return line.jobId;
   });
 }

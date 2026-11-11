@@ -944,6 +944,8 @@ model CostingLine {
   /// Vendor bill yang menagih baris buying ini. Edit/batal bill hanya membuka kembali baris miliknya.
   billId            String?
   bill              VendorBill? @relation("BillCostings", fields: [billId], references: [id], onDelete: SetNull)
+  /// Selling: baris buying reimburse asalnya (dibuat otomatis, nominal sama). Lihat src/lib/selling-sync.ts.
+  buyingLineId      String?    @unique
   /// Voucher pengeluaran yang memuat baris buying ini. Baris terkunci sejak voucher dibuat.
   voucherId         String?
   voucher           Voucher?   @relation(fields: [voucherId], references: [id], onDelete: SetNull)
