@@ -15,16 +15,14 @@ let seq = 0;
 export const newTaxRow = (kind = "PPH23", amount = "", description = ""): TaxRowDraft => ({ key: ++seq, kind, amount, description });
 
 /**
- * Baris PPN Masukan dari PPN yang diisi di baris buying, dikelompokkan per tarif.
+ * Baris PPN Masukan dari PPN yang diketik di baris buying (sesuai invoice vendor), satu baris pajak per biaya.
  * Baris pajak yang diketik Finance (PPh, atau PPN tambahan) tetap dipertahankan.
  */
-export function syncLinePpnRows(rows: TaxRowDraft[], lines: { ppnRate: number | null; ppnIdr: number; reimburse: boolean }[]): TaxRowDraft[] {
+export function syncLinePpnRows(rows: TaxRowDraft[], lines: { label: string; ppnIdr: number; reimburse: boolean }[]): TaxRowDraft[] {
   const manual = rows.filter((r) => !r.auto);
-  const byRate = new Map<number, number>();
-  for (const l of lines) if (!l.reimburse && l.ppnIdr > 0 && l.ppnRate) byRate.set(l.ppnRate, (byRate.get(l.ppnRate) ?? 0) + l.ppnIdr);
-  const auto = [...byRate.entries()].map(([rate, amt]) => ({
-    ...newTaxRow("PPN_IN", String(Math.round(amt)), `PPN Masukan ${String(rate).replace(".", ",")}%`), auto: true,
-  }));
+  const auto = lines
+    .filter((l) => !l.reimburse && l.ppnIdr > 0)
+    .map((l) => ({ ...newTaxRow("PPN_IN", String(l.ppnIdr), `PPN Masukan ${l.label}`.slice(0, 200)), auto: true }));
   return [...auto, ...manual];
 }
 

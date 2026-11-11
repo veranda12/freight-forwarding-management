@@ -14,7 +14,7 @@ export type CostingRow = {
   revenue: number; cost: number; profit: number; margin: number;
 };
 
-export function CostingTable({ data }: { data: CostingRow[] }) {
+export function CostingTable({ data, emptyTitle }: { data: CostingRow[]; emptyTitle?: string }) {
   const router = useRouter();
   const columns: ColumnDef<CostingRow>[] = [
     { accessorKey: "number", header: "No. Job", cell: ({ row }) => <span className="font-medium">{row.original.number}</span> },
@@ -29,5 +29,5 @@ export function CostingTable({ data }: { data: CostingRow[] }) {
       cell: ({ row }) => <span className={cn("tabular-nums font-medium", row.original.margin < 10 ? "text-destructive" : row.original.margin < 15 ? "text-warning" : "text-success")}>{formatPercent(row.original.margin)}</span>,
     },
   ];
-  return <DataTable columns={columns} data={data} searchPlaceholder="Cari no. job, no. B/L, atau customer…" searchKeys={["number", "bl", "customer"]} onRowClick={(r) => router.push(`/costing/${r.id}`)} emptyTitle="Belum ada data costing" />;
+  return <DataTable columns={columns} data={data} searchPlaceholder="Cari no. job, no. B/L, atau customer…" searchKeys={["number", "bl", "customer"]} onRowClick={(r) => router.push(`/costing/${r.id}`)} emptyTitle={emptyTitle ?? "Belum ada data costing"} hideSearch />;
 }

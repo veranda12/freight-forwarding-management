@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Briefcase, Receipt } from "lucide-react";
+import { Briefcase, FileInput, Receipt } from "lucide-react";
 import { requireCan } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
 import { can } from "@/lib/rbac";
@@ -44,6 +44,8 @@ export default async function JobCostingPage({ params }: { params: Promise<{ id:
   const canBill = can(user.role, "bills", "write");
   // Jalan pintas ke Buat Invoice dengan job ini terpilih, selama masih ada selling yang belum ditagih.
   const canInvoice = can(user.role, "invoices", "write") && job.status !== "CANCELLED" && selling.some((c) => !c.invoiced);
+  // Jalan pintas ke Buat Bill dengan job ini: ada biaya vendor yang belum di-bill, belum di voucher, belum dicatat.
+  const billable = canBill && job.status !== "CANCELLED" && buying.some((c) => c.vendorId && !c.billed && !c.voucherId && !c.recordedAt);
   const canCosting = can(user.role, "costing", "write") && job.status !== "CANCELLED" && job.status !== "CLOSED";
   let chargeOptions: ChargeFormOptions | null = null;
   if (canCosting) {
@@ -79,6 +81,7 @@ export default async function JobCostingPage({ params }: { params: Promise<{ id:
         <PageHeader title={job.number} description={`${job.customer.name}${bl ? ` · B/L ${bl}` : ""}`}>
           <JobStatusBadge status={job.status} />
           <Button asChild variant="outline"><Link href={`/jobs/${job.id}`}><Briefcase /> Buka Job</Link></Button>
+          {billable && <Button asChild variant="outline"><Link href={`/bills/new?job=${encodeURIComponent(job.number)}`}><FileInput /> Buat Bill</Link></Button>}
           {canInvoice && <Button asChild><Link href={`/invoices/new?job=${job.id}`}><Receipt /> Buat Invoice</Link></Button>}
         </PageHeader>
       </div>
@@ -123,7 +126,7 @@ function CostTable({
   rows: {
     id: string; side: string; chargeCodeId: string; chargeCode: { code: string; name: string }; description: string | null;
     vendorId: string | null; vehicleId: string | null; vendor: { name: string } | null; vehicle: { plate: string } | null;
-    currency: string; exchangeRate: any; qty: any; unitPrice: any; amountForeign: any; actualIdr: any; ppnRate: any; ppnIdr: any; taxable: boolean;
+    currency: string; exchangeRate: any; qty: any; unitPrice: any; amountForeign: any; actualIdr: any; ppnIdr: any; taxable: boolean;
     asReceipt: boolean; unitLabel: string | null; invoiced: boolean; billed: boolean; recordedAt: Date | null;
     voucherId: string | null; voucher: { number: string } | null; invoice: { number: string; status: string } | null;
   }[];
@@ -167,7 +170,7 @@ function CostTable({
                   <TableCell>{formatMoney(Number(r.amountForeign), r.currency, r.currency === "IDR" ? 0 : 2)}</TableCell>
                   <TableCell className="text-right tabular-nums">
                     {formatIDR(Number(r.actualIdr))}
-                    {Number(r.ppnIdr) > 0 && <p className="text-xs text-muted-foreground">+ PPN {String(Number(r.ppnRate)).replace(".", ",")}% {formatIDR(Number(r.ppnIdr))}</p>}
+                    {Number(r.ppnIdr) > 0 && <p className="text-xs text-muted-foreground">+ PPN {formatIDR(Number(r.ppnIdr))}</p>}
                   </TableCell>
                   <TableCell><span className={cn("text-xs", locked ? "text-muted-foreground" : "text-warning")}>{status}</span></TableCell>
                   {recordable && (
@@ -184,7 +187,7 @@ function CostTable({
                           <ChargeForm jobId={jobId} side={side} options={chargeOptions} initial={{
                             id: r.id, chargeCodeId: r.chargeCodeId, description: r.description, qty: Number(r.qty), unitPrice: Number(r.unitPrice),
                             currency: r.currency, rate: Number(r.exchangeRate), asReceipt: r.asReceipt, vendorId: r.vendorId, vehicleId: r.vehicleId,
-                            ppnRate: r.ppnRate == null ? null : Number(r.ppnRate),
+                            ppnIdr: Number(r.ppnIdr),
                           }} />
                           <DeleteChargeButton lineId={r.id} label={r.chargeCode.code} />
                         </span>

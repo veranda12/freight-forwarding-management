@@ -1,6 +1,8 @@
 /**
- * Uji PPN masukan per baris buying: tarif berbeda tersimpan, voucher membawa PPN ke akun PPN Masukan (1400),
- * reimburse ditolak kena PPN, dan baris tanpa PPN tidak berubah.
+ * Uji PPN masukan per baris buying dengan contoh invoice vendor dari client (total Rp 5.467.100):
+ * Handling 750.000 + PPN 82.500, Trucking 2.200.000 + PPN 24.200 (1,1% sudah termasuk di invoice),
+ * LOLO 640.000 + PPN 70.400 (11% sudah termasuk), Kuli 50.000 dan Pemeriksa 1.650.000 reimburse tanpa PPN.
+ * PPN diketik nominal sesuai invoice, masuk PPN Masukan (1400); reimburse ke akun reimburse (1350).
  * Hanya untuk database UJI: menolak "ffms" dan "ffms_pgcheck". Data uji tidak dihapus.
  * Jalankan: DATABASE_URL=.../ffms_test npx tsx tests/integration/verify-buying-ppn.ts
  */
@@ -27,44 +29,51 @@ async function main() {
   const vendor = await db.vendor.findFirstOrThrow({ orderBy: { code: "asc" } });
   const cc = await db.chargeCode.findFirstOrThrow({ where: { isActive: true, asReceipt: false } });
   const kas = await db.bankAccount.findFirstOrThrow({ where: { kind: "CASH", isActive: true, currency: "IDR" } });
-  const job = await db.job.create({ data: { number: `JOB/UJI-PPN/${Date.now()}`, mode: "SEA_FCL", direction: "IMPORT", status: "ARRIVED", customerId: customer.id } });
+  const job = await db.job.create({ data: { number: `JOB/UJI-PPN/${Date.now()}`, mode: "SEA_FCL", direction: "EXPORT", status: "DEPARTED", customerId: customer.id } });
   const base = { side: "BUYING" as const, chargeCodeId: cc.id, qty: 1, taxable: true, vendorId: vendor.id, asReceipt: false };
+  const add = (desc: string, price: number, ppn: number | null, reimburse = false) =>
+    addJobCharge(db, job.id, { ...base, description: desc, unitPrice: price, asReceipt: reimburse, ...(ppn != null ? { ppnIdr: ppn } : {}) });
 
-  const a = await addJobCharge(db, job.id, { ...base, unitPrice: 1_000_000, ppnRate: "11" });
-  const b = await addJobCharge(db, job.id, { ...base, unitPrice: 500_000, ppnRate: "1.1" });
-  const c = await addJobCharge(db, job.id, { ...base, unitPrice: 200_000 });
-  const la = await db.costingLine.findUniqueOrThrow({ where: { id: a } });
-  const lb = await db.costingLine.findUniqueOrThrow({ where: { id: b } });
-  const lc = await db.costingLine.findUniqueOrThrow({ where: { id: c } });
-  ok(Number(la.ppnRate) === 11 && Number(la.ppnIdr) === 110_000, `PPN 11% dari 1.000.000 = ${Number(la.ppnIdr)}`);
-  ok(Number(lb.ppnRate) === 1.1 && Number(lb.ppnIdr) === 5_500, `PPN 1,1% dari 500.000 = ${Number(lb.ppnIdr)}`);
-  ok(lc.ppnRate === null && Number(lc.ppnIdr) === 0, "baris tanpa PPN tetap 0");
+  const handling = await add("Handling fee (red line)", 750_000, 82_500);
+  const trucking = await add("Trucking Driyorejo", 2_200_000, 24_200);
+  const kuli = await add("Kuli pabrik", 50_000, null, true);
+  const periksa = await add("Pemeriksa/bongkar muat red line", 1_650_000, null, true);
+  const lolo = await add("LOLO GTM", 640_000, 70_400);
+  const all = [handling, trucking, kuli, periksa, lolo];
+
+  const lines = await db.costingLine.findMany({ where: { id: { in: all } } });
+  const byId = new Map(lines.map((l) => [l.id, l]));
+  ok(Number(byId.get(trucking)!.ppnIdr) === 24_200, "PPN trucking disimpan sesuai invoice (24.200)");
+  ok(Number(byId.get(kuli)!.ppnIdr) === 0 && byId.get(kuli)!.asReceipt, "reimburse tanpa PPN");
   const jobAfter = await db.job.findUniqueOrThrow({ where: { id: job.id } });
-  ok(Number(jobAfter.costIdr) === 1_700_000, `biaya job tidak termasuk PPN (${Number(jobAfter.costIdr)})`);
+  ok(Number(jobAfter.costIdr) === 3_590_000, `biaya job = non-reimburse tanpa PPN (${Number(jobAfter.costIdr)})`);
 
-  await throws(() => addJobCharge(db, job.id, { ...base, unitPrice: 100_000, asReceipt: true, ppnRate: 11 }), /reimburse/, "reimburse dengan PPN ditolak");
+  await throws(() => add("Behandle", 4_070_925, 403_425, true), /reimburse/i, "reimburse dengan PPN ditolak");
+  await throws(() => add("Salah ketik", 10_000, 50_000), /lebih besar/, "PPN lebih besar dari biaya ditolak");
 
-  // Ubah harga: PPN ikut dihitung ulang. Kosongkan: PPN hilang.
-  await updateJobCharge(db, a, { ...base, unitPrice: 2_000_000, ppnRate: "11" });
-  ok(Number((await db.costingLine.findUniqueOrThrow({ where: { id: a } })).ppnIdr) === 220_000, "ubah harga: PPN dihitung ulang (220.000)");
-  await updateJobCharge(db, c, { ...base, unitPrice: 200_000, ppnRate: "" });
-  ok(Number((await db.costingLine.findUniqueOrThrow({ where: { id: c } })).ppnIdr) === 0, "PPN dikosongkan tetap 0");
+  // Ubah nominal PPN, lalu kosongkan dan isi lagi: nilai mengikuti ketikan, tidak dihitung ulang.
+  await updateJobCharge(db, lolo, { ...base, description: "LOLO GTM", unitPrice: 640_000, ppnIdr: "" });
+  ok(Number((await db.costingLine.findUniqueOrThrow({ where: { id: lolo } })).ppnIdr) === 0, "PPN dikosongkan menjadi 0");
+  await updateJobCharge(db, lolo, { ...base, description: "LOLO GTM", unitPrice: 640_000, ppnIdr: 70_400 });
+  ok(Number((await db.costingLine.findUniqueOrThrow({ where: { id: lolo } })).ppnIdr) === 70_400, "PPN diisi lagi 70.400");
 
-  // Voucher: baris pajak dari PPN baris buying (sama seperti layar Buat Voucher).
-  const lines = await db.costingLine.findMany({ where: { id: { in: [a, b, c] } } });
-  const taxRows = syncLinePpnRows([], lines.map((l) => ({ ppnRate: l.ppnRate == null ? null : Number(l.ppnRate), ppnIdr: Number(l.ppnIdr), reimburse: l.asReceipt })))
+  // Voucher seperti layar Buat Voucher: baris PPN Masukan per biaya ber-PPN.
+  const fresh = await db.costingLine.findMany({ where: { id: { in: all } }, include: { chargeCode: true }, orderBy: { sortOrder: "asc" } });
+  const taxRows = syncLinePpnRows([], fresh.map((l) => ({ label: l.description ?? l.chargeCode.code, ppnIdr: Number(l.ppnIdr), reimburse: l.asReceipt })))
     .map((r) => ({ kind: r.kind, amount: r.amount, description: r.description }));
-  ok(taxRows.length === 2, `2 baris PPN Masukan per tarif: ${taxRows.map((r) => `${r.description}=${r.amount}`).join(", ")}`);
-  const voucherId = await createVoucher(db, { jobId: job.id, lineIds: [a, b, c], dateKey: today, payee: vendor.name, vendorId: vendor.id, taxRows });
+  ok(taxRows.length === 3, `3 baris PPN Masukan: ${taxRows.map((r) => r.amount).join(" + ")}`);
+  const voucherId = await createVoucher(db, { jobId: job.id, lineIds: all, dateKey: today, payee: vendor.name, vendorId: vendor.id, taxRows });
   const v = await db.voucher.findUniqueOrThrow({ where: { id: voucherId } });
-  ok(Number(v.total) === 2_700_000 + 225_500, `total voucher = biaya + PPN (${Number(v.total)})`);
-  const paid = await payVoucher(db, voucherId, { bankAccountId: kas.id, dateKey: today });
-  const je = await db.voucher.findUniqueOrThrow({ where: { id: voucherId }, select: { journalEntryId: true } });
-  const jl = await db.journalLine.findMany({ where: { entryId: je.journalEntryId! }, include: { account: { select: { code: true } } } });
-  const ppnIn = jl.filter((l) => l.account.code === ACC.PPN_IN).reduce((s, l) => s + Number(l.debit), 0);
+  ok(Number(v.total) === 5_467_100, `total voucher sama dengan invoice vendor (${Number(v.total)})`);
+
+  await payVoucher(db, voucherId, { bankAccountId: kas.id, dateKey: today });
+  const paid = await db.voucher.findUniqueOrThrow({ where: { id: voucherId }, select: { journalEntryId: true, proofNumber: true } });
+  const jl = await db.journalLine.findMany({ where: { entryId: paid.journalEntryId! }, include: { account: { select: { code: true } } } });
+  const sumDebit = (code: string) => jl.filter((l) => l.account.code === code).reduce((s, l) => s + Number(l.debit), 0);
+  ok(sumDebit(ACC.PPN_IN) === 177_100, `jurnal ${paid.proofNumber}: Debet PPN Masukan 1400 = ${sumDebit(ACC.PPN_IN)}`);
+  ok(sumDebit(ACC.REIMBURSE) === 1_700_000, `Debet reimburse ${ACC.REIMBURSE} = ${sumDebit(ACC.REIMBURSE)}`);
   const d = jl.reduce((s, l) => s + Number(l.debit), 0), k = jl.reduce((s, l) => s + Number(l.credit), 0);
-  ok(ppnIn === 225_500, `jurnal ${paid.number}: Debet PPN Masukan 1400 = ${ppnIn}`);
-  ok(Math.abs(d - k) < 0.01, "jurnal seimbang");
+  ok(Math.abs(d - k) < 0.01 && k === 5_467_100, `jurnal seimbang, kas keluar ${k}`);
 
   console.log(failures ? `\n${failures} GAGAL` : "\nSEMUA LULUS");
   process.exitCode = failures ? 1 : 0;

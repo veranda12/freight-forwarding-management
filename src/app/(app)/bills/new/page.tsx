@@ -6,7 +6,8 @@ import { BillBuilder, type BillLineOpt } from "./bill-builder";
 
 export const dynamic = "force-dynamic";
 
-export default async function NewBillPage() {
+/** ?job=<No. Job>: jalan pintas dari Costing, vendor dan biaya job itu langsung disiapkan. */
+export default async function NewBillPage({ searchParams }: { searchParams: Promise<{ job?: string }> }) {
   await requireCan("bills", "write", { redirectTo: "/bills" });
   const today = new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10);
   const [lines, currencies] = await Promise.all([
@@ -21,6 +22,8 @@ export default async function NewBillPage() {
     }),
     prisma.currency.findMany({ where: { isBase: false }, select: { code: true, name: true }, orderBy: { code: "asc" } }),
   ]);
+  const asked = ((await searchParams).job ?? "").trim().slice(0, 60);
+  const focusJob = asked && lines.some((l) => l.job.number === asked) ? asked : undefined;
   const rows: BillLineOpt[] = lines.map((l) => ({
     id: l.id, vendorId: l.vendor!.id, vendor: l.vendor!.name, isForeign: !!l.vendor!.isForeign,
     job: l.job.number, bl: [l.job.hblNo, l.job.mblNo, l.job.hawbNo, l.job.mawbNo].filter(Boolean).join(" / "),
@@ -33,7 +36,7 @@ export default async function NewBillPage() {
         <Breadcrumbs items={[{ label: "Vendor Bill (AP)", href: "/bills" }, { label: "Buat Bill" }]} />
         <PageHeader title="Buat Vendor Bill" description="Pilih vendor, lalu centang biayanya. Satu bill bisa berisi biaya beberapa job dari vendor yang sama" />
       </div>
-      <BillBuilder lines={rows} currencies={currencies} today={today} />
+      <BillBuilder lines={rows} currencies={currencies} today={today} focusJob={focusJob} />
     </div>
   );
 }

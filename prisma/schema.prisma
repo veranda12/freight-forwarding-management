@@ -924,9 +924,9 @@ model CostingLine {
   amountForeign     Decimal    @default(0) @db.Decimal(18, 2)
   estimatedIdr      Decimal    @default(0) @db.Decimal(18, 2)
   actualIdr         Decimal    @default(0) @db.Decimal(18, 2)
-  /// PPN masukan baris buying: tarif (persen, boleh berbeda per tagihan vendor) dan nilainya dalam IDR.
-  /// Terisi otomatis sebagai PPN Masukan (1400) saat baris ini masuk voucher atau vendor bill.
-  ppnRate           Decimal?   @db.Decimal(6, 3)
+  /// PPN masukan baris buying (IDR), diketik sesuai faktur/invoice vendor yang ditujukan ke perusahaan.
+  /// Tidak dihitung dari tarif. Terisi sebagai PPN Masukan (1400) saat baris ini masuk voucher atau vendor bill.
+  /// Baris reimburse tidak punya PPN: nilainya diisi termasuk PPN dan ditagihkan ke customer.
   ppnIdr            Decimal    @default(0) @db.Decimal(18, 2)
   taxable           Boolean    @default(true)
   asReceipt         Boolean    @default(false)

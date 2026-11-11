@@ -17,7 +17,7 @@ import { TaxRowsEditor, syncLinePpnRows, taxSummary, type TaxRowDraft } from "@/
 
 export type VoucherJob = {
   id: string; number: string; bl: string; customer: string;
-  lines: { id: string; label: string; note: string | null; vendorId: string | null; vendor: string | null; amount: number; reimburse: boolean; ppnRate: number | null; ppnIdr: number }[];
+  lines: { id: string; label: string; note: string | null; vendorId: string | null; vendor: string | null; amount: number; reimburse: boolean; ppnIdr: number }[];
 };
 
 export function VoucherBuilder({ jobs, today, closedMonths }: { jobs: VoucherJob[]; today: string; closedMonths: string[] }) {

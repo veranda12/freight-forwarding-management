@@ -27,6 +27,17 @@ const one = (sp: Params, k: string) => {
   return (Array.isArray(v) ? v[0] : v ?? "").trim().slice(0, 60);
 };
 
+const FILTER_KEYS = ["job", "bl", "billNo", "from", "to", "vendorId", "customerId", "currency", "status", "due"] as const;
+
+/**
+ * Halaman Vendor Bill hanya menampilkan data yang diminta: tanpa filter apa pun, yang tampil bill bertanggal
+ * hari ini (semua status). Mengembalikan query yang dipakai halaman dan export.
+ */
+export function billQueryOrToday(sp: Params, today: string): { query: Params; requested: boolean } {
+  const requested = FILTER_KEYS.some((k) => one(sp, k) !== "");
+  return requested ? { query: sp, requested } : { query: { ...sp, from: today, to: today, status: "all" }, requested };
+}
+
 /** Filter dari query string. Bawaan: hanya bill yang belum lunas (yang masih harus dibayar). */
 export function parseBillFilter(sp: Params): BillFilter {
   const status = one(sp, "status") as BillStatusFilter;

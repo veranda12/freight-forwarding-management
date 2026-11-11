@@ -4,7 +4,7 @@ import { getCurrentUser } from "@/lib/auth-helpers";
 import { can } from "@/lib/rbac";
 import { logger } from "@/lib/logger";
 import { jktKey } from "@/lib/accounting-core";
-import { parseBillFilter } from "@/lib/bill-groups";
+import { billQueryOrToday, parseBillFilter } from "@/lib/bill-groups";
 import { buildBillWorkbook, ExportTooLargeError, loadBillExport, XLSX_TYPE } from "@/lib/doc-export";
 
 export const runtime = "nodejs";
@@ -19,7 +19,7 @@ export async function GET(req: NextRequest) {
   if (!can(user.role, "bills", "read")) return NextResponse.json({ error: "Tidak punya izin melihat vendor bill." }, { status: 403 });
 
   const today = jktKey(new Date());
-  const f = parseBillFilter(Object.fromEntries(req.nextUrl.searchParams));
+  const f = parseBillFilter(billQueryOrToday(Object.fromEntries(req.nextUrl.searchParams), today).query);
   try {
     const docs = await loadBillExport(prisma, f, today);
     const buffer = await buildBillWorkbook(docs).xlsx.writeBuffer();

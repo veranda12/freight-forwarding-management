@@ -34,7 +34,7 @@ export function BillGroupsTable({
   const allOpen = groups.length > 0 && groups.every((g) => open.has(g.key));
 
   if (groups.length === 0) {
-    return <EmptyState title="Tidak ada bill" description="Tidak ada tagihan vendor yang cocok dengan filter. Bawaan halaman ini hanya bill yang belum lunas." />;
+    return <EmptyState title="Tidak ada bill" description="Tidak ada tagihan vendor yang cocok dengan filter. Tanpa filter, halaman ini hanya menampilkan bill bertanggal hari ini." />;
   }
 
   return (

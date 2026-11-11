@@ -4,13 +4,13 @@ import { requireCan } from "@/lib/auth-helpers";
 import { Button } from "@/components/ui/button";
 import { prisma } from "@/lib/prisma";
 import { can } from "@/lib/rbac";
-import { formatIDR } from "@/lib/format";
+import { formatDate, formatIDR } from "@/lib/format";
 import { latestRate } from "@/lib/fx";
 import { jktKey } from "@/lib/accounting-core";
 import { cashAccountOptions } from "@/lib/cash-accounts";
 import { BILL_STATUS_LABELS } from "@/lib/enums";
 import {
-  GROUPS_PER_PAGE, MAX_BILLS, hasJobFilter, loadBillGroups, parseBillFilter, type BillFilter,
+  GROUPS_PER_PAGE, MAX_BILLS, billQueryOrToday, hasJobFilter, loadBillGroups, parseBillFilter, type BillFilter,
 } from "@/lib/bill-groups";
 import { PageHeader } from "@/components/page-header";
 import { StatStrip } from "@/components/stat-strip";
@@ -34,8 +34,9 @@ function filterQuery(f: BillFilter, page: number): string {
 
 export default async function BillsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const user = await requireCan("bills", "read");
-  const f = parseBillFilter(await searchParams);
   const today = jktKey(new Date());
+  const { query, requested } = billQueryOrToday(await searchParams, today);
+  const f = parseBillFilter(query);
   const [data, cash, vendors, customers, currencies] = await Promise.all([
     loadBillGroups(prisma, f, today),
     cashAccountOptions(prisma, "payment"),
@@ -55,7 +56,7 @@ export default async function BillsPage({ searchParams }: { searchParams: Promis
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Vendor Bill (AP)" description="Tagihan vendor per job: yang perlu dibayar perusahaan">
+      <PageHeader title="Vendor Bill (AP)" description={requested ? "Tagihan vendor per job sesuai filter" : `Bill bertanggal hari ini, ${formatDate(new Date())}. Gunakan filter untuk data lain.`}>
         <Button asChild variant="outline">
           <a href={`/api/bills/export${filterQuery(f, 1)}`} download title="Sesuai filter yang aktif, semua halaman. Bill lintas job diekspor utuh.">
             <FileSpreadsheet /> Export Excel

@@ -29,12 +29,19 @@ export type BillEditInit = {
 };
 
 /** Satu bill untuk satu vendor. Biayanya boleh dari beberapa job, dipilih dengan ceklis. Dipakai juga untuk edit bill. */
-export function BillBuilder({ lines, currencies, today, edit }: { lines: BillLineOpt[]; currencies: { code: string; name: string }[]; today: string; edit?: BillEditInit }) {
+export function BillBuilder({ lines, currencies, today, edit, focusJob }: {
+  lines: BillLineOpt[]; currencies: { code: string; name: string }[]; today: string; edit?: BillEditInit;
+  /** Jalan pintas dari Costing: hanya vendor yang punya biaya di job ini, filter job terpasang, biayanya tercentang. */
+  focusJob?: string;
+}) {
   const router = useRouter();
   const [pending, start] = useTransition();
-  const [vendorId, setVendorId] = useState(edit?.vendorId ?? "");
-  const [jobFilter, setJobFilter] = useState<string[]>([]);
-  const [selected, setSelected] = useState<string[]>(edit?.selected ?? []);
+  const focusVendors = focusJob && !edit ? [...new Set(lines.filter((l) => l.job === focusJob).map((l) => l.vendorId))] : [];
+  const autoVendor = focusVendors.length === 1 ? focusVendors[0] : "";
+  const jobLines = (v: string) => lines.filter((l) => l.vendorId === v && l.job === focusJob).map((l) => l.id);
+  const [vendorId, setVendorId] = useState(edit?.vendorId ?? autoVendor);
+  const [jobFilter, setJobFilter] = useState<string[]>(focusJob && !edit ? [focusJob] : []);
+  const [selected, setSelected] = useState<string[]>(edit?.selected ?? (autoVendor ? jobLines(autoVendor) : []));
   const [vendorRef, setVendorRef] = useState(edit?.vendorRef ?? "");
   const [date, setDate] = useState(edit?.date ?? today);
   const [dueDate, setDueDate] = useState(edit?.dueDate ?? "");
@@ -48,12 +55,13 @@ export function BillBuilder({ lines, currencies, today, edit }: { lines: BillLin
   const vendors = useMemo(() => {
     const m = new Map<string, { id: string; label: string; count: number }>();
     for (const l of lines) {
+      if (focusVendors.length && !focusVendors.includes(l.vendorId)) continue;
       const v = m.get(l.vendorId) ?? { id: l.vendorId, label: l.vendor, count: 0 };
       v.count++;
       m.set(l.vendorId, v);
     }
     return [...m.values()].sort((a, b) => a.label.localeCompare(b.label)).map((v) => ({ id: v.id, label: `${v.label} (${v.count} biaya)` }));
-  }, [lines]);
+  }, [lines, focusVendors.join()]);
   const own = lines.filter((l) => l.vendorId === vendorId);
   // Pilihan filter: job milik vendor ini, bisa dicari dengan nomor job atau nomor B/L.
   const jobOptions = useMemo(() => {
@@ -72,7 +80,11 @@ export function BillBuilder({ lines, currencies, today, edit }: { lines: BillLin
   const jobs = new Set(picked.map((l) => l.job)).size;
   const allShown = shown.length > 0 && shown.every((l) => selected.includes(l.id));
 
-  function pickVendor(v: string) { setVendorId(v); setSelected([]); setJobFilter([]); }
+  function pickVendor(v: string) {
+    setVendorId(v);
+    setSelected(focusJob && !edit ? jobLines(v) : []);
+    setJobFilter(focusJob && !edit ? [focusJob] : []);
+  }
   const toggle = (id: string) => setSelected((x) => (x.includes(id) ? x.filter((v) => v !== id) : [...x, id]));
   function toggleShown() {
     const ids = shown.map((l) => l.id);
@@ -110,6 +122,12 @@ export function BillBuilder({ lines, currencies, today, edit }: { lines: BillLin
               ? <SearchableSelect value="" onChange={(job) => setJobFilter((x) => [...x, job])} options={jobOptions} placeholder="Filter job / B/L…" ariaLabel="Filter job atau B/L" />
               : <Input disabled placeholder="Filter job / B/L…" />}
           </div>
+          {focusVendors.length > 0 && (
+            <p className="text-xs text-muted-foreground">
+              Dari Costing {focusJob}: hanya vendor yang punya biaya belum di-bill di job ini{focusVendors.length > 1 ? ", pilih salah satu" : ""}.
+              {" "}<a href="/bills/new" className="text-primary hover:underline">Tampilkan semua vendor</a>
+            </p>
+          )}
           {jobFilter.length > 0 && (
             <div className="flex flex-wrap items-center gap-2 text-sm">
               <span className="text-muted-foreground">Filter:</span>
