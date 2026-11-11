@@ -11,9 +11,10 @@ const item = (code: string, p: Partial<RateItem>): RateItem => ({
 const RATES: RateItem[] = [
   item("CC", { price: 2_000_000 }),
   item("CC", { containerTypeId: "t20", price: 1_800_000 }),
-  item("GREEN", { price: 1_650_000 }),
-  item("GREEN", { containerTypeId: "t20", price: 1_500_000 }),
-  item("REDLINE", { condition: "RED_LANE", price: 3_000_000 }),
+  item("GREEN", { condition: "NON_RED_LANE", price: 1_650_000 }),
+  item("GREEN", { condition: "NON_RED_LANE", containerTypeId: "t20", price: 1_500_000 }),
+  item("REDLINE", { condition: "RED_LANE", price: 4_500_000 }),
+  item("REDLINE", { condition: "RED_LANE", containerTypeId: "t20", price: 4_300_000 }),
   item("TRUCK", { price: 3_100_000 }),
   item("TRUCK", { containerTypeId: "t20", price: 2_900_000 }),
   item("XDIST", { basis: "PER_KM_OVER", price: 100_000, thresholdKm: 30 }),
@@ -48,10 +49,19 @@ describe("buildRateCardCharges", () => {
     expect(m["CC:40GP"].unitPrice).toBe(2_000_000);
     expect(m["XDIST:40GP"].unitPrice).toBe(800_000);
   });
-  it("jalur merah menambah Red Line, Green Light tetap ditagih", () => {
-    const m = byCode(buildRateCardCharges(RATES, hc3, "RED", 20));
-    expect(m["REDLINE:40HC"]).toMatchObject({ qty: 3, unitPrice: 3_000_000 });
-    expect(m["GREEN:40HC"]).toBeDefined();
+  it("jalur merah: Red Line 40ft 4,5 jt dan 20ft 4,3 jt, tanpa Green Light Fee (permintaan client 11 Nov)", () => {
+    const out = buildRateCardCharges(RATES, [{ containerTypeId: "t20", code: "20GP", count: 1 }, { containerTypeId: "t40", code: "40HC", count: 2 }], "RED", 20);
+    const m = byCode(out);
+    expect(m["REDLINE:40HC"]).toMatchObject({ qty: 2, unitPrice: 4_500_000 });
+    expect(m["REDLINE:20GP"]).toMatchObject({ qty: 1, unitPrice: 4_300_000 });
+    expect(out.some((o) => o.chargeCodeId === "GREEN")).toBe(false);
+  });
+  it("jalur hijau dan kuning tetap kena Green Light Fee, jalur belum diisi juga", () => {
+    for (const lane of ["GREEN", "YELLOW", null]) {
+      const m = byCode(buildRateCardCharges(RATES, hc3, lane, 20));
+      expect(m["GREEN:40HC"]).toMatchObject({ qty: 3, unitPrice: 1_650_000 });
+      expect(m["REDLINE:40HC"]).toBeUndefined();
+    }
   });
   it("jarak sampai batas tidak membuat surcharge, jarak kosong ditolak", () => {
     expect(buildRateCardCharges(RATES, hc3, "GREEN", 30).some((o) => o.chargeCodeId === "XDIST")).toBe(false);

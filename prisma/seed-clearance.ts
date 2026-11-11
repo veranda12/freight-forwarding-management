@@ -36,9 +36,11 @@ const CHARGES: [string, string, string, string, InvoiceSection, boolean][] = [
 const RATES: [string, string | null, TariffBasis, TariffCondition, number, number | null, string | null][] = [
   ["CC", null, "PER_CONTAINER", "ALWAYS", 2_000_000, null, null],
   ["CC", "20GP", "PER_CONTAINER", "ALWAYS", 1_800_000, null, null],
-  ["GREEN", null, "PER_CONTAINER", "ALWAYS", 1_650_000, null, null],
-  ["GREEN", "20GP", "PER_CONTAINER", "ALWAYS", 1_500_000, null, null],
-  ["REDLINE", null, "PER_CONTAINER", "RED_LANE", 3_000_000, null, "Jalur merah"],
+  // Jalur merah: Red Line saja (40ft 4,5 jt, 20ft 4,3 jt), tanpa Green Light Fee (permintaan client 11 Nov).
+  ["GREEN", null, "PER_CONTAINER", "NON_RED_LANE", 1_650_000, null, null],
+  ["GREEN", "20GP", "PER_CONTAINER", "NON_RED_LANE", 1_500_000, null, null],
+  ["REDLINE", null, "PER_CONTAINER", "RED_LANE", 4_500_000, null, "Jalur merah"],
+  ["REDLINE", "20GP", "PER_CONTAINER", "RED_LANE", 4_300_000, null, "Jalur merah"],
   ["BEHANDLE", null, "PER_CONTAINER", "RED_LANE", 2_700_000, null, "Jalur merah, estimasi. Ditagih sesuai kuitansi"],
   ["TRUCK", null, "PER_CONTAINER", "ALWAYS", 3_100_000, null, "Tarif dasar sampai 30 km"],
   ["TRUCK", "20GP", "PER_CONTAINER", "ALWAYS", 2_900_000, null, "Tarif dasar sampai 30 km"],

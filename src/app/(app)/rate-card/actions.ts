@@ -11,7 +11,7 @@ export type RateCardInput = {
   chargeCodeId: string; containerTypeId: string | null;
   /** Kosong = tarif standar semua customer. */
   customerId: string | null; basis: "PER_CONTAINER" | "PER_BL" | "PER_KM_OVER" | "OVERWEIGHT";
-  condition: "ALWAYS" | "RED_LANE" | "OPTIONAL"; price: string; thresholdKm: string;
+  condition: "ALWAYS" | "RED_LANE" | "NON_RED_LANE" | "OPTIONAL"; price: string; thresholdKm: string;
   /** Batas berat dalam ton (diketik user), disimpan dalam kg. */
   thresholdTon: string; taxable: boolean; note: string; sortOrder: string; isActive: boolean;
 };

@@ -235,5 +235,6 @@ export const BASIS_LABELS: Record<TariffBasis, string> = {
 export const CONDITION_LABELS: Record<TariffCondition, string> = {
   ALWAYS: "Selalu",
   RED_LANE: "Hanya jalur merah",
+  NON_RED_LANE: "Selain jalur merah",
   OPTIONAL: "Jika ada (manual)",
 };

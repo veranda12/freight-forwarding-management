@@ -11,7 +11,7 @@ export type RateItem = {
   /** Kosong = tarif standar. Diisi = tarif khusus customer (pemanggil hanya mengirim baris milik customer job). */
   customerId?: string | null;
   basis: "PER_CONTAINER" | "PER_BL" | "PER_KM_OVER" | "OVERWEIGHT";
-  condition: "ALWAYS" | "RED_LANE" | "OPTIONAL";
+  condition: "ALWAYS" | "RED_LANE" | "NON_RED_LANE" | "OPTIONAL";
   price: number;
   thresholdKm: number | null;
   /** OVERWEIGHT: berat maksimal per container (kg) yang sudah termasuk tarif dasar. */
@@ -69,7 +69,8 @@ const ton = (kg: number) => (kg / 1000).toLocaleString("en-US", { maximumFractio
  * Selling charge dari rate card untuk satu job (murni, tanpa DB).
  * Urutan tarif yang dipakai per charge: khusus customer dan tipe container, khusus customer semua tipe,
  * standar tipe container, lalu standar semua tipe. Charge yang hanya punya tarif customer ikut ditagih juga.
- * Baris OPTIONAL tidak dibuat; baris RED_LANE hanya untuk jalur merah.
+ * Baris OPTIONAL tidak dibuat; baris RED_LANE hanya untuk jalur merah; baris NON_RED_LANE untuk selain jalur merah
+ * (jalur belum diisi ikut dibuat, sama seperti sebelum ada kondisi ini).
  *
  * Surcharge dihitung per container: jarak container bila diisi (selain itu jarak job) dan berat kotornya.
  * Kelebihan jarak dan kelebihan berat tidak ditagih dua-duanya: per container diambil yang nominalnya
@@ -77,7 +78,7 @@ const ton = (kg: number) => (kg / 1000).toLocaleString("en-US", { maximumFractio
  */
 export function buildRateCardCharges(items: RateItem[], groups: ContainerGroup[], lane: string | null, distanceKm: number | null): GeneratedCharge[] {
   const active = items
-    .filter((i) => i.condition === "ALWAYS" || (i.condition === "RED_LANE" && lane === "RED"))
+    .filter((i) => i.condition === "ALWAYS" || (i.condition === "RED_LANE" && lane === "RED") || (i.condition === "NON_RED_LANE" && lane !== "RED"))
     .sort((a, b) => a.sortOrder - b.sortOrder);
   const needsContainers = active.some((i) => i.basis !== "PER_BL");
   if (needsContainers && groups.length === 0) throw new Error("Tambahkan container (beserta tipenya) di tab Containers dulu.");

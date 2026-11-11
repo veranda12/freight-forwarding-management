@@ -254,6 +254,8 @@ enum TariffCondition {
   ALWAYS
   /// Dibuat otomatis hanya jika job jalur merah.
   RED_LANE
+  /// Dibuat otomatis kecuali job jalur merah (mis. Green Light Fee: jalur merah sudah termasuk di Red Line).
+  NON_RED_LANE
   /// Tidak dibuat otomatis (jika ada), ditambahkan saat dibutuhkan.
   OPTIONAL
 }
