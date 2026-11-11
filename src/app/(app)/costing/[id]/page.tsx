@@ -95,7 +95,10 @@ export default async function JobCostingPage({ params }: { params: Promise<{ id:
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/30 px-4 py-3 text-sm">
             <p className="text-muted-foreground">
               Selling charge bisa dihitung otomatis dari rate card: {job.containers.length ? summarizeContainers(job.containers) : "belum ada container"}
-              {" · "}{job.customsLane ? LANE_LABELS[job.customsLane] : "jalur belum diisi"}{" · "}{job.distanceKm == null ? "jarak belum diisi" : `${formatNumber(Number(job.distanceKm), 1)} km`}.
+              {" · "}{job.customsLane ? LANE_LABELS[job.customsLane] : "jalur belum diisi"}{" · "}{(() => {
+                const missing = job.containers.filter((c) => c.distanceKm == null && job.distanceKm == null).length;
+                return !job.containers.length ? "jarak belum diisi" : missing ? `${missing} container belum ada jarak` : "jarak container lengkap";
+              })()}.
             </p>
             <ApplyRateCardButton jobId={job.id} hasRateCardLines={selling.some((c) => c.fromRateCard && !c.invoiced)} />
           </div>

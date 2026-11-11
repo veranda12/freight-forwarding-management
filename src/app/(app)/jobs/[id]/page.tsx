@@ -20,7 +20,6 @@ import { Breadcrumbs } from "@/components/breadcrumbs";
 import { cn } from "@/lib/utils";
 import { StatusControl } from "./status-control";
 import { BlForm } from "./bl-form";
-import { MilestoneTimeline, type MilestoneItem } from "./milestone-timeline";
 import { ClearanceForm } from "./clearance-form";
 import { getJobLock } from "@/lib/job-lock";
 import { summarizeContainers } from "@/lib/job-containers";
@@ -93,21 +92,14 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
     ? (await prisma.warehouse.findMany({ where: { customerId: job.customerId, isActive: true }, orderBy: { name: "asc" } }))
         .map((w) => ({ id: w.id, name: w.name, address: w.address, city: w.city, distanceKm: w.distanceKm == null ? null : Number(w.distanceKm) }))
     : [];
-  const jobDest = [job.warehouse?.name ?? job.deliveryAddress, job.distanceKm == null ? null : `${formatNumber(Number(job.distanceKm), 1)} km`].filter(Boolean).join(", ") || "belum diisi";
+  // Data lama: tujuan job dipakai container yang belum punya tujuan sendiri.
+  const jobDest = [job.warehouse?.name ?? job.deliveryAddress, job.distanceKm == null ? null : `${formatNumber(Number(job.distanceKm), 1)} km`].filter(Boolean).join(", ");
   const revenue = Number(job.revenueIdr);
   const cost = Number(job.costIdr);
   const profit = Number(job.profitIdr);
   const margin = Number(job.marginPct);
 
-  const milestoneItems: MilestoneItem[] = job.milestones.map((m) => ({
-    id: m.id, title: m.title, note: m.note,
-    plannedAt: m.plannedAt?.toISOString() ?? null,
-    actualAt: m.actualAt?.toISOString() ?? null,
-    isDone: m.isDone,
-  }));
-
   // Operasional dulu (D-06): milestone berikutnya & hitung mundur ETD
-  const nextMs = job.milestones.find((m) => !m.isDone);
   const nowMs = Date.now();
   const dToEtd = job.etd ? Math.ceil((new Date(job.etd).getTime() - nowMs) / 86400000) : null;
   const etdHint = dToEtd == null ? null : dToEtd > 0 ? `H-${dToEtd}` : dToEtd === 0 ? "hari ini" : `lewat ${-dToEtd}h`;
@@ -131,13 +123,12 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
 
       {/* Status & jadwal — operasional dulu (D-06) */}
       <Card>
-        <CardContent className="grid grid-cols-2 divide-x divide-y p-0 sm:grid-cols-3 lg:grid-cols-6 lg:divide-y-0">
+        <CardContent className="grid grid-cols-2 divide-x divide-y p-0 sm:grid-cols-3 lg:grid-cols-5 lg:divide-y-0">
           <StripCell label="Status"><JobStatusBadge status={job.status} /></StripCell>
           <StripCell label="Rute"><span className="inline-flex items-center gap-1.5"><Icon className="h-3.5 w-3.5 text-muted-foreground" />{originCode} → {destCode}</span></StripCell>
           <StripCell label="ETD">{formatDate(job.etd)}{etdHint && <span className={cn("ml-1.5 text-xs font-medium", etdTone)}>{etdHint}</span>}</StripCell>
           <StripCell label="ETA">{formatDate(job.eta)}</StripCell>
           <StripCell label="ATD / ATA"><span className="text-sm">{formatDate(job.atd)} / {formatDate(job.ata)}</span></StripCell>
-          <StripCell label="Milestone berikutnya"><span className="truncate text-sm">{nextMs?.title ?? "Selesai"}</span></StripCell>
         </CardContent>
       </Card>
 
@@ -158,7 +149,6 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="parties">Parties</TabsTrigger>
           {!isAir && <TabsTrigger value="containers">Containers ({job.containers.length})</TabsTrigger>}
-          <TabsTrigger value="milestones">Milestones</TabsTrigger>
           <TabsTrigger value="documents">Documents</TabsTrigger>
         </TabsList>
 
@@ -219,21 +209,14 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
             </Card>
             <Card className="lg:col-span-2">
               <CardHeader className="flex-row items-center justify-between">
-                <CardTitle className="text-base">Clearance & Delivery</CardTitle>
-                {canWrite && (
-                  <ClearanceForm jobId={job.id} warehouses={warehouses} initial={{
-                    customsLane: job.customsLane, warehouseId: job.warehouseId, deliveryAddress: job.deliveryAddress,
-                    distanceKm: job.distanceKm == null ? null : Number(job.distanceKm),
-                  }} />
-                )}
+                <CardTitle className="text-base">Clearance</CardTitle>
+                {canWrite && <ClearanceForm jobId={job.id} initial={{ customsLane: job.customsLane }} />}
               </CardHeader>
               <CardContent>
-                <dl className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4">
+                <dl className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3">
                   <Field label="Jalur bea cukai">{job.customsLane ? LANE_LABELS[job.customsLane] : "-"}</Field>
-                  <Field label="Gudang utama">{job.warehouse?.name ?? "-"}</Field>
-                  <Field label="Jarak utama">{job.distanceKm == null ? "-" : `${formatNumber(Number(job.distanceKm), 1)} km`}{job.containers.some((c) => c.distanceKm != null) ? <span className="block text-xs text-muted-foreground">Sebagian container punya jarak sendiri</span> : null}</Field>
                   <Field label="Container">{job.containers.length ? summarizeContainers(job.containers) : "-"}</Field>
-                  <div className="col-span-2 sm:col-span-4"><Field label="Alamat kirim">{job.deliveryAddress ?? "-"}</Field></div>
+                  <Field label="Tujuan & jarak">Diisi per container di tab Containers</Field>
                 </dl>
               </CardContent>
             </Card>
@@ -313,16 +296,6 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
             </Card>
           </TabsContent>
         )}
-
-        {/* MILESTONES */}
-        <TabsContent value="milestones">
-          <Card>
-            <CardHeader><CardTitle className="text-base">Timeline Milestone</CardTitle></CardHeader>
-            <CardContent>
-              <MilestoneTimeline jobId={job.id} items={milestoneItems} canWrite={canWrite} />
-            </CardContent>
-          </Card>
-        </TabsContent>
 
         {/* DOCUMENTS */}
         <TabsContent value="documents">

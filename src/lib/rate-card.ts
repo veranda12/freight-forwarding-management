@@ -112,7 +112,7 @@ export function buildRateCardCharges(items: RateItem[], groups: ContainerGroup[]
       if (rows[0].basis === "PER_KM_OVER") {
         if (!item) throw new Error(`Rate card ${rows[0].chargeCode.code} belum punya tarif untuk container ${g.code}.`);
         const km = u.distanceKm ?? distanceKm;
-        if (km == null) throw new Error(u.containerNo ? `Isi jarak container ${u.containerNo} atau jarak tujuan job dulu.` : "Isi jarak gudang (km) di Clearance & Delivery dulu.");
+        if (km == null) throw new Error(u.containerNo ? `Isi jarak container ${u.containerNo} di tab Containers dulu.` : "Isi jarak (km) tiap container di tab Containers dulu.");
         sig.push(`km${km}`);
         const threshold = item.thresholdKm ?? 0;
         const extraKm = r2(Math.max(0, km - threshold));

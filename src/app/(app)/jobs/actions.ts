@@ -56,6 +56,7 @@ export async function createJob(input: JobInput): Promise<{ ok: boolean; error?:
         number, mode: mode as any, direction: direction as any, status: "DRAFT",
         // salesPicId = user yang menginput job (tampil sebagai "Diinput oleh").
         customerId, billTo, salesPicId: user.id,
+        customsLane: ["GREEN", "YELLOW", "RED"].includes(String(input.customsLane)) ? (input.customsLane as "GREEN" | "YELLOW" | "RED") : null,
         incoterm: s(input.incoterm),
         mblNo: !isAir ? s(input.mblNo) : null, hblNo: null,
         mawbNo: isAir ? s(input.mblNo) : null, hawbNo: isAir ? s(input.hblNo) : null,

@@ -11,7 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { MODE_LABELS, DIRECTION_LABELS } from "@/lib/enums";
+import { MODE_LABELS, DIRECTION_LABELS, LANE_LABELS } from "@/lib/enums";
 import { computeChargeable, type WeightRuleInput } from "@/lib/chargeable";
 import { formatNumber } from "@/lib/format";
 import { SearchableSelect } from "@/components/searchable-select";
@@ -29,7 +29,7 @@ export function JobForm({
   const router = useRouter();
   const [pending, start] = useTransition();
   const [f, setF] = useState<Record<string, string>>({
-    mode: "SEA_FCL", direction: "EXPORT", incoterm: "FOB",
+    mode: "SEA_FCL", direction: "EXPORT", incoterm: "FOB", customsLane: "NONE",
     polId: "", podId: "", originAirportId: "", destAirportId: "",
     vesselName: "", voyageNo: "", flightNo: "", etd: "", eta: "", mblNo: "", hblNo: "",
     grossWeightKg: "", volumeCbm: "", chargeableWeight: "", packages: "", packageType: "",
@@ -72,6 +72,8 @@ export function JobForm({
           <Sel label="Mode" value={f.mode} onChange={(v) => set("mode", v)} options={Object.entries(MODE_LABELS).map(([id, label]) => ({ id, label }))} />
           <Sel label="Arah" value={f.direction} onChange={(v) => set("direction", v)} options={Object.entries(DIRECTION_LABELS).map(([id, label]) => ({ id, label }))} />
           <Sel label="Incoterm" value={f.incoterm} onChange={(v) => set("incoterm", v)} options={["FOB", "CIF", "CFR", "EXW", "DAP", "FCA"].map((x) => ({ id: x, label: x }))} />
+          {/* Jalur dipakai rate card: merah = Red Line tanpa Green Light. Bisa diubah nanti di detail job. */}
+          <Sel label="Jalur bea cukai" value={f.customsLane} onChange={(v) => set("customsLane", v)} options={[{ id: "NONE", label: "Belum diketahui" }, ...Object.entries(LANE_LABELS).map(([id, label]) => ({ id, label }))]} />
         </CardContent>
       </Card>
 
