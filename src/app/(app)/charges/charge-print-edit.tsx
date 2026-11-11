@@ -33,10 +33,10 @@ export function ChargePrintEdit({ id, code, name, invoiceSection, asReceipt }: {
 
   return (
     <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (o) { setSection(invoiceSection ?? NONE); setReceipt(asReceipt); } }}>
-      <DialogTrigger asChild><Button size="sm" variant="ghost"><Printer /> Cetak</Button></DialogTrigger>
+      <DialogTrigger asChild><Button size="sm" variant="ghost"><Printer /> Invoice & Reimburse</Button></DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Cetak invoice: {code}</DialogTitle>
+          <DialogTitle>Invoice & reimburse: {code}</DialogTitle>
           <DialogDescription>{name}. Seksi menentukan pengelompokan di invoice ringkas dan detail. Berlaku untuk baris baru.</DialogDescription>
         </DialogHeader>
         <div className="space-y-4 text-sm">
@@ -52,7 +52,7 @@ export function ChargePrintEdit({ id, code, name, invoiceSection, asReceipt }: {
           </div>
           <label className="flex items-center gap-2">
             <input type="checkbox" checked={receipt} onChange={(e) => setReceipt(e.target.checked)} className="h-4 w-4 accent-primary" />
-            Biaya as receipt (ditagih sesuai kuitansi, dicetak berarsir)
+            Reimburse (as receipt): ditagih sesuai kuitansi, tidak masuk pendapatan, dicetak berarsir. Otomatis tercentang Reimburse saat diinput di costing.
           </label>
         </div>
         <DialogFooter>

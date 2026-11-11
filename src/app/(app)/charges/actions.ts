@@ -62,7 +62,7 @@ export async function saveChargeMappingAction(input: { id: string; name: string;
 /** Menambah charge code baru beserta pajak dan pemetaan akunnya. */
 export async function createChargeCodeAction(input: {
   code: string; name: string; revenueAccountId: string; expenseAccountId: string;
-  defaultTaxable: boolean; isPph23: boolean; isPph26: boolean; pph26Rate: number;
+  defaultTaxable: boolean; isPph23: boolean; isPph26: boolean; pph26Rate: number; asReceipt?: boolean;
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   const user = await assertCan("charges", "write");
   try {

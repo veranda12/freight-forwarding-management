@@ -21,16 +21,17 @@ export function ChargeNew({ revenueAccounts, expenseAccounts }: { revenueAccount
   const [name, setName] = useState("");
   const [rev, setRev] = useState("");
   const [exp, setExp] = useState("");
+  const [receipt, setReceipt] = useState(false);
 
   function reset() {
-    setCode(""); setName(""); setRev(""); setExp("");
+    setCode(""); setName(""); setRev(""); setExp(""); setReceipt(false);
   }
 
   function save() {
     start(async () => {
       const res = await createChargeCodeAction({
         code, name, revenueAccountId: rev, expenseAccountId: exp,
-        defaultTaxable: true, isPph23: false, isPph26: false, pph26Rate: 0,
+        defaultTaxable: !receipt, isPph23: false, isPph26: false, pph26Rate: 0, asReceipt: receipt,
       });
       if (res.ok) { toast.success(`Charge ${code.toUpperCase()} ditambahkan.`); setOpen(false); reset(); router.refresh(); }
       else toast.error(res.error);
@@ -64,6 +65,10 @@ export function ChargeNew({ revenueAccounts, expenseAccounts }: { revenueAccount
               <SelectContent>{expenseAccounts.map((a) => <SelectItem key={a.id} value={a.id}>{label(a)}</SelectItem>)}</SelectContent>
             </Select>
           </div>
+          <label className="col-span-2 flex items-start gap-2">
+            <input type="checkbox" checked={receipt} onChange={(e) => setReceipt(e.target.checked)} className="mt-0.5 h-4 w-4 accent-primary" />
+            <span>Reimburse (as receipt)<span className="block text-xs text-muted-foreground">Ditagih ulang ke customer sesuai kuitansi (mis. materai, LOLO, behandle). Otomatis tercentang Reimburse saat diinput di costing.</span></span>
+          </label>
         </div>
         <DialogFooter>
           <DialogClose asChild><Button variant="ghost">Batal</Button></DialogClose>
