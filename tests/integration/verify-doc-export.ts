@@ -162,7 +162,8 @@ async function main() {
     const groups = await loadBillGroups(db, fb, today);
     ok(groups.totals.billCount === bills.length && c2(groups.totals.total) === sum(bills.map((b) => b.total)), "jumlah dan total bill sama dengan halaman Vendor Bill (filter yang sama)");
     const x1 = bills[0];
-    ok(x1.jobs === `${jA.number}, ${jB.number}` && x1.lines.length === 3, "bill lintas job: semua job, 3 baris");
+    // Urutan job mengikuti bill (createBillCore mengurutkan baris per jobId), jadi dibandingkan tanpa urutan.
+    ok(x1.jobs.split(", ").sort().join() === [jA.number, jB.number].sort().join() && x1.lines.length === 3, "bill lintas job: semua job, 3 baris");
     ok(c2(x1.ppn) === c2(11_000) && c2(x1.pph23) === c2(20_000) && c2(x1.total) === c2(1_791_000), "bill: PPN 11.000, PPh 23 20.000, total net 1.791.000");
     ok(c2(x1.paid) === c2(791_000) && c2(x1.outstanding) === c2(1_000_000) && x1.status === "PARTIAL", "bill Partial: dibayar 791.000, sisa 1.000.000");
     ok(x1.vendorRef === "INV-VENDOR-77" && x1.lines.every((l) => l.pph23), "ref vendor dan tanda PPh 23 per baris");
