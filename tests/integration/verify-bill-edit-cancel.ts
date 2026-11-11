@@ -9,7 +9,7 @@ import {
   billChangeState, cancelBillCore, cancelVendorPaymentCore, createBillCore, recordVendorPaymentCore, updateBillCore,
 } from "../../src/lib/payables";
 import { recalcJobTotals } from "../../src/lib/job-charges";
-import { setLockKey } from "../../src/lib/period-lock";
+import { lockSnapshot, restoreLock, lockMonth } from "./period-lock-helper";
 import { getTrialBalance } from "../../src/lib/accounting";
 import { ACC } from "../../src/lib/coa";
 
@@ -34,7 +34,7 @@ async function main() {
   const dbName = (await db.$queryRaw<{ d: string }[]>`SELECT current_database() AS d`)[0].d;
   if (dbName === "ffms" || dbName === "ffms_pgcheck") throw new Error(`Jangan jalankan uji ini di database ${dbName}.`);
   console.log(`   database: ${dbName}`);
-  await setLockKey(db, null);
+  await lockMonth(db, null);
   const ts = Date.now().toString().slice(-7);
 
   const customer = await db.customer.findFirstOrThrow({ orderBy: { code: "asc" } });
@@ -96,11 +96,11 @@ async function main() {
   await cancelVendorPaymentCore(db, pay.id, "uji batal bayar dulu");
   st = await billChangeState(db, billId);
   ok(st.cancelBlock === null && st.editBlock === null, "pembayaran dibatalkan: bill bisa diubah lagi");
-  await setLockKey(db, today);
+  await lockMonth(db, today);
   st = await billChangeState(db, billId);
-  ok(/tutup buku/.test(st.cancelBlock ?? ""), `tutup buku: "${st.cancelBlock}"`);
-  await throws(() => cancelBillCore(db, billId, "uji kunci"), /tutup buku/, "batal di periode tutup buku ditolak");
-  await setLockKey(db, null);
+  ok(/sudah closing/.test(st.cancelBlock ?? ""), `tutup buku: "${st.cancelBlock}"`);
+  await throws(() => cancelBillCore(db, billId, "uji kunci"), /sudah closing/, "batal di periode tutup buku ditolak");
+  await lockMonth(db, null);
 
   // ---------------------------------------------------------------- batal
   console.log("-- batal bill");

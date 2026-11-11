@@ -9,7 +9,7 @@ import { PrismaClient } from "@prisma/client";
 import { createCashEntry, updateCashEntry, type CashEntryInput } from "../../src/lib/cash-entry";
 import { createManualJournal, updateManualJournal } from "../../src/lib/manual-journal";
 import { previewProofNumber } from "../../src/lib/sequence";
-import { getLockKey, setLockKey } from "../../src/lib/period-lock";
+import { lockSnapshot, restoreLock, lockMonth } from "./period-lock-helper";
 import { jktKey } from "../../src/lib/accounting-core";
 
 const db = new PrismaClient();
@@ -25,10 +25,10 @@ async function main() {
   const dbName = (await db.$queryRaw<{ d: string }[]>`SELECT current_database() AS d`)[0].d;
   if (dbName === "ffms" || dbName === "ffms_pgcheck") throw new Error(`Jangan jalankan uji ini di database ${dbName}.`);
   console.log(`   database: ${dbName}`);
-  const original = await getLockKey(db);
+  const original = await lockSnapshot(db);
 
   try {
-    await setLockKey(db, null);
+    await lockMonth(db, null);
     const today = jktKey(new Date());
     const ym = today.slice(0, 7);
     const [yy, mm] = [today.slice(2, 4), today.slice(5, 7)];
@@ -66,11 +66,11 @@ async function main() {
     ok((await db.journalEntry.findUniqueOrThrow({ where: { id: a.journalEntryId } })).number === a2.number, "nomor tidak berubah setelah ditolak");
 
     // Periode terkunci (closing)
-    await setLockKey(db, `${ym}-05`);
-    await throws(() => updateCashEntry(db, b.journalEntryId, out(`${ym}-06`)), /Periode terkunci/, "edit bukti di periode yang sudah dikunci ditolak");
-    await throws(() => updateCashEntry(db, a.journalEntryId, out(`${ym}-04`)), /Periode terkunci/, "edit ke tanggal yang sudah dikunci ditolak");
+    await lockMonth(db, `${ym}-05`);
+    await throws(() => updateCashEntry(db, b.journalEntryId, out(`${ym}-06`)), /sudah closing/, "edit bukti di periode yang sudah dikunci ditolak");
+    await throws(() => updateCashEntry(db, a.journalEntryId, out(`${ym}-04`)), /sudah closing/, "edit ke tanggal yang sudah dikunci ditolak");
     ok((await db.journalEntry.findUniqueOrThrow({ where: { id: a.journalEntryId } })).number === a2.number, "nomor tetap setelah ditolak kunci");
-    await setLockKey(db, null);
+    await lockMonth(db, null);
 
     // Nomor format lama tidak diubah saat diedit
     const old = await createCashEntry(db, out(`${ym}-03`));
@@ -100,8 +100,7 @@ async function main() {
     const expect = (before?.counter ?? 0) + 1;
     ok(c.number === `${doc}/BK/${String(ny).slice(2)}/01/02/${String(expect).padStart(4, "0")}`, `tahun baru mulai dari nomor urut sendiri (${c.number})`);
   } finally {
-    await setLockKey(db, original);
-    ok((await getLockKey(db)) === original, `kunci periode dikembalikan (${original ?? "tanpa kunci"})`);
+    await restoreLock(db, original);
   }
 
   console.log(failures ? `\n${failures} GAGAL` : "\nSemua lulus");

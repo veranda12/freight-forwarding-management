@@ -6,8 +6,8 @@ import { normalizeDeductions, type Deductions } from "./receipt-deductions";
 import { resolveCashAccount, assertCashCurrency } from "./cash-accounts";
 import { cashProofCode, genInvoiceNumber, genProofNumber } from "./sequence";
 import { closeJobsOfInvoice } from "./job-lock";
-import { getLockKey } from "./period-lock";
-import { formatDate, TZ } from "./format";
+import { getClosedMonths, isClosedKey, closedMessage } from "./period-lock";
+import { formatDate } from "./format";
 import { effectiveRate, IDR, latestRate } from "./fx";
 import type { PaymentRecorded } from "./payables";
 
@@ -347,11 +347,10 @@ export async function cancelInvoiceCore(db: PrismaClient, invoiceId: string, use
   });
 }
 
-const monthLabel = (d: Date) => d.toLocaleDateString("id-ID", { month: "long", year: "numeric", timeZone: TZ });
 
 /** Alasan pelunasan tidak bisa dibatalkan, atau null bila bisa. Murni. */
 export function receiptCancelBlock(p: {
-  direction: string; cancelledAt: Date | null; date: Date; lockKey: string | null;
+  direction: string; cancelledAt: Date | null; date: Date; closedMonths: string[];
   reconciled: boolean; reconciledAt: Date | null; fxRevalAfter: boolean;
 }): string | null {
   if (p.direction !== "RECEIPT") return "Yang bisa dibatalkan di sini hanya pelunasan invoice.";
@@ -360,7 +359,7 @@ export function receiptCancelBlock(p: {
     const when = p.reconciledAt ? ` pada ${formatDate(p.reconciledAt)}` : "";
     return `Pembayaran ini sudah direkonsiliasi${when}. Buka dulu rekonsiliasinya di menu Rekonsiliasi Bank.`;
   }
-  if (p.lockKey && jktKey(p.date) <= p.lockKey) return `Periode ${monthLabel(p.date)} sudah tutup buku. Buka dulu periodenya di menu Tutup Buku.`;
+  if (isClosedKey(p.closedMonths, jktKey(p.date))) return closedMessage(jktKey(p.date));
   if (p.fxRevalAfter) return "Invoice valas ini sudah direvaluasi kurs setelah tanggal pelunasan, jadi pelunasannya tidak bisa dibatalkan.";
   return null;
 }
@@ -380,7 +379,7 @@ export async function receiptCancelState(db: Db, paymentId: string) {
     ? await db.journalEntry.count({ where: { source: "FX_REVAL", isReversed: false, isReversal: false, date: { gte: pay.date } } })
     : 0;
   const block = receiptCancelBlock({
-    direction: pay.direction, cancelledAt: pay.cancelledAt, date: pay.date, lockKey: await getLockKey(db),
+    direction: pay.direction, cancelledAt: pay.cancelledAt, date: pay.date, closedMonths: await getClosedMonths(db),
     reconciled: recon.length > 0, reconciledAt: recon.find((l) => l.reconciledAt)?.reconciledAt ?? null, fxRevalAfter: fx > 0,
   });
   const invoices = pay.allocations.flatMap((a) => (a.invoice ? [a.invoice.number] : []));

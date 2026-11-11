@@ -12,7 +12,7 @@ import { cancelInvoiceCore, createInvoiceCore } from "../../src/lib/receivables"
 import { createBillVoucher, createInvoiceVoucher } from "../../src/lib/doc-vouchers";
 import { cancelVoucher, payVoucher } from "../../src/lib/vouchers";
 import { recalcJobTotals } from "../../src/lib/job-charges";
-import { getLockKey, setLockKey } from "../../src/lib/period-lock";
+import { lockSnapshot, restoreLock, lockMonth } from "./period-lock-helper";
 import { jktKey } from "../../src/lib/accounting-core";
 import { ACC } from "../../src/lib/coa";
 
@@ -36,10 +36,10 @@ async function main() {
   const dbName = (await db.$queryRaw<{ d: string }[]>`SELECT current_database() AS d`)[0].d;
   if (dbName === "ffms" || dbName === "ffms_pgcheck") throw new Error(`Jangan jalankan uji ini di database ${dbName}.`);
   console.log(`   database: ${dbName}`);
-  const original = await getLockKey(db);
+  const original = await lockSnapshot(db);
 
   try {
-    await setLockKey(db, null);
+    await lockMonth(db, null);
     const ts = Date.now();
     const day = jktKey(new Date());
     const customer = await db.customer.findFirstOrThrow({ orderBy: { code: "asc" } });
@@ -178,14 +178,13 @@ async function main() {
     await throws(() => createBillVoucher(db, { billId: bill4, lineIds: [l4], ...base, bankAccountId: "tidak-ada" }), /Rekening tidak ditemukan/, "rekening asing ditolak");
     const usdBank = await db.bankAccount.findFirst({ where: { currency: { not: "IDR" }, isActive: true } });
     if (usdBank) await throws(() => createBillVoucher(db, { billId: bill4, lineIds: [l4], ...base, bankAccountId: usdBank.id }), /Pilih rekening IDR/, `rekening valas ${usdBank.currency} ditolak`);
-    await setLockKey(db, day);
-    await throws(() => createBillVoucher(db, { billId: bill4, lineIds: [l4], ...base }), /Periode terkunci/, "periode terkunci ditolak");
-    await setLockKey(db, null);
+    await lockMonth(db, day);
+    await throws(() => createBillVoucher(db, { billId: bill4, lineIds: [l4], ...base }), /sudah closing/, "periode terkunci ditolak");
+    await lockMonth(db, null);
     ok((await db.voucherDocLine.count({ where: { billLineId: l4 } })) === 0, "tidak ada voucher dari input yang ditolak");
     ok(JSON.stringify(vcSeq) === JSON.stringify(await db.sequence.findMany({ where: { key: { startsWith: "PROOF:VC" } } })), "nomor voucher tidak terpakai oleh input yang ditolak");
   } finally {
-    await setLockKey(db, original);
-    ok((await getLockKey(db)) === original, `kunci periode dikembalikan (${original ?? "tanpa kunci"})`);
+    await restoreLock(db, original);
   }
 
   console.log(failures ? `\n${failures} GAGAL` : "\nSemua lulus");

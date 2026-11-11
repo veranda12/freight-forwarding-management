@@ -5,8 +5,8 @@ import { postJournal, replaceJournal, reverseJournal, type JournalLineInput } fr
 import { cashProofCode, genDocNumber, genProofNumber, SEQ } from "./sequence";
 import { effectiveRate, IDR, latestRate } from "./fx";
 import { resolveCashAccount, assertCashCurrency } from "./cash-accounts";
-import { getLockKey } from "./period-lock";
-import { formatDate, formatIDR, TZ } from "./format";
+import { getClosedMonths, isClosedKey, closedMessage } from "./period-lock";
+import { formatDate, formatIDR } from "./format";
 
 export type BillOpts = {
   currency?: string; rate?: number;
@@ -127,7 +127,7 @@ export async function createBillCore(db: PrismaClient, vendorId: string, lineIds
  * Urutannya: yang paling perlu ditindaklanjuti user lebih dulu (pembayaran, voucher), lalu kurs dan periode.
  */
 export function billChangeBlock(b: {
-  status: string; amountPaid: number; currency: string; date: Date; vouchers: string[]; revalued: boolean; lockKey: string | null;
+  status: string; amountPaid: number; currency: string; date: Date; vouchers: string[]; revalued: boolean; closedMonths: string[];
 }, action: "edit" | "cancel" | "any"): string | null {
   const verb = action === "edit" ? "diedit" : action === "cancel" ? "dibatalkan" : "diedit atau dibatalkan";
   if (b.status === "CANCELLED") return "Bill ini sudah dibatalkan.";
@@ -137,7 +137,7 @@ export function billChangeBlock(b: {
   }
   if (b.vouchers.length) return `Bill ini sudah dibuatkan voucher ${b.vouchers.join(", ")}. Batalkan vouchernya dulu, baru bill bisa ${verb}.`;
   if (b.revalued) return `Bill ${b.currency} ini sudah direvaluasi kurs, jadi nilai hutangnya tidak bisa ${verb} lagi.`;
-  if (b.lockKey && jktKey(b.date) <= b.lockKey) return `Periode ${monthLabel(b.date)} sudah tutup buku. Buka dulu periodenya di menu Tutup Buku.`;
+  if (isClosedKey(b.closedMonths, jktKey(b.date))) return closedMessage(jktKey(b.date));
   return null;
 }
 
@@ -156,7 +156,7 @@ export async function billChangeState(db: Db, billId: string) {
   const input = {
     status: bill.status, amountPaid: Number(bill.amountPaid), currency: bill.currency, date: bill.date,
     vouchers: vouchers.map((v) => v.number), revalued: !!apLine && Math.abs(Number(apLine.credit) - Number(bill.total)) > 0.5,
-    lockKey: await getLockKey(db),
+    closedMonths: await getClosedMonths(db),
   };
   // anyBlock: satu kalimat untuk ditampilkan bila edit dan batal sama-sama diblokir karena alasan yang sama.
   return { bill, editBlock: billChangeBlock(input, "edit"), cancelBlock: billChangeBlock(input, "cancel"), anyBlock: billChangeBlock(input, "any") };
@@ -386,11 +386,10 @@ export async function recordVendorPaymentCore(db: PrismaClient, billId: string, 
 }
 
 type Db = PrismaClient | Prisma.TransactionClient;
-const monthLabel = (d: Date) => d.toLocaleDateString("id-ID", { month: "long", year: "numeric", timeZone: TZ });
 
 /** Alasan pembayaran vendor bill tidak bisa dibatalkan, atau null bila bisa. Murni. */
 export function vendorPaymentCancelBlock(p: {
-  direction: string; hasBill: boolean; cancelledAt: Date | null; date: Date; lockKey: string | null;
+  direction: string; hasBill: boolean; cancelledAt: Date | null; date: Date; closedMonths: string[];
   reconciled: boolean; reconciledAt: Date | null; fxRevalAfter: boolean; voucherNumber: string | null;
 }): string | null {
   if (p.direction !== "PAYMENT" || !p.hasBill) return "Yang bisa dibatalkan di sini hanya pembayaran vendor bill.";
@@ -400,7 +399,7 @@ export function vendorPaymentCancelBlock(p: {
     const when = p.reconciledAt ? ` pada ${formatDate(p.reconciledAt)}` : "";
     return `Pembayaran ini sudah direkonsiliasi${when}. Buka dulu rekonsiliasinya di menu Rekonsiliasi Bank.`;
   }
-  if (p.lockKey && jktKey(p.date) <= p.lockKey) return `Periode ${monthLabel(p.date)} sudah tutup buku. Buka dulu periodenya di menu Tutup Buku.`;
+  if (isClosedKey(p.closedMonths, jktKey(p.date))) return closedMessage(jktKey(p.date));
   if (p.fxRevalAfter) return "Bill valas ini sudah direvaluasi kurs setelah tanggal pembayaran, jadi pembayarannya tidak bisa dibatalkan.";
   return null;
 }
@@ -424,7 +423,7 @@ export async function vendorPaymentCancelState(db: Db, paymentId: string) {
     : 0;
   const block = vendorPaymentCancelBlock({
     direction: pay.direction, hasBill: pay.allocations.some((a) => a.bill), cancelledAt: pay.cancelledAt, date: pay.date,
-    lockKey: await getLockKey(db), reconciled: recon.length > 0, reconciledAt: recon.find((l) => l.reconciledAt)?.reconciledAt ?? null,
+    closedMonths: await getClosedMonths(db), reconciled: recon.length > 0, reconciledAt: recon.find((l) => l.reconciledAt)?.reconciledAt ?? null,
     fxRevalAfter: fx > 0, voucherNumber: pay.voucher?.number ?? null,
   });
   const bills = pay.allocations.flatMap((a) => (a.bill ? [a.bill.number] : []));

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { requireCan } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
-import { getLockKey } from "@/lib/period-lock";
+import { getClosedMonths } from "@/lib/period-lock";
 import { cashAccountOptions } from "@/lib/cash-accounts";
 import { billsForVoucher, invoicesForVoucher } from "@/lib/doc-vouchers";
 import { PageHeader } from "@/components/page-header";
@@ -34,7 +34,7 @@ export default async function NewVoucherPage({ searchParams }: { searchParams: P
   const tab: Tab = invoiceId ? "invoice" : billId ? "bill" : TABS.some((t) => t.key === asked) ? (asked as Tab) : "invoice";
   const q = one(sp, "q").slice(0, 60);
   const today = new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10);
-  const lockKey = await getLockKey(prisma);
+  const closedMonths = await getClosedMonths(prisma);
 
   return (
     <div className="space-y-6">
@@ -50,13 +50,13 @@ export default async function NewVoucherPage({ searchParams }: { searchParams: P
           </Link>
         ))}
       </nav>
-      {tab === "job" ? <JobTab today={today} lockKey={lockKey} /> : (
+      {tab === "job" ? <JobTab today={today} closedMonths={closedMonths} /> : (
         <DocVoucherBuilder
           key={`${tab}-${invoiceId ?? billId ?? ""}-${q}`}
           kind={tab}
           docs={tab === "invoice" ? await invoicesForVoucher(prisma, q, invoiceId) : await billsForVoucher(prisma, q, billId)}
           focusId={tab === "invoice" ? invoiceId : billId}
-          q={q} today={today} lockKey={lockKey}
+          q={q} today={today} closedMonths={closedMonths}
           {...await cashOptions(tab === "invoice" ? "receipt" : "payment")}
         />
       )}
@@ -70,7 +70,7 @@ async function cashOptions(purpose: "receipt" | "payment") {
 }
 
 /** Voucher biaya job: alur yang sudah ada (terbit lalu dibayar), tidak berubah. */
-async function JobTab({ today, lockKey }: { today: string; lockKey: string | null }) {
+async function JobTab({ today, closedMonths }: { today: string; closedMonths: string[] }) {
   const lines = await prisma.costingLine.findMany({
     where: { side: "BUYING", billed: false, voucherId: null, recordedAt: null, actualIdr: { gt: 0 }, job: { status: { notIn: ["CANCELLED", "CLOSED"] } } },
     include: {
@@ -86,5 +86,5 @@ async function JobTab({ today, lockKey }: { today: string; lockKey: string | nul
     row.lines.push({ id: l.id, label: `${l.chargeCode.code} ${l.chargeCode.name}`, note: l.description !== l.chargeCode.code ? l.description : null, vendorId: l.vendor?.id ?? null, vendor: l.vendor?.name ?? null, amount: Number(l.actualIdr), reimburse: l.asReceipt });
     jobs.set(j.id, row);
   }
-  return <VoucherBuilder jobs={[...jobs.values()]} today={today} lockKey={lockKey} />;
+  return <VoucherBuilder jobs={[...jobs.values()]} today={today} closedMonths={closedMonths} />;
 }

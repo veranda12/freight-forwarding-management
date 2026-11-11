@@ -1,5 +1,6 @@
 "use client";
 
+import { isClosedKey, closedMessage } from "@/lib/period-lock";
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -18,7 +19,7 @@ export type VoucherJob = {
   lines: { id: string; label: string; note: string | null; vendorId: string | null; vendor: string | null; amount: number; reimburse: boolean }[];
 };
 
-export function VoucherBuilder({ jobs, today, lockKey }: { jobs: VoucherJob[]; today: string; lockKey: string | null }) {
+export function VoucherBuilder({ jobs, today, closedMonths }: { jobs: VoucherJob[]; today: string; closedMonths: string[] }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [q, setQ] = useState("");
@@ -102,13 +103,13 @@ export function VoucherBuilder({ jobs, today, lockKey }: { jobs: VoucherJob[]; t
           <div className="space-y-1.5">
             <Label>Tanggal</Label>
             <Input type="date" value={dateKey} onChange={(e) => setDateKey(e.target.value)} />
-            {lockKey && <p className={`text-xs ${dateKey <= lockKey ? "text-destructive" : "text-muted-foreground"}`}>Periode terkunci sampai {lockKey}. Tanggal voucher harus sesudahnya.</p>}
+            {isClosedKey(closedMonths, dateKey) && <p className="text-xs text-destructive">{closedMessage(dateKey)}</p>}
           </div>
           <div className="space-y-1.5"><Label>Catatan (opsional)</Label><Input value={notes} onChange={(e) => setNotes(e.target.value)} /></div>
           <div className="flex justify-between rounded-md bg-muted/40 px-3 py-2 font-semibold"><span>{picked.length} biaya</span><span className="tabular-nums">{formatIDR(total)}</span></div>
           <TaxRowsEditor rows={taxRows} onChange={setTaxRows} base={total} nonReimburse={nonReimburse} format={formatIDR}
             disabledReason={picked.length === 0 ? "Pilih biaya dulu." : reimburseOnly ? "Biaya reimburse tidak dikenai pajak." : null} />
-          <Button className="w-full" onClick={save} disabled={pending || picked.length === 0 || payee.trim().length < 2 || (lockKey !== null && dateKey <= lockKey) || !tax.ready}>{pending ? <Loader2 className="animate-spin" /> : <Save />} Buat Voucher</Button>
+          <Button className="w-full" onClick={save} disabled={pending || picked.length === 0 || payee.trim().length < 2 || isClosedKey(closedMonths, dateKey) || !tax.ready}>{pending ? <Loader2 className="animate-spin" /> : <Save />} Buat Voucher</Button>
           <p className="text-xs text-muted-foreground">Setelah dibuat, biaya terkunci. Untuk koreksi, batalkan voucher lalu buat ulang.</p>
         </CardContent>
       </Card>

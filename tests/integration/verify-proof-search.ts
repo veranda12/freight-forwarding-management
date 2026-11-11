@@ -8,7 +8,7 @@ import { PrismaClient, Prisma } from "@prisma/client";
 import { createBillCore, recordVendorPaymentCore } from "../../src/lib/payables";
 import { createInvoiceCore } from "../../src/lib/receivables";
 import { recalcJobTotals } from "../../src/lib/job-charges";
-import { setLockKey } from "../../src/lib/period-lock";
+import { lockSnapshot, restoreLock, lockMonth } from "./period-lock-helper";
 import { parseProofQuery, proofJournals, proofKindsFor, searchProofs, type ProofKind, type ProofResult } from "../../src/lib/proof-search";
 
 const db = new PrismaClient();
@@ -38,7 +38,7 @@ async function main() {
   const dbName = (await db.$queryRaw<{ d: string }[]>`SELECT current_database() AS d`)[0].d;
   if (dbName === "ffms" || dbName === "ffms_pgcheck") throw new Error(`Jangan jalankan uji ini di database ${dbName}.`);
   console.log(`   database: ${dbName}`);
-  await setLockKey(db, null);
+  await lockMonth(db, null);
 
   const ts = Date.now();
   const customer = await db.customer.findFirstOrThrow({ orderBy: { code: "asc" } });

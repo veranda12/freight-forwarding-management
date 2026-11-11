@@ -1355,7 +1355,6 @@ model DomesticEvent {
 
 model AccountingSetting {
   id          String    @id @default("default")
-  lockedUntil DateTime?
   /// Tarif PPN keluaran untuk invoice baru. Invoice menyimpan tarifnya sendiri.
   ppnRate     Decimal   @default(0.011) @db.Decimal(6, 4)
   updatedAt   DateTime  @updatedAt
@@ -1425,6 +1424,19 @@ model TaxRemittance {
   createdAt       DateTime       @default(now())
 
   @@index([kind, period])
+}
+
+/// Closing bulanan. Bulan CLOSED menolak semua jurnal bertanggal di bulan itu.
+/// REOPENED = dibuka sementara untuk koreksi (hanya satu bulan sekaligus), lalu ditutup lagi.
+model PeriodClosing {
+  period       String    @id // "YYYY-MM", zona Asia/Jakarta
+  status       String // CLOSED | REOPENED
+  closedAt     DateTime  @default(now())
+  closedById   String?
+  reopenedAt   DateTime?
+  reopenedById String?
+  reopenReason String?
+  updatedAt    DateTime  @updatedAt
 }
 
 model FiscalClosing {

@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { assertCan } from "@/lib/auth-helpers";
 import { writeAudit } from "@/lib/audit";
 import { closeFiscalYear } from "@/lib/fiscal";
-import { setLockKey } from "@/lib/period-lock";
+import { closeMonth, reopenMonth, recloseMonth, periodLabel } from "@/lib/period-lock";
 import { createFixedAsset, runDepreciation, type NewAssetInput } from "@/lib/fixed-assets";
 import { runRevaluation } from "@/lib/fx";
 import { remitTaxPeriod, cancelTaxRemittance } from "@/lib/tax";
@@ -36,11 +36,33 @@ export async function closeYearAction(year: number): Promise<Result<{ netIncome:
   } catch (e) { return fail(e); }
 }
 
-export async function setLockAction(key: string | null): Promise<Result> {
+export async function closeMonthAction(period: string): Promise<Result> {
   const user = await assertCan("accounting", "write");
   try {
-    await setLockKey(prisma, key || null);
-    await writeAudit({ entity: "Accounting", entityId: "lock", action: "PERIOD_LOCK", summary: key ? `Kunci periode sampai ${key}` : "Kunci periode dibuka", userId: user.id });
+    await closeMonth(prisma, period, user.id);
+    await writeAudit({ entity: "Accounting", entityId: period, action: "CLOSE_MONTH", summary: `Closing ${periodLabel(period)}`, userId: user.id });
+    refresh("/accounting", "/accounting/closing");
+    return { ok: true };
+  } catch (e) { return fail(e); }
+}
+
+/** Buka bulan yang sudah closing untuk koreksi. Khusus Admin, alasan wajib. */
+export async function reopenMonthAction(period: string, reason: string): Promise<Result> {
+  const user = await assertCan("accounting", "write");
+  if (user.role !== "ADMIN") return { ok: false, error: "Hanya Admin yang bisa membuka bulan yang sudah closing." };
+  try {
+    await reopenMonth(prisma, period, reason, user.id);
+    await writeAudit({ entity: "Accounting", entityId: period, action: "REOPEN_MONTH", summary: `Buka ${periodLabel(period)} untuk koreksi: ${reason.trim()}`, userId: user.id });
+    refresh("/accounting", "/accounting/closing");
+    return { ok: true };
+  } catch (e) { return fail(e); }
+}
+
+export async function recloseMonthAction(period: string): Promise<Result> {
+  const user = await assertCan("accounting", "write");
+  try {
+    await recloseMonth(prisma, period, user.id);
+    await writeAudit({ entity: "Accounting", entityId: period, action: "RECLOSE_MONTH", summary: `Tutup lagi ${periodLabel(period)}`, userId: user.id });
     refresh("/accounting", "/accounting/closing");
     return { ok: true };
   } catch (e) { return fail(e); }

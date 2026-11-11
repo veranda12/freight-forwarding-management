@@ -1,5 +1,6 @@
 "use client";
 
+import { isClosedKey, closedMessage } from "@/lib/period-lock";
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -24,8 +25,8 @@ const dash = (n: number) => (n ? formatIDR(n) : "-");
  * simpan. Voucher hanya dokumen pencatatan: tidak membuat jurnal dan tidak mengubah status invoice/bill.
  * Tabel Kode COA - Debit - Kredit terisi otomatis dari akun charge dan rekening, sama dengan isi cetakannya.
  */
-export function DocVoucherBuilder({ kind, docs, focusId, q, today, lockKey, cashAccounts, defaultCashId }: {
-  kind: "invoice" | "bill"; docs: DocForVoucher[]; focusId: string | null; q: string; today: string; lockKey: string | null;
+export function DocVoucherBuilder({ kind, docs, focusId, q, today, closedMonths, cashAccounts, defaultCashId }: {
+  kind: "invoice" | "bill"; docs: DocForVoucher[]; focusId: string | null; q: string; today: string; closedMonths: string[];
   cashAccounts: { id: string; label: string; currency: string; coaCode: string }[]; defaultCashId: string | null;
 }) {
   const router = useRouter();
@@ -57,7 +58,7 @@ export function DocVoucherBuilder({ kind, docs, focusId, q, today, lockKey, cash
   }, [doc, selected, isInvoice, bank]);
   const problem = !calc ? null
     : !(calc.total > 0) ? "Nilai voucher harus lebih dari 0."
-    : lockKey && dateKey <= lockKey ? `Periode terkunci sampai ${lockKey}.`
+    : isClosedKey(closedMonths, dateKey) ? closedMessage(dateKey)
     : null;
 
   function toggle(d: DocForVoucher, lineId: string) {
@@ -139,7 +140,7 @@ export function DocVoucherBuilder({ kind, docs, focusId, q, today, lockKey, cash
           <div className="space-y-1.5">
             <Label htmlFor="dv-date">Tanggal</Label>
             <Input id="dv-date" type="date" value={dateKey} onChange={(e) => setDateKey(e.target.value)} />
-            {lockKey && <p className={`text-xs ${dateKey <= lockKey ? "text-destructive" : "text-muted-foreground"}`}>Periode terkunci sampai {lockKey}.</p>}
+            {isClosedKey(closedMonths, dateKey) && <p className="text-xs text-destructive">{closedMessage(dateKey)}</p>}
           </div>
           <div className="space-y-1.5">
             <Label>{isInvoice ? "Diterima di" : "Dibayar dari"}</Label>

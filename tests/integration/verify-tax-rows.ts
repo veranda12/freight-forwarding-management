@@ -10,7 +10,7 @@ import { Prisma, PrismaClient } from "@prisma/client";
 import { cancelVoucher, createVoucher, payVoucher } from "../../src/lib/vouchers";
 import { cancelCashEntry, createCashEntry, listCashEntries, updateCashEntry, type CashEntryInput } from "../../src/lib/cash-entry";
 import { getTaxRecap } from "../../src/lib/tax";
-import { getLockKey, setLockKey } from "../../src/lib/period-lock";
+import { lockSnapshot, restoreLock, lockMonth } from "./period-lock-helper";
 import { jktKey } from "../../src/lib/accounting-core";
 import { ACC } from "../../src/lib/coa";
 import { createBankAccount } from "../../src/lib/cash-accounts";
@@ -36,10 +36,10 @@ async function main() {
   const dbName = (await db.$queryRaw<{ d: string }[]>`SELECT current_database() AS d`)[0].d;
   if (dbName === "ffms" || dbName === "ffms_pgcheck") throw new Error(`Jangan jalankan uji ini di database ${dbName}.`);
   console.log(`   database: ${dbName}`);
-  const original = await getLockKey(db);
+  const original = await lockSnapshot(db);
 
   try {
-    await setLockKey(db, null);
+    await lockMonth(db, null);
     const today = jktKey(new Date());
     const day = `${today.slice(0, 7)}-06`;
     const bank = await db.bankAccount.findFirstOrThrow({ where: { kind: "BANK", currency: "IDR", isActive: true }, include: { coaAccount: true } });
@@ -208,7 +208,7 @@ async function main() {
     const lp = (await listCashEntries(db)).find((x) => x.id === plain.journalEntryId)!;
     ok(lp.taxRows.length === 0 && lp.rows.length === 1 && lp.amount === 150_000, "Jurnal Pengeluaran tanpa pajak tidak berubah");
   } finally {
-    await setLockKey(db, original);
+    await restoreLock(db, original);
   }
 
   console.log(failures ? `\n${failures} GAGAL` : "\nSemua lulus");

@@ -6,7 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { can } from "@/lib/rbac";
 import { formatDate, formatDateTime, formatIDR } from "@/lib/format";
 import { journalEditBlock } from "@/lib/journal";
-import { getLockKey } from "@/lib/period-lock";
+import { getClosedMonths, isClosedKey, closedMessage } from "@/lib/period-lock";
 import { jktKey } from "@/lib/accounting-core";
 import { SOURCE_LABEL } from "@/lib/journal-filter";
 import { MANUAL_JOURNAL_TAG } from "@/lib/manual-journal";
@@ -30,13 +30,13 @@ export default async function JournalDetailPage({ params }: { params: Promise<{ 
     },
   });
   if (!e) notFound();
-  const [history, lock] = await Promise.all([
+  const [history, closedMonths] = await Promise.all([
     prisma.auditLog.findMany({ where: { entity: "JournalEntry", entityId: id }, include: { user: { select: { name: true } } }, orderBy: { createdAt: "desc" } }),
-    getLockKey(prisma),
+    getClosedMonths(prisma),
   ]);
   const manual = e.source === "MANUAL" && e.sourceId === MANUAL_JOURNAL_TAG;
   const editable = (e.source === "CASH_ENTRY" || manual) && can(user.role, "accounting", "write");
-  const block = journalEditBlock(e) ?? (lock && jktKey(e.date) <= lock ? `Periode sudah dikunci sampai ${lock}. Koreksi lewat Jurnal Umum.` : null);
+  const block = journalEditBlock(e) ?? (isClosedKey(closedMonths, jktKey(e.date)) ? closedMessage(jktKey(e.date)) : null);
   const editHref = e.source === "CASH_ENTRY" ? `/accounting/cash-entry?edit=${e.id}` : `/accounting/manual-journal?edit=${e.id}`;
   const total = e.lines.reduce((s, l) => s + Number(l.debit), 0);
 

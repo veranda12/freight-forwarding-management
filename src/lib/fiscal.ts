@@ -2,7 +2,6 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import { accountMap } from "./coa";
 import { closingEntries, jktKey } from "./accounting-core";
 import { postJournal } from "./journal";
-import { getLockKey } from "./period-lock";
 
 /** Tutup buku satu tahun: pendapatan/beban ditutup ke Laba Ditahan (3100). Tidak bisa diulang. */
 export async function closeFiscalYear(db: PrismaClient, year: number, userId?: string) {
@@ -28,11 +27,6 @@ export async function closeFiscalYear(db: PrismaClient, year: number, userId?: s
           throw new Error(`Tutup buku tahun ${y} terlebih dahulu.`);
         }
       }
-    }
-
-    const lock = await getLockKey(tx);
-    if (lock && lock >= jktKey(yearEnd)) {
-      throw new Error(`Periode terkunci sampai ${lock}. Lepas kunci periode dulu sebelum menutup tahun ${year}.`);
     }
 
     const grouped = await tx.journalLine.groupBy({
@@ -76,10 +70,9 @@ export async function closeFiscalYear(db: PrismaClient, year: number, userId?: s
 
 /** Daftar tahun buku dari tahun transaksi pertama sampai tahun berjalan, beserta status tutupnya. */
 export async function fiscalYearStatus(db: PrismaClient) {
-  const [first, closings, lock] = await Promise.all([
+  const [first, closings] = await Promise.all([
     db.journalEntry.findFirst({ where: { source: { not: "CLOSING" } }, orderBy: { date: "asc" }, select: { date: true } }),
     db.fiscalClosing.findMany({ orderBy: { fiscalYear: "desc" } }),
-    getLockKey(db),
   ]);
   const thisYear = Number(jktKey(new Date()).slice(0, 4));
   const startYear = first ? Number(jktKey(first.date).slice(0, 4)) : thisYear;
@@ -89,5 +82,5 @@ export async function fiscalYearStatus(db: PrismaClient) {
     const c = closedMap.get(y);
     years.push({ year: y, closed: !!c, closedAt: c?.closedAt ?? null, netIncome: c ? Number(c.netIncome) : null, journalEntryId: c?.journalEntryId ?? null });
   }
-  return { years, lockedUntil: lock };
+  return { years };
 }

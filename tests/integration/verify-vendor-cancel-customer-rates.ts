@@ -8,7 +8,7 @@ import { createBillFromJobCore, recordVendorPaymentCore, cancelVendorPaymentCore
 import { applyRateCard } from "../../src/lib/rate-card";
 import { assertBlUnique } from "../../src/lib/job-bl";
 import { recalcJobTotals } from "../../src/lib/job-charges";
-import { setLockKey } from "../../src/lib/period-lock";
+import { lockSnapshot, restoreLock, lockMonth } from "./period-lock-helper";
 import { getTrialBalance } from "../../src/lib/accounting";
 
 const db = new PrismaClient();
@@ -27,7 +27,7 @@ async function main() {
   const dbName = (await db.$queryRaw<{ d: string }[]>`SELECT current_database() AS d`)[0].d;
   if (dbName === "ffms" || dbName === "ffms_pgcheck") throw new Error(`Jangan jalankan uji ini di database ${dbName}.`);
   console.log(`   database: ${dbName}`);
-  await setLockKey(db, null);
+  await lockMonth(db, null);
   const ts = Date.now().toString().slice(-7);
 
   const [customer, other] = await db.customer.findMany({ orderBy: { code: "asc" }, take: 2 });
@@ -56,9 +56,9 @@ async function main() {
   const [p1, p2] = await db.payment.findMany({ where: { allocations: { some: { billId } } }, orderBy: { createdAt: "asc" } });
 
   await throws(() => cancelVendorPaymentCore(db, p2.id, ""), /Alasan/, "batal bayar wajib alasan");
-  await setLockKey(db, today);
-  await throws(() => cancelVendorPaymentCore(db, p2.id, "uji kunci"), /tutup buku/, "periode tutup buku: ditolak");
-  await setLockKey(db, null);
+  await lockMonth(db, today);
+  await throws(() => cancelVendorPaymentCore(db, p2.id, "uji kunci"), /sudah closing/, "periode tutup buku: ditolak");
+  await lockMonth(db, null);
   const cashLine = await db.journalLine.findFirstOrThrow({ where: { entryId: p2.journalEntryId!, credit: { gt: 0 } } });
   await db.journalLine.update({ where: { id: cashLine.id }, data: { reconciledAt: new Date() } });
   await throws(() => cancelVendorPaymentCore(db, p2.id, "uji rekon"), /Rekonsiliasi Bank/, "sudah direkonsiliasi: ditolak");

@@ -6,7 +6,7 @@ import { PrismaClient } from "@prisma/client";
 import { getIncomeStatement, getBalanceSheet, getTrialBalance } from "../../src/lib/accounting";
 import { closeFiscalYear, fiscalYearStatus } from "../../src/lib/fiscal";
 import { postJournal } from "../../src/lib/journal";
-import { setLockKey } from "../../src/lib/period-lock";
+import { lockSnapshot, restoreLock, lockMonth } from "./period-lock-helper";
 import { accountMap } from "../../src/lib/coa";
 
 const prisma = new PrismaClient();
@@ -53,17 +53,17 @@ async function main() {
   catch (e: any) { ok(/sudah ditutup/.test(e.message), `tutup ulang ditolak: "${e.message}"`); }
 
   // 5) Kunci periode memblokir posting ke tanggal terkunci, tanggal sesudahnya tetap boleh
-  await setLockKey(prisma, "2026-03-31");
+  await lockMonth(prisma, "2026-03-31");
   const acc = await accountMap(prisma as any);
   const tryPost = (d: string) => prisma.$transaction(async (tx) => postJournal(tx, {
     date: new Date(d + "T12:00:00+07:00"), description: "TEST lock", source: "MANUAL",
     lines: [{ accountId: acc["1100"], debit: 1 }, { accountId: acc["1100"], credit: 1 }],
   }));
   try { await tryPost("2026-03-15"); ok(false, "posting di periode terkunci ditolak"); }
-  catch (e: any) { ok(/terkunci/.test(e.message), `posting terkunci ditolak: "${e.message}"`); }
-  try { await tryPost("2026-04-02"); ok(true, "posting setelah tanggal kunci diizinkan"); }
+  catch (e: any) { ok(/sudah closing/.test(e.message), `posting terkunci ditolak: "${e.message}"`); }
+  try { await tryPost("2026-04-02"); ok(true, "posting di bulan berikutnya diizinkan"); }
   catch (e: any) { ok(false, "posting setelah kunci seharusnya diizinkan: " + e.message); }
-  await setLockKey(prisma, null);
+  await lockMonth(prisma, null);
 
   // bersihkan jurnal uji
   await prisma.journalLine.deleteMany({ where: { entry: { description: "TEST lock" } } });

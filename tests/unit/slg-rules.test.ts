@@ -55,13 +55,13 @@ describe("nilai invoice", () => {
     expect(invoiceEditBlock({ status: "OVERDUE", amountPaid: 0 })).toBeNull();
   });
   it("batal pelunasan: pesan untuk setiap batasan", () => {
-    const base = { direction: "RECEIPT", cancelledAt: null, date: new Date("2026-11-05T05:00:00Z"), lockKey: null, reconciled: false, reconciledAt: null, fxRevalAfter: false };
+    const base = { direction: "RECEIPT", cancelledAt: null, date: new Date("2026-11-05T05:00:00Z"), closedMonths: [], reconciled: false, reconciledAt: null, fxRevalAfter: false };
     expect(receiptCancelBlock(base)).toBeNull();
     expect(receiptCancelBlock({ ...base, direction: "PAYMENT" })).toMatch(/pelunasan invoice/);
     expect(receiptCancelBlock({ ...base, cancelledAt: new Date() })).toMatch(/sudah dibatalkan/);
     expect(receiptCancelBlock({ ...base, reconciled: true, reconciledAt: new Date("2026-11-07T05:00:00Z") })).toBe("Pembayaran ini sudah direkonsiliasi pada 07 Nov 2026. Buka dulu rekonsiliasinya di menu Rekonsiliasi Bank.");
-    expect(receiptCancelBlock({ ...base, lockKey: "2026-11-30" })).toBe("Periode November 2026 sudah tutup buku. Buka dulu periodenya di menu Tutup Buku.");
-    expect(receiptCancelBlock({ ...base, lockKey: "2026-10-31" })).toBeNull();
+    expect(receiptCancelBlock({ ...base, closedMonths: ["2026-11"] })).toBe("Periode November 2026 sudah closing. Buka bulan itu untuk koreksi di menu Tutup Buku.");
+    expect(receiptCancelBlock({ ...base, closedMonths: ["2026-10", "2026-12"] })).toBeNull();
     expect(receiptCancelBlock({ ...base, fxRevalAfter: true })).toMatch(/revaluasi/);
   });
 });

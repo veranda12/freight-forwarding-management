@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { can } from "@/lib/rbac";
 import { listManualJournals, manualAccountInfo } from "@/lib/manual-journal";
 import { formatIDR } from "@/lib/format";
-import { getLockKey } from "@/lib/period-lock";
+import { getClosedMonths } from "@/lib/period-lock";
 import { PageHeader } from "@/components/page-header";
 import { StatStrip } from "@/components/stat-strip";
 import { ManualJournalPanel } from "./manual-journal-panel";
@@ -33,7 +33,7 @@ export default async function ManualJournalPage({ searchParams }: { searchParams
         { label: "Nilai jurnal berlaku", value: formatIDR(active.reduce((s, e) => s + e.total, 0)) },
         { label: "Dibatalkan", value: entries.length - active.length, tone: entries.length - active.length ? "warning" : undefined },
       ]} />
-      <ManualJournalPanel accounts={accounts} entries={entries} today={today} canWrite={can(user.role, "accounting", "write")} lockKey={await getLockKey(prisma)} editId={entries.some((e) => e.id === sp.edit) ? sp.edit : undefined} />
+      <ManualJournalPanel accounts={accounts} entries={entries} today={today} canWrite={can(user.role, "accounting", "write")} closedMonths={await getClosedMonths(prisma)} editId={entries.some((e) => e.id === sp.edit) ? sp.edit : undefined} />
     </div>
   );
 }

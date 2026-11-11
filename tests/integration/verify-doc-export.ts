@@ -11,7 +11,7 @@ import { PrismaClient, Prisma } from "@prisma/client";
 import { createBillCore, recordVendorPaymentCore } from "../../src/lib/payables";
 import { cancelInvoiceCore, createInvoiceCore, recordReceiptCore } from "../../src/lib/receivables";
 import { recalcJobTotals } from "../../src/lib/job-charges";
-import { getLockKey, setLockKey } from "../../src/lib/period-lock";
+import { lockSnapshot, restoreLock, lockMonth } from "./period-lock-helper";
 import { jktKey } from "../../src/lib/accounting-core";
 import { loadBillGroups, parseBillFilter } from "../../src/lib/bill-groups";
 import { parseInvoiceExportFilter } from "../../src/lib/doc-export-filter";
@@ -48,10 +48,10 @@ async function main() {
   const dbName = (await db.$queryRaw<{ d: string }[]>`SELECT current_database() AS d`)[0].d;
   if (dbName === "ffms" || dbName === "ffms_pgcheck") throw new Error(`Jangan jalankan uji ini di database ${dbName}.`);
   console.log(`   database: ${dbName}`);
-  const original = await getLockKey(db);
+  const original = await lockSnapshot(db);
 
   try {
-    await setLockKey(db, null);
+    await lockMonth(db, null);
     const ts = Date.now();
     const today = jktKey(new Date());
     const customer = await db.customer.findFirstOrThrow({ orderBy: { code: "asc" } });
@@ -181,7 +181,7 @@ async function main() {
 
     ok(JSON.stringify(beforeBill) === JSON.stringify(await writes()), "export bill tidak menulis apa pun");
   } finally {
-    await setLockKey(db, original);
+    await restoreLock(db, original);
   }
 
   console.log(failures ? `\n${failures} GAGAL` : "\nSEMUA LULUS");

@@ -26,7 +26,8 @@ export async function postJournal(
     number?: string;
   }
 ): Promise<string> {
-  await assertNotLocked(tx, opts.date);
+  // Jurnal penutup tahun bertanggal 31 Desember tetap boleh walau Desember sudah closing.
+  if (opts.source !== "CLOSING") await assertNotLocked(tx, opts.date);
   const number = opts.number ?? (await genDocNumber(tx, SEQ.JOURNAL, opts.date));
   const totalDebit = r2(opts.lines.reduce((s, l) => s + (l.debit ?? 0), 0));
   const totalCredit = r2(opts.lines.reduce((s, l) => s + (l.credit ?? 0), 0));

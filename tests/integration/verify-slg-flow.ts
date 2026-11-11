@@ -11,7 +11,7 @@ import { createCashEntry, updateCashEntry } from "../../src/lib/cash-entry";
 import { createManualJournal, updateManualJournal } from "../../src/lib/manual-journal";
 import { assertJobEditable, closeJobIfSettled } from "../../src/lib/job-lock";
 import { addJobCharge, updateJobCharge, recalcJobTotals, editInvoiceCharges } from "../../src/lib/job-charges";
-import { setLockKey } from "../../src/lib/period-lock";
+import { lockSnapshot, restoreLock, lockMonth } from "./period-lock-helper";
 import { ACC } from "../../src/lib/coa";
 
 const db = new PrismaClient();
@@ -41,7 +41,7 @@ async function main() {
   const dbName = (await db.$queryRaw<{ d: string }[]>`SELECT current_database() AS d`)[0].d;
   if (dbName === "ffms") throw new Error("Jangan jalankan uji ini di database demo ffms.");
   console.log(`   database: ${dbName}`);
-  await setLockKey(db, null);
+  await lockMonth(db, null);
   await db.accountingSetting.upsert({ where: { id: "default" }, update: { ppnRate: 0.011 }, create: { id: "default", ppnRate: 0.011 } });
 
   const customer = await db.customer.findFirstOrThrow();
@@ -173,9 +173,9 @@ async function main() {
   // 5b. Batalkan pelunasan (Admin): jurnal dibalik, invoice terbuka lagi, nomor invoice tetap
   const lastRc = await db.payment.findFirstOrThrow({ where: { allocations: { some: { invoiceId: invId } } }, orderBy: { createdAt: "desc" } });
   await throws(() => cancelReceiptCore(db, lastRc.id, ""), /Alasan/, "batal pelunasan wajib alasan");
-  await setLockKey(db, today);
-  await throws(() => cancelReceiptCore(db, lastRc.id, "uji kunci"), /tutup buku/, "periode tutup buku: batal pelunasan ditolak");
-  await setLockKey(db, null);
+  await lockMonth(db, today);
+  await throws(() => cancelReceiptCore(db, lastRc.id, "uji kunci"), /sudah closing/, "periode tutup buku: batal pelunasan ditolak");
+  await lockMonth(db, null);
   const rcLine = await db.journalLine.findFirstOrThrow({ where: { entryId: lastRc.journalEntryId!, debit: { gt: 0 } } });
   await db.journalLine.update({ where: { id: rcLine.id }, data: { reconciledAt: new Date() } });
   await throws(() => cancelReceiptCore(db, lastRc.id, "uji rekon"), /Rekonsiliasi Bank/, "sudah direkonsiliasi: batal pelunasan ditolak");
@@ -225,9 +225,9 @@ async function main() {
   await updateManualJournal(db, ju.journalEntryId, { dateKey: today, description: "Uji jurnal umum revisi", lines: [{ accountId: expense.id, debit: 2000 }, { accountId: expense2.id, credit: 2000 }] });
   ok((await db.journalEntry.findUniqueOrThrow({ where: { id: ju.journalEntryId } })).number === ju.number, "edit jurnal umum: nomor tetap");
 
-  await setLockKey(db, today);
-  await throws(() => updateManualJournal(db, ju.journalEntryId, { dateKey: today, description: "Setelah kunci", lines: [{ accountId: expense.id, debit: 1 }, { accountId: expense2.id, credit: 1 }] }), /terkunci/, "periode dikunci: edit ditolak");
-  await setLockKey(db, null);
+  await lockMonth(db, today);
+  await throws(() => updateManualJournal(db, ju.journalEntryId, { dateKey: today, description: "Setelah kunci", lines: [{ accountId: expense.id, debit: 1 }, { accountId: expense2.id, credit: 1 }] }), /sudah closing/, "periode dikunci: edit ditolak");
+  await lockMonth(db, null);
 
   // 7. Batalkan invoice membuka baris
   const j3 = await mkJob("D", "MBL-D");

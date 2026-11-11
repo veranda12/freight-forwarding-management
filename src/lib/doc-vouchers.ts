@@ -2,7 +2,7 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import { r2 } from "./accounting-core";
 import { genProofNumber } from "./sequence";
 import { IDR } from "./fx";
-import { getLockKey } from "./period-lock";
+import { getClosedMonths, isClosedKey, closedMessage } from "./period-lock";
 import { assertCashCurrency, resolveCashAccount } from "./cash-accounts";
 import { billLineAccount, invoiceLineAccount } from "./doc-voucher-rows";
 
@@ -58,8 +58,7 @@ function checkCommon(input: DocVoucherInput) {
 
 /** Kunci periode dan rekening: dicek di dalam transaksi, sama seperti voucher biaya job. */
 async function checkDateAndCash(tx: Prisma.TransactionClient, input: DocVoucherInput, purpose: "receipt" | "payment") {
-  const lock = await getLockKey(tx);
-  if (lock && input.dateKey <= lock) throw new Error(`Periode terkunci sampai ${lock}. Voucher tanggal ${input.dateKey} tidak bisa dibuat.`);
+  if (isClosedKey(await getClosedMonths(tx), input.dateKey)) throw new Error(closedMessage(input.dateKey));
   const cash = await resolveCashAccount(tx, input.bankAccountId, purpose);
   assertCashCurrency(cash, IDR, "voucher");
   return cash;

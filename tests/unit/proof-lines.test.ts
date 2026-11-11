@@ -74,15 +74,15 @@ describe("entryActions", () => {
     });
     expect(entryActions(e("BILL", "b1"), "MANAGEMENT").cancelBlock).toMatch(/izin/);
     const d = new Date("2026-11-10T05:00:00Z");
-    const base = { status: "UNPAID", amountPaid: 0, currency: "IDR", date: d, vouchers: [] as string[], revalued: false, lockKey: null as string | null };
+    const base = { status: "UNPAID", amountPaid: 0, currency: "IDR", date: d, vouchers: [] as string[], revalued: false, closedMonths: [] as string[] };
     expect(billChangeBlock(base, "edit")).toBeNull();
     expect(billChangeBlock({ ...base, status: "CANCELLED" }, "cancel")).toBe("Bill ini sudah dibatalkan.");
     expect(billChangeBlock({ ...base, status: "PARTIAL", amountPaid: 300000 }, "cancel")).toMatch(/sudah dibayar Rp.*300\.000 ke vendor\. Batalkan pembayarannya dulu \(khusus Admin\), baru bill bisa dibatalkan/);
     expect(billChangeBlock({ ...base, status: "PAID", amountPaid: 1 }, "edit")).toMatch(/baru bill bisa diedit/);
     expect(billChangeBlock({ ...base, vouchers: ["SLG/VB/26/11/0001"] }, "edit")).toContain("voucher SLG/VB/26/11/0001. Batalkan vouchernya dulu");
     expect(billChangeBlock({ ...base, currency: "USD", revalued: true }, "cancel")).toContain("Bill USD ini sudah direvaluasi kurs");
-    expect(billChangeBlock({ ...base, lockKey: "2026-11-30" }, "edit")).toMatch(/Periode November 2026 sudah tutup buku/);
-    expect(billChangeBlock({ ...base, lockKey: "2026-10-31" }, "edit")).toBeNull();
+    expect(billChangeBlock({ ...base, closedMonths: ["2026-11"] }, "edit")).toMatch(/Periode November 2026 sudah closing/);
+    expect(billChangeBlock({ ...base, closedMonths: ["2026-10", "2026-12"] }, "edit")).toBeNull();
   });
 
   it("jurnal otomatis menyebut periodenya", () => {

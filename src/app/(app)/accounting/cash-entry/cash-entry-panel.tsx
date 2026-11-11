@@ -1,5 +1,6 @@
 "use client";
 
+import { isClosedKey } from "@/lib/period-lock";
 import { useEffect, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -37,9 +38,9 @@ const newRow = (amount = ""): Row => ({ key: ++seq, counterAccountId: "", amount
 const LABEL = { IN: "Jurnal Penerimaan", OUT: "Jurnal Pengeluaran" } as const;
 const dateKeyOf = (iso: string) => new Date(new Date(iso).getTime() + 7 * 3600 * 1000).toISOString().slice(0, 10);
 
-export function CashEntryPanel({ cashAccounts, defaultCashId, inAccounts, outAccounts, entries, today, canWrite, prefill, rates, lockKey, editId }: {
+export function CashEntryPanel({ cashAccounts, defaultCashId, inAccounts, outAccounts, entries, today, canWrite, prefill, rates, closedMonths, editId }: {
   cashAccounts: CashOpt[]; defaultCashId: string | null; inAccounts: Opt[]; outAccounts: Opt[]; entries: Entry[];
-  today: string; canWrite: boolean; prefill?: CashPrefill; rates: Record<string, number>; lockKey: string | null; editId?: string;
+  today: string; canWrite: boolean; prefill?: CashPrefill; rates: Record<string, number>; closedMonths: string[]; editId?: string;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -101,7 +102,7 @@ export function CashEntryPanel({ cashAccounts, defaultCashId, inAccounts, outAcc
       else toast.error(res.error);
     });
   }
-  const isLocked = (e: Entry) => !!lockKey && dateKeyOf(e.date) <= lockKey;
+  const isLocked = (e: Entry) => isClosedKey(closedMonths, dateKeyOf(e.date));
 
   return (
     <div className="space-y-4">

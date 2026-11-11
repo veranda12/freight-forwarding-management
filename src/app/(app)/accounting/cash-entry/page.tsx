@@ -5,7 +5,7 @@ import { cashAccountOptions, cashCoaIds } from "@/lib/cash-accounts";
 import { listCashEntries } from "@/lib/cash-entry";
 import { listTransfers } from "@/lib/bank-transfer";
 import { latestRate } from "@/lib/fx";
-import { getLockKey } from "@/lib/period-lock";
+import { getClosedMonths } from "@/lib/period-lock";
 import { formatIDR } from "@/lib/format";
 import Link from "next/link";
 import { TicketPlus } from "lucide-react";
@@ -55,7 +55,7 @@ export default async function CashEntryPage({ searchParams }: { searchParams: Pr
       }
     : undefined;
   const canWrite = can(user.role, "accounting", "write");
-  const lock = await getLockKey(prisma);
+  const closedMonths = await getClosedMonths(prisma);
   const editId = entries.some((e) => e.id === sp.edit) ? sp.edit : undefined;
 
   return (
@@ -78,7 +78,7 @@ export default async function CashEntryPage({ searchParams }: { searchParams: Pr
         <TabsContent value="kas">
           <CashEntryPanel
             cashAccounts={cash.options} defaultCashId={cash.defaultId} prefill={prefill} rates={rates}
-            inAccounts={inAccounts} outAccounts={outAccounts} entries={entries} today={today} canWrite={canWrite} lockKey={lock} editId={editId}
+            inAccounts={inAccounts} outAccounts={outAccounts} entries={entries} today={today} canWrite={canWrite} closedMonths={closedMonths} editId={editId}
           />
         </TabsContent>
         <TabsContent value="transfer">

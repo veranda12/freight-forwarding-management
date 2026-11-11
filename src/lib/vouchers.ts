@@ -4,7 +4,7 @@ import { r2 } from "./accounting-core";
 import { postJournal } from "./journal";
 import { assertCashCurrency, resolveCashAccount } from "./cash-accounts";
 import { cashProofCode, genProofNumber } from "./sequence";
-import { getLockKey } from "./period-lock";
+import { getClosedMonths, isClosedKey, closedMessage } from "./period-lock";
 import { taxJournalLines, validateTaxRows, type OutTaxRowKind, type TaxRowInput } from "./tax-rows";
 
 export type VoucherInput = {
@@ -35,8 +35,7 @@ export async function createVoucher(db: PrismaClient, input: VoucherInput, userI
   const v = validateVoucher(input);
   return db.$transaction(async (tx) => {
     // Voucher belum punya jurnal saat dibuat, jadi kunci periode dicek di sini, bukan di postJournal.
-    const lock = await getLockKey(tx);
-    if (lock && v.dateKey <= lock) throw new Error(`Periode terkunci sampai ${lock}. Voucher tanggal ${v.dateKey} tidak bisa dibuat.`);
+    if (isClosedKey(await getClosedMonths(tx), v.dateKey)) throw new Error(closedMessage(v.dateKey));
     const lines = await tx.costingLine.findMany({ where: { id: { in: v.lineIds }, jobId: v.jobId, side: "BUYING" } });
     if (lines.length !== v.lineIds.length) throw new Error("Ada biaya yang tidak ditemukan di job ini. Muat ulang halaman.");
     if (lines.some((l) => l.billed || l.voucherId || l.recordedAt)) throw new Error("Ada biaya yang sudah di-bill atau sudah masuk voucher lain. Muat ulang halaman.");
