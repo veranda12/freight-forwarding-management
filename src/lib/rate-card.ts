@@ -203,6 +203,8 @@ export async function applyRateCard(db: PrismaClient, jobId: string): Promise<nu
     if (job.status === "CANCELLED") throw new Error("Job sudah dibatalkan.");
     const billedRateCard = await tx.costingLine.count({ where: { jobId, fromRateCard: true, invoiced: true } });
     if (billedRateCard > 0) throw new Error("Charge rate card job ini sudah ditagih. Batalkan invoicenya dulu untuk menghitung ulang.");
+    // Jalur menentukan charge yang ditagih (mis. Red Line hanya jalur merah), jadi wajib dipilih supaya tidak salah tagih.
+    if (!job.customsLane) throw new Error("Jalur bea cukai belum dipilih. Pilih jalur hijau, kuning, atau merah di halaman Job, bagian Clearance, lalu hitung lagi.");
 
     // Tarif standar ditambah tarif khusus customer job ini; tarif customer lain tidak ikut.
     const items = await tx.rateCardItem.findMany({ where: { isActive: true, OR: [{ customerId: null }, { customerId: job.customerId }] }, include: { chargeCode: true } });
@@ -258,4 +260,20 @@ export async function applyRateCard(db: PrismaClient, jobId: string): Promise<nu
     await recalcJobTotals(tx, jobId);
     return created;
   });
+}
+
+/**
+ * Setelah jalur bea cukai diganti: bila selling job sudah pernah dihitung dari rate card, hitung ulang
+ * supaya tarif jalur lama (mis. Green Light) diganti tarif jalur baru (mis. Red Line + Behandle).
+ * Belum pernah dihitung: tidak ada yang dibuat. Gagal (mis. sudah ditagih): pesan dikembalikan, jalur tetap tersimpan.
+ */
+export async function reapplyRateCardAfterLaneChange(db: PrismaClient, jobId: string): Promise<{ recalculated: boolean; error?: string }> {
+  const lines = await db.costingLine.count({ where: { jobId, side: "SELLING", fromRateCard: true } });
+  if (lines === 0) return { recalculated: false };
+  try {
+    await applyRateCard(db, jobId);
+    return { recalculated: true };
+  } catch (e) {
+    return { recalculated: false, error: e instanceof Error ? e.message : "Gagal menghitung ulang rate card." };
+  }
 }

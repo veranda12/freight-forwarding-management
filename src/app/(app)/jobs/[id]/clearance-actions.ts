@@ -4,18 +4,18 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { assertCan } from "@/lib/auth-helpers";
 import { writeAudit } from "@/lib/audit";
-import { applyRateCard } from "@/lib/rate-card";
+import { applyRateCard, reapplyRateCardAfterLaneChange } from "@/lib/rate-card";
 import { getJobLock } from "@/lib/job-lock";
 import { errorMessage } from "@/lib/action-error";
 
-type Result = { ok: true; message?: string } | { ok: false; error: string };
+type Result = { ok: true; message?: string; warning?: string } | { ok: false; error: string };
 
 export type ClearanceInput = { customsLane: "GREEN" | "YELLOW" | "RED" | null };
 
 /** Simpan jalur bea cukai job. Tujuan dan jarak diisi per container di tab Containers. */
 export async function updateJobClearanceAction(jobId: string, input: ClearanceInput): Promise<Result> {
   const user = await assertCan("jobs", "write");
-  const job = await prisma.job.findUnique({ where: { id: jobId }, select: { number: true } });
+  const job = await prisma.job.findUnique({ where: { id: jobId }, select: { number: true, customsLane: true } });
   if (!job) return { ok: false, error: "Job tidak ditemukan." };
   const lock = await getJobLock(prisma, jobId);
   if (lock) return { ok: false, error: lock };
@@ -23,7 +23,13 @@ export async function updateJobClearanceAction(jobId: string, input: ClearanceIn
   await prisma.job.update({ where: { id: jobId }, data: { customsLane: lane } });
   await writeAudit({ entity: "Job", entityId: jobId, action: "UPDATE_CLEARANCE", summary: `${job.number}: jalur ${lane ?? "-"}`, userId: user.id });
   revalidatePath(`/jobs/${jobId}`);
-  return { ok: true };
+  // Ganti jalur langsung mengganti tarifnya (merah: Red Line, hijau: Green Light) bila rate card sudah dihitung.
+  if (!lane || lane === job.customsLane) return { ok: true };
+  const re = await reapplyRateCardAfterLaneChange(prisma, jobId);
+  if (!re.recalculated) return re.error ? { ok: true, warning: `Jalur disimpan, tapi charge rate card belum dihitung ulang: ${re.error}` } : { ok: true };
+  await writeAudit({ entity: "Job", entityId: jobId, action: "APPLY_RATE_CARD", summary: `${job.number}: dihitung ulang karena jalur ${lane}`, userId: user.id });
+  revalidatePath(`/costing/${jobId}`);
+  return { ok: true, message: "Jalur disimpan. Charge rate card dihitung ulang sesuai jalur baru." };
 }
 
 /** Buat ulang selling charge dari rate card berdasarkan container, jalur, dan jarak job. */

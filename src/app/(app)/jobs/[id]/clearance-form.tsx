@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Calculator, Loader2, Pencil } from "lucide-react";
@@ -26,7 +27,7 @@ export function ClearanceForm({ jobId, initial }: { jobId: string; initial: Clea
   function submit() {
     start(async () => {
       const res = await updateJobClearanceAction(jobId, { customsLane: lane === NONE ? null : (lane as ClearanceInitial["customsLane"]) });
-      if (res.ok) { toast.success("Jalur bea cukai disimpan."); setOpen(false); router.refresh(); } else toast.error(res.error);
+      if (res.ok) { if (res.warning) toast.warning(res.warning); else toast.success(res.message ?? "Jalur bea cukai disimpan."); setOpen(false); router.refresh(); } else toast.error(res.error);
     });
   }
 
@@ -36,7 +37,7 @@ export function ClearanceForm({ jobId, initial }: { jobId: string; initial: Clea
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Jalur bea cukai</DialogTitle>
-          <DialogDescription>Dipakai untuk menghitung charge dari rate card. Jalur merah: Red Line ditagih, Green Light tidak. Setelah diubah, klik Hitung dari rate card di Costing.</DialogDescription>
+          <DialogDescription>Dipakai untuk menghitung charge dari rate card. Jalur merah: Red Line ditagih, Green Light tidak. Bila charge rate card sudah dihitung, tarifnya langsung diganti sesuai jalur baru.</DialogDescription>
         </DialogHeader>
         <div className="space-y-1.5">
           <Label>Jalur bea cukai</Label>
@@ -58,7 +59,7 @@ export function ClearanceForm({ jobId, initial }: { jobId: string; initial: Clea
 }
 
 /** Tombol buat ulang selling charge dari rate card. */
-export function ApplyRateCardButton({ jobId, hasRateCardLines }: { jobId: string; hasRateCardLines: boolean }) {
+export function ApplyRateCardButton({ jobId, hasRateCardLines, customsLane }: { jobId: string; hasRateCardLines: boolean; customsLane: ClearanceInitial["customsLane"] }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [open, setOpen] = useState(false);
@@ -77,9 +78,18 @@ export function ApplyRateCardButton({ jobId, hasRateCardLines }: { jobId: string
             {hasRateCardLines ? " Baris rate card yang belum ditagih akan diganti. Baris yang diubah atau ditambah manual tetap." : ""}
           </DialogDescription>
         </DialogHeader>
+        {customsLane ? (
+          <p className="rounded-md border bg-muted/40 px-3 py-2 text-sm">
+            Jalur bea cukai: <span className="font-semibold">{LANE_LABELS[customsLane]}</span>. Pastikan sudah sesuai sebelum menghitung.
+          </p>
+        ) : (
+          <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            Jalur bea cukai belum dipilih. Pilih dulu di halaman <Link href={`/jobs/${jobId}`} className="font-semibold underline">Job</Link>, bagian Clearance, supaya charge yang ditagih sesuai jalurnya.
+          </p>
+        )}
         <DialogFooter>
           <DialogClose asChild><Button variant="ghost">Batal</Button></DialogClose>
-          <Button onClick={run} disabled={pending}>{pending ? <Loader2 className="animate-spin" /> : null} Ya, hitung</Button>
+          <Button onClick={run} disabled={pending || !customsLane}>{pending ? <Loader2 className="animate-spin" /> : null} Ya, hitung</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -56,6 +56,11 @@ async function main() {
       containers: { create: [{ containerNo: "TEST0000001", containerTypeId: t["20GP"], grossWeightKg: 20_000 }, { containerNo: "TEST0000002", containerTypeId: t["20GP"], grossWeightKg: 20_000 }, { containerNo: "TEST0000003", containerTypeId: t["40HC"], grossWeightKg: 20_000 }] },
     },
   }));
+  // Jalur wajib dipilih sebelum rate card dihitung, supaya charge per jalur tidak salah tagih.
+  await db.job.update({ where: { id: red.id }, data: { customsLane: null } });
+  ok((await err(() => applyRateCard(db, red.id))).includes("Jalur bea cukai belum dipilih"), "rate card ditolak bila jalur belum dipilih");
+  ok((await db.costingLine.count({ where: { jobId: red.id } })) === 0, "tidak ada charge dibuat tanpa jalur");
+  await db.job.update({ where: { id: red.id }, data: { customsLane: "RED" } });
   const created = await applyRateCard(db, red.id);
   let rl = await db.costingLine.findMany({ where: { jobId: red.id }, include: { chargeCode: true } });
   const get = (code: string, unit: string) => rl.find((l) => l.chargeCode.code === code && l.unitLabel === unit);
