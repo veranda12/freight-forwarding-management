@@ -99,3 +99,21 @@ export async function getLedgerDetail(db: PrismaClient, accountId: string, from?
   });
   return { openingBalance, rows, totalDebit: r2(totalDebit), totalCredit: r2(totalCredit), closingBalance: running };
 }
+
+/**
+ * Buku besar beberapa akun sekaligus: semua akun postable dengan kode dari `fromCode` sampai `toCode`
+ * (mis. 1000 sampai 1999 = kepala 1). Akun tanpa saldo awal dan tanpa mutasi di periode itu dilewati.
+ */
+export async function getLedgerRange(db: PrismaClient, fromCode: string, toCode: string, from?: string, to?: string) {
+  const [lo, hi] = fromCode <= toCode ? [fromCode, toCode] : [toCode, fromCode];
+  const accounts = await db.coaAccount.findMany({
+    where: { isPostable: true, code: { gte: lo, lte: hi } }, orderBy: { code: "asc" }, select: { id: true, code: true, name: true, type: true },
+  });
+  const out = [];
+  for (const a of accounts) {
+    const l = await getLedgerDetail(db, a.id, from, to);
+    if (l.rows.length === 0 && Math.abs(l.openingBalance) < 0.005) continue;
+    out.push({ account: { code: a.code, name: a.name, type: a.type }, ...l });
+  }
+  return out;
+}
