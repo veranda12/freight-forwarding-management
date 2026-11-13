@@ -19,10 +19,15 @@ export type RateCardInitial = Omit<RateCardInput, "price" | "thresholdKm" | "thr
 
 const ALL = "__all__";
 const STD = "__std__";
+const ANY_CITY = "__anycity__";
 
 /** Dialog tambah atau ubah satu tarif di rate card. */
-export function RateCardForm({ charges, containerTypes, customers, initial, defaultCustomerId = null }: {
+export function RateCardForm({ charges, containerTypes, customers, cities, initial, defaultCustomerId = null, defaultCity = null }: {
   charges: Opt[]; containerTypes: Opt[]; customers: Opt[]; initial?: RateCardInitial;
+  /** Kota pelabuhan Indonesia (master Port), mis. Jakarta, Surabaya. */
+  cities: string[];
+  /** Tambah tarif dari tampilan satu kota: kota itu langsung terpilih. */
+  defaultCity?: string | null;
   /** Tambah tarif dari tampilan satu customer: customer itu langsung terpilih. */
   defaultCustomerId?: string | null;
 }) {
@@ -31,7 +36,7 @@ export function RateCardForm({ charges, containerTypes, customers, initial, defa
   const [open, setOpen] = useState(false);
   const fromInitial = (): RateCardInput => ({
     chargeCodeId: initial?.chargeCodeId ?? "", containerTypeId: initial?.containerTypeId ?? null,
-    customerId: initial ? initial.customerId : defaultCustomerId, basis: initial?.basis ?? "PER_CONTAINER",
+    customerId: initial ? initial.customerId : defaultCustomerId, city: initial ? initial.city : defaultCity, basis: initial?.basis ?? "PER_CONTAINER",
     condition: initial?.condition ?? "ALWAYS", price: initial ? String(initial.price) : "", thresholdKm: initial?.thresholdKm == null ? "" : String(initial.thresholdKm),
     thresholdTon: initial?.thresholdKg == null ? "" : String(initial.thresholdKg / 1000),
     taxable: initial?.taxable ?? false, note: initial?.note ?? "", sortOrder: String(initial?.sortOrder ?? 0), isActive: initial?.isActive ?? true,
@@ -80,6 +85,21 @@ export function RateCardForm({ charges, containerTypes, customers, initial, defa
                 Tarif khusus menggantikan tarif standar charge yang sama untuk customer ini. Charge lain tetap memakai tarif standar.
               </p>
             )}
+          </div>
+          <div className="space-y-1.5 sm:col-span-2">
+            <Label>Kota</Label>
+            <Select value={f.city ?? ANY_CITY} onValueChange={(v) => set({ city: v === ANY_CITY ? null : v })}>
+              <SelectTrigger aria-label="Kota"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ANY_CITY}>Semua kota</SelectItem>
+                {[...new Set([...cities, ...(f.city ? [f.city] : [])])].map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              {f.city
+                ? `Hanya untuk job dengan pelabuhan di ${f.city} (impor: Port of Discharge, ekspor: Port of Loading). Menggantikan tarif "Semua kota" yang setara.`
+                : "Berlaku di semua kota, kecuali kota yang punya tarif sendiri untuk charge ini."}
+            </p>
           </div>
           <div className="space-y-1.5">
             <Label>Dasar hitung</Label>

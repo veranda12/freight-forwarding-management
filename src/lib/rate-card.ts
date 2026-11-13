@@ -10,6 +10,8 @@ export type RateItem = {
   containerTypeId: string | null;
   /** Kosong = tarif standar. Diisi = tarif khusus customer (pemanggil hanya mengirim baris milik customer job). */
   customerId?: string | null;
+  /** Kosong = semua kota. Diisi = tarif kota itu (pemanggil hanya mengirim baris kota job dan baris tanpa kota). */
+  city?: string | null;
   basis: "PER_CONTAINER" | "PER_BL" | "PER_KM_OVER" | "OVERWEIGHT";
   condition: "ALWAYS" | "RED_LANE" | "NON_RED_LANE" | "OPTIONAL";
   price: number;
@@ -94,8 +96,7 @@ export function buildRateCardCharges(items: RateItem[], groups: ContainerGroup[]
   }
   const typeMatch = (r: RateItem, g: ContainerGroup) => !!r.containerTypeId && r.containerTypeId === g.containerTypeId;
   const rateFor = (rows: RateItem[], g: ContainerGroup) =>
-    rows.find((r) => r.customerId && typeMatch(r, g)) ?? rows.find((r) => r.customerId && !r.containerTypeId)
-    ?? rows.find((r) => !r.customerId && typeMatch(r, g)) ?? rows.find((r) => !r.customerId && !r.containerTypeId);
+    bestRate(rows.filter((r) => !r.containerTypeId || typeMatch(r, g)), (r) => typeMatch(r, g));
 
   const unitsOf = (g: ContainerGroup): ContainerUnit[] =>
     g.units?.length ? g.units : Array.from({ length: g.count }, () => ({ containerNo: "", distanceKm: null, weightKg: null }));
@@ -145,7 +146,7 @@ export function buildRateCardCharges(items: RateItem[], groups: ContainerGroup[]
     const first = rows[0];
     const base = { chargeCodeId: first.chargeCodeId, asReceipt: first.chargeCode.asReceipt };
     if (first.basis === "PER_BL") {
-      const bl = rows.find((r) => r.customerId) ?? first;
+      const bl = bestRate(rows, () => false) ?? first;
       out.push({ ...base, qty: 1, unitPrice: r2(bl.price), taxable: bl.taxable, unitLabel: "B/L", description: null });
       continue;
     }
@@ -181,9 +182,49 @@ export function buildRateCardCharges(items: RateItem[], groups: ContainerGroup[]
   return out;
 }
 
+/**
+ * Tarif yang paling khusus: customer, lalu kota, lalu tipe container. Urutannya: customer+kota, customer,
+ * standar+kota, standar; di tiap tingkat tarif tipe container didahulukan. Seri: urutan rate card. Murni.
+ */
+export function bestRate<T extends { customerId?: string | null; city?: string | null }>(rows: T[], typeMatch: (r: T) => boolean): T | undefined {
+  let best: T | undefined;
+  let bestScore = -1;
+  for (const r of rows) {
+    const score = (r.customerId ? 4 : 0) + (r.city ? 2 : 0) + (typeMatch(r) ? 1 : 0);
+    if (score > bestScore) { best = r; bestScore = score; }
+  }
+  return best;
+}
+
+/**
+ * Kota tarif sebuah job: impor dari Port of Discharge, selain itu dari Port of Loading
+ * (mis. Tanjung Priok = Jakarta, Tanjung Perak = Surabaya). Tanpa pelabuhan: null (hanya tarif tanpa kota). Murni.
+ */
+export function jobRateCity(job: { direction: string; pol?: { city: string | null } | null; pod?: { city: string | null } | null }): string | null {
+  const port = job.direction === "IMPORT" ? job.pod : job.pol;
+  return port?.city?.trim() || null;
+}
+
+/** Filter Prisma tarif yang berlaku: tarif standar dan tarif customer job, tanpa kota atau kota job. */
+export function rateCardScope(customerId: string | null, city: string | null): Prisma.RateCardItemWhereInput {
+  return {
+    isActive: true,
+    AND: [
+      { OR: [{ customerId: null }, ...(customerId ? [{ customerId }] : [])] },
+      { OR: [{ city: null }, ...(city ? [{ city }] : [])] },
+    ],
+  };
+}
+
+/** Kota tarif job dari id-nya (mengambil pelabuhan). */
+export async function jobRateCityById(db: Pick<PrismaClient, "job">, jobId: string): Promise<string | null> {
+  const job = await db.job.findUnique({ where: { id: jobId }, select: { direction: true, pol: { select: { city: true } }, pod: { select: { city: true } } } });
+  return job ? jobRateCity(job) : null;
+}
+
 export function toRateItem(r: {
   id: string; chargeCodeId: string; chargeCode: { code: string; name: string; asReceipt: boolean }; containerTypeId: string | null;
-  customerId?: string | null; basis: RateItem["basis"]; condition: RateItem["condition"]; price: Prisma.Decimal | number; thresholdKm: number | null;
+  customerId?: string | null; city?: string | null; basis: RateItem["basis"]; condition: RateItem["condition"]; price: Prisma.Decimal | number; thresholdKm: number | null;
   thresholdKg: number | null; taxable: boolean; sortOrder: number;
 }): RateItem {
   return { ...r, price: Number(r.price) };
@@ -197,7 +238,7 @@ export async function applyRateCard(db: PrismaClient, jobId: string): Promise<nu
   return db.$transaction(async (tx) => {
     const job = await tx.job.findUnique({
       where: { id: jobId },
-      include: { containers: { include: { containerType: true } } },
+      include: { containers: { include: { containerType: true } }, pol: { select: { city: true } }, pod: { select: { city: true } } },
     });
     if (!job) throw new Error("Job tidak ditemukan.");
     if (job.status === "CANCELLED") throw new Error("Job sudah dibatalkan.");
@@ -206,8 +247,8 @@ export async function applyRateCard(db: PrismaClient, jobId: string): Promise<nu
     // Jalur menentukan charge yang ditagih (mis. Red Line hanya jalur merah), jadi wajib dipilih supaya tidak salah tagih.
     if (!job.customsLane) throw new Error("Jalur bea cukai belum dipilih. Pilih jalur hijau, kuning, atau merah di halaman Job, bagian Clearance, lalu hitung lagi.");
 
-    // Tarif standar ditambah tarif khusus customer job ini; tarif customer lain tidak ikut.
-    const items = await tx.rateCardItem.findMany({ where: { isActive: true, OR: [{ customerId: null }, { customerId: job.customerId }] }, include: { chargeCode: true } });
+    // Tarif standar ditambah tarif khusus customer job ini, tanpa kota atau kota pelabuhan job; customer/kota lain tidak ikut.
+    const items = await tx.rateCardItem.findMany({ where: rateCardScope(job.customerId, jobRateCity(job)), include: { chargeCode: true } });
     if (items.length === 0) throw new Error("Rate card masih kosong.");
     const charges = buildRateCardCharges(items.map(toRateItem), groupContainers(job.containers), job.customsLane, job.distanceKm == null ? null : Number(job.distanceKm));
 
@@ -290,18 +331,17 @@ export function unitFromBasis(basis: RateItem["basis"], groups: ContainerGroup[]
  * Tarif khusus customer didahulukan. Charge tanpa tarif tidak masuk peta (unit tetap kosong).
  */
 export async function rateCardUnits(
-  db: Pick<PrismaClient, "rateCardItem">, customerId: string | null, chargeCodeIds: string[], groups: ContainerGroup[],
+  db: Pick<PrismaClient, "rateCardItem">, customerId: string | null, chargeCodeIds: string[], groups: ContainerGroup[], city: string | null = null,
 ): Promise<Map<string, string>> {
   const ids = [...new Set(chargeCodeIds)];
   const out = new Map<string, string>();
   if (!ids.length) return out;
   const items = await db.rateCardItem.findMany({
-    where: { isActive: true, chargeCodeId: { in: ids }, OR: [{ customerId: null }, ...(customerId ? [{ customerId }] : [])] },
-    select: { chargeCodeId: true, basis: true, customerId: true }, orderBy: { sortOrder: "asc" },
+    where: { ...rateCardScope(customerId, city), chargeCodeId: { in: ids } },
+    select: { chargeCodeId: true, basis: true, customerId: true, city: true }, orderBy: { sortOrder: "asc" },
   });
   for (const id of ids) {
-    const rows = items.filter((i) => i.chargeCodeId === id);
-    const pick = rows.find((r) => r.customerId) ?? rows[0];
+    const pick = bestRate(items.filter((i) => i.chargeCodeId === id), () => false);
     const unit = pick ? unitFromBasis(pick.basis, groups) : null;
     if (unit) out.set(id, unit);
   }
@@ -322,7 +362,7 @@ export async function displayUnits(
   const maps = new Map<string, Map<string, string>>();
   for (const jobId of jobIds) {
     const groups = groupContainers(containers.filter((c) => c.jobId === jobId));
-    maps.set(jobId, await rateCardUnits(db, customerId, need.filter((l) => l.jobId === jobId).map((l) => l.chargeCodeId), groups));
+    maps.set(jobId, await rateCardUnits(db, customerId, need.filter((l) => l.jobId === jobId).map((l) => l.chargeCodeId), groups, await jobRateCityById(db, jobId)));
   }
   const noJob = need.some((l) => !l.jobId) ? await rateCardUnits(db, customerId, need.filter((l) => !l.jobId).map((l) => l.chargeCodeId), []) : new Map<string, string>();
   return lines.map((l) => l.unitLabel ?? (l.jobId ? maps.get(l.jobId) : noJob)?.get(l.chargeCodeId) ?? null);

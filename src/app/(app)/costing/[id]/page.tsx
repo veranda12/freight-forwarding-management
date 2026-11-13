@@ -8,7 +8,7 @@ import { LANE_LABELS } from "@/lib/enums";
 import { formatIDR, formatMoney, formatNumber, formatPercent } from "@/lib/format";
 import { chargeLockReason } from "@/lib/job-charges";
 import { summarizeContainers } from "@/lib/job-containers";
-import { displayUnits } from "@/lib/rate-card";
+import { displayUnits, jobRateCity } from "@/lib/rate-card";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -31,6 +31,7 @@ export default async function JobCostingPage({ params }: { params: Promise<{ id:
     include: {
       customer: true,
       containers: { include: { containerType: true } },
+      pol: { select: { city: true } }, pod: { select: { city: true } },
       costings: {
         include: { chargeCode: true, vendor: true, vehicle: true, voucher: { select: { number: true } }, invoice: { select: { number: true, status: true } } },
         orderBy: [{ side: "asc" }, { sortOrder: "asc" }],
@@ -99,6 +100,7 @@ export default async function JobCostingPage({ params }: { params: Promise<{ id:
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/30 px-4 py-3 text-sm">
             <p className="text-muted-foreground">
               Selling charge bisa dihitung otomatis dari rate card: {job.containers.length ? summarizeContainers(job.containers) : "belum ada container"}
+              {" · "}{jobRateCity(job) ? `tarif kota ${jobRateCity(job)}` : "tarif tanpa kota (pelabuhan belum diisi)"}
               {" · "}{job.customsLane ? LANE_LABELS[job.customsLane] : <span className="font-semibold text-destructive">jalur bea cukai belum dipilih</span>}{" · "}{(() => {
                 const missing = job.containers.filter((c) => c.distanceKm == null && job.distanceKm == null).length;
                 return !job.containers.length ? "jarak belum diisi" : missing ? `${missing} container belum ada jarak` : "jarak container lengkap";

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildRateCardCharges, groupContainers, type RateItem } from "../../src/lib/rate-card";
+import { bestRate, buildRateCardCharges, groupContainers, jobRateCity, type RateItem } from "../../src/lib/rate-card";
 import { amountInWords, numberToWords } from "../../src/lib/amount-words";
 
 let seq = 0;
@@ -156,6 +156,49 @@ describe("surcharge jarak vs overweight: ambil yang lebih besar", () => {
       ],
     }], "GREEN", null).filter((o) => o.chargeCodeId === "OVWT");
     expect(out).toEqual([expect.objectContaining({ qty: 2, unitPrice: 600_000, description: "Overweight 25 ton over 23 ton" })]);
+  });
+});
+
+describe("tarif per kota", () => {
+  // Pemanggil sudah menyaring tarif ke kota job + tanpa kota; di sini tarif Surabaya ikut, kota lain tidak.
+  const sby = [
+    item("CC", { price: 2_000_000 }),
+    item("CC", { city: "Surabaya", price: 2_200_000 }),
+    item("CC", { containerTypeId: "t20", price: 1_800_000 }),
+    item("TRUCK", { price: 3_100_000 }),
+    item("PIB", { basis: "PER_BL", price: 1_000_000 }),
+    item("PIB", { basis: "PER_BL", city: "Surabaya", price: 1_250_000 }),
+  ];
+  const mixed = [{ containerTypeId: "t20", code: "20GP", count: 1 }, { containerTypeId: "t40", code: "40HC", count: 1 }];
+
+  it("tarif kota menggantikan tarif tanpa kota; charge tanpa tarif kota tetap pakai tarif umum", () => {
+    const m = byCode(buildRateCardCharges(sby, mixed, "GREEN", 10));
+    expect(m["CC:40HC"].unitPrice).toBe(2_200_000);
+    expect(m["TRUCK:40HC"].unitPrice).toBe(3_100_000);
+    expect(m["PIB:B/L"].unitPrice).toBe(1_250_000);
+  });
+
+  it("tarif kota (semua tipe) lebih kuat dari tarif tipe container tanpa kota", () => {
+    expect(byCode(buildRateCardCharges(sby, mixed, "GREEN", 10))["CC:20GP"].unitPrice).toBe(2_200_000);
+  });
+
+  it("urutan: customer+kota, customer, standar+kota, standar", () => {
+    const rows = [
+      { id: "std", customerId: null, city: null }, { id: "stdKota", customerId: null, city: "Surabaya" },
+      { id: "cust", customerId: "c1", city: null }, { id: "custKota", customerId: "c1", city: "Surabaya" },
+    ];
+    const pick = (ids: string[]) => bestRate(rows.filter((r) => ids.includes(r.id)), () => false)?.id;
+    expect(pick(["std", "stdKota", "cust", "custKota"])).toBe("custKota");
+    expect(pick(["std", "stdKota", "cust"])).toBe("cust");
+    expect(pick(["std", "stdKota"])).toBe("stdKota");
+    expect(pick(["std"])).toBe("std");
+  });
+
+  it("kota job: impor dari Port of Discharge, ekspor dari Port of Loading", () => {
+    const pol = { city: "Jakarta" }, pod = { city: "Surabaya" };
+    expect(jobRateCity({ direction: "IMPORT", pol, pod })).toBe("Surabaya");
+    expect(jobRateCity({ direction: "EXPORT", pol, pod })).toBe("Jakarta");
+    expect(jobRateCity({ direction: "IMPORT", pol, pod: null })).toBeNull();
   });
 });
 

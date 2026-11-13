@@ -1,5 +1,5 @@
 import { Prisma } from "@prisma/client";
-import { buildRateCardCharges, groupContainers, toRateItem, type GeneratedCharge } from "./rate-card";
+import { buildRateCardCharges, groupContainers, jobRateCity, rateCardScope, toRateItem, type GeneratedCharge } from "./rate-card";
 import { rebuildInvoice } from "./receivables";
 
 type Tx = Prisma.TransactionClient;
@@ -29,10 +29,13 @@ async function nextSort(tx: Tx, jobId: string) {
 
 /** Tarif rate card untuk satu charge pada job ini, tanpa syarat jalur. Kosong bila tidak ada tarif atau data job belum lengkap. */
 async function rateCardFor(tx: Tx, jobId: string, chargeCodeId: string): Promise<GeneratedCharge[]> {
-  const job = await tx.job.findUnique({ where: { id: jobId }, include: { containers: { include: { containerType: true } } } });
+  const job = await tx.job.findUnique({
+    where: { id: jobId },
+    include: { containers: { include: { containerType: true } }, pol: { select: { city: true } }, pod: { select: { city: true } } },
+  });
   if (!job) return [];
   const items = await tx.rateCardItem.findMany({
-    where: { isActive: true, chargeCodeId, condition: { not: "OPTIONAL" }, OR: [{ customerId: null }, { customerId: job.customerId }] },
+    where: { ...rateCardScope(job.customerId, jobRateCity(job)), chargeCodeId, condition: { not: "OPTIONAL" } },
     include: { chargeCode: true },
   });
   if (!items.length) return [];

@@ -5,7 +5,7 @@ import { renderToBuffer } from "@react-pdf/renderer";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { can } from "@/lib/rbac";
-import { displayUnits, groupContainers } from "@/lib/rate-card";
+import { displayUnits, groupContainers, jobRateCity, rateCardScope } from "@/lib/rate-card";
 import { mergeReceiptLines } from "@/lib/pdf/invoice-print-lines";
 import { InvoiceDocument, type PdfExcludedLine, type PdfInvoice, type PdfInvoiceCompany } from "@/lib/pdf/invoice-document";
 
@@ -39,7 +39,7 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
   // Biaya khusus jalur merah dicetak sebagai "Excluded" bila job bukan jalur merah, seperti contoh invoice clearance.
   if (job?.customsLane && job.customsLane !== "RED" && inv.lines.some((l) => l.section === "LOCAL")) {
     const red = await prisma.rateCardItem.findMany({
-      where: { isActive: true, condition: "RED_LANE", OR: [{ customerId: null }, { customerId: inv.customerId }] },
+      where: { ...rateCardScope(inv.customerId, jobRateCity(job)), condition: "RED_LANE" },
       include: { chargeCode: true }, orderBy: { sortOrder: "asc" },
     });
     const seen = new Set<string>();

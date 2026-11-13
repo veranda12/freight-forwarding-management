@@ -1566,6 +1566,9 @@ model RateCardItem {
   /// Kosong = tarif standar semua customer. Diisi = tarif khusus customer itu, menggantikan tarif standar yang setara.
   customerId      String?
   customer        Customer?       @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  /// Kosong = berlaku di semua kota. Diisi (mis. "Surabaya") = hanya untuk job yang pelabuhannya di kota itu
+  /// (impor: Port of Discharge, ekspor: Port of Loading), menggantikan tarif tanpa kota yang setara.
+  city            String?
   basis           TariffBasis
   condition       TariffCondition @default(ALWAYS)
   price           Decimal         @default(0) @db.Decimal(18, 2)
