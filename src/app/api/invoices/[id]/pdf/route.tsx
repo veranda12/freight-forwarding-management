@@ -6,6 +6,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { can } from "@/lib/rbac";
 import { groupContainers } from "@/lib/rate-card";
+import { mergeReceiptLines } from "@/lib/pdf/invoice-print-lines";
 import { InvoiceDocument, type PdfExcludedLine, type PdfInvoice, type PdfInvoiceCompany } from "@/lib/pdf/invoice-document";
 
 export const runtime = "nodejs";
@@ -71,10 +72,12 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
       lane: !multi && job.customsLane ? LANE_EN[job.customsLane] : null,
       containerNos: multi ? null : job.containers.map((c) => c.containerNo).join(", ") || null,
     } : null,
-    lines: inv.lines.map((l) => ({
-      section: l.section ?? l.chargeCode.invoiceSection, name: l.description ?? l.chargeCode.name, note: multi && l.job ? [`B/L ${blOf(l.job)}`, l.note].filter(Boolean).join(" · ") : l.note,
+    // Reimburse dengan charge yang sama (mis. LOLO lift on dan lift off beda vendor) dicetak satu baris.
+    lines: mergeReceiptLines(inv.lines.map((l) => ({
+      section: l.section ?? l.chargeCode.invoiceSection, name: l.description ?? l.chargeCode.name, note: l.note,
       qty: Number(l.qty), unitLabel: l.unitLabel, unitPrice: Number(l.unitPrice), amount: Number(l.amount), asReceipt: l.asReceipt,
-    })),
+      bl: multi && l.job ? blOf(l.job) : null,
+    }))).map(({ bl, ...l }) => ({ ...l, note: bl ? [`B/L ${bl}`, l.note].filter(Boolean).join(" · ") : l.note })),
     excluded: multi ? [] : excluded,
   };
 

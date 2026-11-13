@@ -92,7 +92,8 @@ export function ProofDocument({ doc }: { doc: ProofDoc }) {
   return (
     <Document title={`${doc.title ?? f.title} ${doc.number}`}>
       <Page size="A5" orientation="landscape" style={s.page}>
-        <View style={s.box}>
+        {/* Kotak setinggi halaman: sedikit atau banyak baris, tanda tangan tetap di bawah. */}
+        <View style={[s.box, { flexGrow: 1 }]}>
           {/* Kop: logo | nama PT, SOP, Doc. No, Revision */}
           <View style={[s.row, s.bb]}>
             <View style={[s.br, { width: LOGO_W, alignItems: "center", justifyContent: "center", padding: 4 }]}>
@@ -156,7 +157,7 @@ export function ProofDocument({ doc }: { doc: ProofDoc }) {
             <Text style={[s.cell, s.br, s.right, { width: cols.amt }]}>{money(totalDebit)}</Text>
             <Text style={[s.cell, s.right, { flex: 1 }]}>{money(totalCredit)}</Text>
           </View>
-          <View style={[s.bb, { height: doc.info.length > 2 ? 14 : 34 }]} />
+          <View style={[s.bb, { flexGrow: 1, minHeight: 14 }]} />
 
           {/* Tanda tangan */}
           <View style={s.row} wrap={false}>
@@ -196,7 +197,8 @@ const v = StyleSheet.create({
   table: { borderWidth: B, borderColor: INK, marginTop: 6 },
   th: { fontFamily: "Helvetica-Bold", textAlign: "center", paddingVertical: 3, paddingHorizontal: 4 },
   td: { paddingVertical: 2.5, paddingHorizontal: 4 },
-  signs: { flexDirection: "row", marginTop: 12, justifyContent: "space-between" },
+  // marginTop auto: tanda tangan selalu di bawah halaman (terakhir), sedikit atau banyak baris.
+  signs: { flexDirection: "row", marginTop: "auto", paddingTop: 12, justifyContent: "space-between" },
   sign: { borderWidth: B, borderColor: INK, width: (INNER - 3 * 8) / 4 },
   signTop: { textAlign: "center", paddingVertical: 2.5, borderBottomWidth: B, borderColor: INK },
   signBottom: { textAlign: "center", fontFamily: "Helvetica-Bold", paddingVertical: 2.5 },
