@@ -18,7 +18,7 @@ import { Button } from "@/components/ui/button";
 import { DocVouchersCard } from "@/components/doc-vouchers-card";
 import { vouchersOfDoc } from "@/lib/doc-vouchers";
 import { PayBillButton } from "../pay-bill-button";
-import { billChangeState, vendorPaymentCancelState } from "@/lib/payables";
+import { billChangeState, openIdrBillsByVendor, vendorPaymentCancelState } from "@/lib/payables";
 import { CancelReceiptButton } from "../../payments/cancel-receipt-button";
 import { BillChangeButtons } from "../bill-change-buttons";
 
@@ -53,6 +53,7 @@ export default async function BillDetail({ params }: { params: Promise<{ id: str
   // Voucher bill hanya catatan (tanpa jurnal): bill IDR yang tidak dibatalkan, lunas atau belum.
   const canVoucher = can(user.role, "vouchers", "write") && !isFx && bill.status !== "CANCELLED";
   const cash = await cashAccountOptions(prisma, "payment");
+  const otherBills = canPay && payable && !isFx ? ((await openIdrBillsByVendor(prisma, [bill.vendorId]))[bill.vendorId] ?? []).filter((b) => b.id !== bill.id) : [];
   // Tombol Batalkan Pembayaran per pembayaran aktif, khusus Admin.
   const cancelStates = new Map<string, Awaited<ReturnType<typeof vendorPaymentCancelState>>>();
   if (user.role === "ADMIN") {
@@ -85,6 +86,7 @@ export default async function BillDetail({ params }: { params: Promise<{ id: str
               defaultPaymentRate={defaultPaymentRate}
               cashAccounts={cash.options}
               defaultCashId={cash.defaultId}
+              otherBills={otherBills}
             />
           )}
         </PageHeader>

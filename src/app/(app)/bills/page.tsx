@@ -16,6 +16,7 @@ import { PageHeader } from "@/components/page-header";
 import { StatStrip } from "@/components/stat-strip";
 import { Card, CardContent } from "@/components/ui/card";
 import { BillGroupsTable } from "./bill-groups-table";
+import { openIdrBillsByVendor } from "@/lib/payables";
 
 export const dynamic = "force-dynamic";
 
@@ -45,6 +46,7 @@ export default async function BillsPage({ searchParams }: { searchParams: Promis
     prisma.vendorBill.findMany({ distinct: ["currency"], select: { currency: true }, orderBy: { currency: "asc" } }),
   ]);
   const { groups, totals, capped } = data;
+  const openBills = await openIdrBillsByVendor(prisma, groups.flatMap((g) => g.portions.flatMap((p) => (p.bill.vendorId ? [p.bill.vendorId] : []))));
   const pages = Math.max(1, Math.ceil(groups.length / GROUPS_PER_PAGE));
   const page = Math.min(f.page, pages);
   const shown = groups.slice((page - 1) * GROUPS_PER_PAGE, page * GROUPS_PER_PAGE);
@@ -129,7 +131,7 @@ export default async function BillsPage({ searchParams }: { searchParams: Promis
 
       <BillGroupsTable
         groups={shown} today={today} rates={rates}
-        canPay={can(user.role, "payments", "write")} cashAccounts={cash.options} defaultCashId={cash.defaultId}
+        canPay={can(user.role, "payments", "write")} cashAccounts={cash.options} defaultCashId={cash.defaultId} openBills={openBills}
       />
 
       {pages > 1 && (

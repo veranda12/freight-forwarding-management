@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { assertCan } from "@/lib/auth-helpers";
 import { writeAudit } from "@/lib/audit";
-import { cancelBillCore, createBillCore, recordVendorPaymentCore, updateBillCore, type BillOpts, type VendorPaymentInput } from "@/lib/payables";
+import { cancelBillCore, createBillCore, recordVendorPaymentCore, recordVendorPaymentMultiCore, updateBillCore, type BillOpts, type VendorPaymentInput } from "@/lib/payables";
 import { errorMessage } from "@/lib/action-error";
 
 type Result<T = object> = ({ ok: true } & T) | { ok: false; error: string };
@@ -24,20 +24,39 @@ export async function createBillAction(vendorId: string, lineIds: string[], opts
   } catch (e) { return fail(e); }
 }
 
-/** Mencatat pembayaran ke vendor (IDR, atau valas dengan kurs pembayaran). */
-export async function recordVendorPaymentAction(billId: string, input: VendorPaymentInput): Promise<Result> {
+/** Mencatat pembayaran ke vendor (IDR, atau valas dengan kurs pembayaran). `journalEntryId` dipakai untuk cetak bukti. */
+export async function recordVendorPaymentAction(billId: string, input: VendorPaymentInput): Promise<Result<{ journalEntryId: string }>> {
   const user = await assertCan("payments", "write");
   try {
-    await recordVendorPaymentCore(prisma, billId, input, user.id);
+    const paid = await recordVendorPaymentCore(prisma, billId, input, user.id);
     const bill = await prisma.vendorBill.findUnique({ where: { id: billId }, select: { number: true, currency: true } });
     const summary = bill?.currency && bill.currency !== "IDR"
       ? `${bill.number}: ${bill.currency} ${input.amountForeign ?? 0}`
       : `${bill?.number ?? billId}: Rp ${Number(input.amount ?? 0).toLocaleString("id-ID")}`;
-    await writeAudit({ entity: "VendorBill", entityId: billId, action: "PAYMENT", summary, userId: user.id });
+    await writeAudit({ entity: "VendorBill", entityId: billId, action: "PAYMENT", summary: `${paid.number} ${summary}`, userId: user.id });
     revalidatePath("/bills");
     revalidatePath("/payments");
     revalidatePath("/accounting");
-    return { ok: true };
+    return { ok: true, journalEntryId: paid.journalEntryId };
+  } catch (e) { return fail(e); }
+}
+
+/** Satu pembayaran (satu nomor bukti) untuk beberapa bill IDR dari vendor yang sama. */
+export async function recordVendorPaymentsAction(
+  items: { billId: string; amount: number }[], input: Omit<VendorPaymentInput, "amount" | "amountForeign" | "paymentRate">,
+): Promise<Result<{ journalEntryId: string }>> {
+  const user = await assertCan("payments", "write");
+  try {
+    const paid = await recordVendorPaymentMultiCore(prisma, items, input, user.id);
+    const bills = await prisma.vendorBill.findMany({ where: { id: { in: items.map((i) => i.billId) } }, select: { id: true, number: true } });
+    for (const i of items) {
+      const number = bills.find((b) => b.id === i.billId)?.number ?? i.billId;
+      await writeAudit({ entity: "VendorBill", entityId: i.billId, action: "PAYMENT", summary: `${paid.number} ${number}: Rp ${Number(i.amount).toLocaleString("id-ID")}`, userId: user.id });
+    }
+    revalidatePath("/bills");
+    revalidatePath("/payments");
+    revalidatePath("/accounting");
+    return { ok: true, journalEntryId: paid.journalEntryId };
   } catch (e) { return fail(e); }
 }
 

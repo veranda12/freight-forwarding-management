@@ -12,7 +12,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/empty-state";
 import { BillStatusBadge } from "@/components/status-badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { PayBillButton } from "./pay-bill-button";
+import { PayBillButton, type OpenBill } from "./pay-bill-button";
 
 const GROUP_STATUS: Record<GroupStatus, { label: string; variant: "secondary" | "warning" | "success" | "muted" }> = {
   UNPAID: { label: "Belum dibayar", variant: "secondary" },
@@ -24,10 +24,11 @@ const GROUP_STATUS: Record<GroupStatus, { label: string; variant: "secondary" | 
 const money = (n: number) => <span className="tabular-nums">{formatIDR(n)}</span>;
 
 export function BillGroupsTable({
-  groups, today, rates, canPay, cashAccounts, defaultCashId,
+  groups, today, rates, canPay, cashAccounts, defaultCashId, openBills = {},
 }: {
   groups: BillGroup[]; today: string; rates: Record<string, number | null>;
   canPay: boolean; cashAccounts: { id: string; label: string }[]; defaultCashId: string | null;
+  openBills?: Record<string, OpenBill[]>;
 }) {
   const [open, setOpen] = useState<Set<string>>(new Set());
   const toggle = (k: string) => setOpen((s) => { const n = new Set(s); if (n.has(k)) n.delete(k); else n.add(k); return n; });
@@ -120,6 +121,7 @@ export function BillGroupsTable({
                                         outstandingForeign={Math.round((b.amountForeign - b.amountPaidForeign) * 100) / 100}
                                         bookedRate={b.exchangeRate} defaultPaymentRate={rates[b.currency] ?? null}
                                         cashAccounts={cashAccounts} defaultCashId={defaultCashId}
+                                        otherBills={(b.vendorId ? openBills[b.vendorId] ?? [] : []).filter((o) => o.id !== b.id)}
                                       />
                                     )}
                                   </span>

@@ -67,6 +67,8 @@ export type BillLineInput = { id: string; charge: string; description: string | 
 
 export type BillInput = {
   id: string; number: string; vendorRef: string | null; vendor: string;
+  /** Untuk menawarkan bill lain vendor yang sama saat Bayar. */
+  vendorId?: string;
   date: string; dueDate: string; currency: string; status: BillStatus;
   subtotal: number; total: number; amountPaid: number;
   amountForeign: number; amountPaidForeign: number; exchangeRate: number;
@@ -285,7 +287,7 @@ export async function loadBillGroups(db: Db, f: BillFilter, today: string) {
     orderBy: [{ dueDate: "asc" }, { number: "asc" }],
     take: MAX_BILLS + 1,
     select: {
-      id: true, number: true, vendorRef: true, date: true, dueDate: true, currency: true, status: true,
+      id: true, number: true, vendorRef: true, vendorId: true, date: true, dueDate: true, currency: true, status: true,
       subtotal: true, total: true, amountPaid: true, amountForeign: true, amountPaidForeign: true, exchangeRate: true,
       ppnAmount: true, pph23Amount: true, pph26Amount: true,
       vendor: { select: { name: true } }, job: { select: JOB_SELECT },
@@ -293,7 +295,7 @@ export async function loadBillGroups(db: Db, f: BillFilter, today: string) {
     },
   });
   const bills: BillInput[] = rows.slice(0, MAX_BILLS).map((b) => ({
-    id: b.id, number: b.number, vendorRef: b.vendorRef, vendor: b.vendor.name,
+    id: b.id, number: b.number, vendorRef: b.vendorRef, vendor: b.vendor.name, vendorId: b.vendorId,
     date: b.date.toISOString(), dueDate: b.dueDate.toISOString(), currency: b.currency, status: b.status,
     subtotal: Number(b.subtotal), total: Number(b.total), amountPaid: Number(b.amountPaid),
     amountForeign: Number(b.amountForeign), amountPaidForeign: Number(b.amountPaidForeign), exchangeRate: Number(b.exchangeRate),

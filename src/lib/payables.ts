@@ -300,6 +300,7 @@ export async function recordVendorPaymentTx(tx: Prisma.TransactionClient, billId
   if (!bill) throw new Error("Bill tidak ditemukan.");
   if (bill.status === "CANCELLED") throw new Error("Bill sudah dibatalkan.");
   if (bill.status === "PAID") throw new Error("Bill sudah lunas.");
+  if (bill.currency === IDR) return recordVendorPaymentMultiTx(tx, [{ billId: bill.id, amount: Number(input.amount) }], input, userId);
   const date = input.date ? new Date(`${input.date}T12:00:00+07:00`) : new Date();
 
   const acc = await accountMap(tx);
@@ -307,35 +308,6 @@ export async function recordVendorPaymentTx(tx: Prisma.TransactionClient, billId
   assertCashCurrency(cash, bill.currency, "pembayaran bill");
   const number = await genProofNumber(tx, cashProofCode(cash.kind, "OUT"), date);
   const outIdr = r2(Number(bill.total) - Number(bill.amountPaid));
-
-  if (bill.currency === IDR) {
-    const amount = r2(Number(input.amount));
-    if (!(amount > 0)) throw new Error("Nominal harus lebih dari 0.");
-    if (amount > outIdr + 0.5) throw new Error(`Melebihi sisa hutang (${outIdr}).`);
-    const pay = await tx.payment.create({
-      data: {
-        number, direction: "PAYMENT", date, vendorId: bill.vendorId,
-        method: (input.method as any) ?? "TRANSFER", reference: input.reference, currency: IDR, bankAccountId: cash.bankAccountId,
-        amount: new Prisma.Decimal(amount),
-        allocations: { create: [{ billId: bill.id, amount: new Prisma.Decimal(amount) }] },
-      },
-    });
-    const jeId = await postJournal(tx, {
-      date, description: `Pembayaran ${number} - ${bill.vendor.name}`, source: "PAYMENT", sourceId: pay.id,
-      lines: [
-        { accountId: acc[ACC.AP], debit: amount, description: `Pelunasan ${bill.number}` },
-        { accountId: cash.coaId, credit: amount, description: `Pembayaran dari ${cash.name}` },
-      ],
-      createdById: userId, number,
-    });
-    await tx.payment.update({ where: { id: pay.id }, data: { journalEntryId: jeId } });
-    const newPaid = r2(Number(bill.amountPaid) + amount);
-    await tx.vendorBill.update({
-      where: { id: bill.id },
-      data: { amountPaid: new Prisma.Decimal(newPaid), status: newPaid >= Number(bill.total) - 0.5 ? "PAID" : "PARTIAL" },
-    });
-    return { paymentId: pay.id, number, journalEntryId: jeId };
-  }
 
   const aF = r2(Number(input.amountForeign));
   if (!(aF > 0)) throw new Error(`Nominal ${bill.currency} harus lebih dari 0.`);
@@ -380,9 +352,84 @@ export async function recordVendorPaymentTx(tx: Prisma.TransactionClient, billId
   return { paymentId: pay.id, number, journalEntryId: jeId };
 }
 
+/**
+ * Satu pembayaran untuk beberapa bill IDR dari vendor yang sama (mis. vendor mengirim beberapa invoice, dibayar
+ * sekali transfer). Satu nomor bukti dan satu jurnal: debit hutang per bill, kredit kas/bank sebesar totalnya.
+ */
+export async function recordVendorPaymentMultiTx(
+  tx: Prisma.TransactionClient, items: { billId: string; amount: number }[], input: Omit<VendorPaymentInput, "amount" | "amountForeign" | "paymentRate">, userId?: string,
+): Promise<PaymentRecorded> {
+  if (items.length === 0) throw new Error("Pilih minimal satu bill.");
+  if (new Set(items.map((i) => i.billId)).size !== items.length) throw new Error("Ada bill yang dipilih dua kali.");
+  const bills = await tx.vendorBill.findMany({ where: { id: { in: items.map((i) => i.billId) } }, include: { vendor: true } });
+  const rows = items.map((i) => {
+    const bill = bills.find((b) => b.id === i.billId);
+    if (!bill) throw new Error("Bill tidak ditemukan.");
+    if (bill.status === "CANCELLED") throw new Error(`${bill.number} sudah dibatalkan.`);
+    if (bill.status === "PAID") throw new Error(`${bill.number} sudah lunas.`);
+    if (bill.currency !== IDR) throw new Error(`${bill.number} bill valas, bayar terpisah.`);
+    const amount = r2(Number(i.amount));
+    if (!(amount > 0)) throw new Error(items.length > 1 ? `Nominal ${bill.number} harus lebih dari 0.` : "Nominal harus lebih dari 0.");
+    const out = r2(Number(bill.total) - Number(bill.amountPaid));
+    if (amount > out + 0.5) throw new Error(items.length > 1 ? `Nominal ${bill.number} melebihi sisa hutang (${out}).` : `Melebihi sisa hutang (${out}).`);
+    return { bill, amount };
+  });
+  const vendor = rows[0].bill.vendor;
+  if (rows.some((r) => r.bill.vendorId !== vendor.id)) throw new Error("Satu pembayaran hanya untuk bill dari vendor yang sama.");
+  const date = input.date ? new Date(`${input.date}T12:00:00+07:00`) : new Date();
+  const acc = await accountMap(tx);
+  const cash = await resolveCashAccount(tx, input.bankAccountId, "payment");
+  assertCashCurrency(cash, IDR, "pembayaran bill");
+  const number = await genProofNumber(tx, cashProofCode(cash.kind, "OUT"), date);
+  const total = r2(rows.reduce((s, r) => s + r.amount, 0));
+
+  const pay = await tx.payment.create({
+    data: {
+      number, direction: "PAYMENT", date, vendorId: vendor.id,
+      method: (input.method as any) ?? "TRANSFER", reference: input.reference, currency: IDR, bankAccountId: cash.bankAccountId,
+      amount: new Prisma.Decimal(total),
+      allocations: { create: rows.map((r) => ({ billId: r.bill.id, amount: new Prisma.Decimal(r.amount) })) },
+    },
+  });
+  const jeId = await postJournal(tx, {
+    date, description: `Pembayaran ${number} - ${vendor.name}`, source: "PAYMENT", sourceId: pay.id,
+    lines: [
+      ...rows.map((r) => ({ accountId: acc[ACC.AP], debit: r.amount, description: `Pelunasan ${r.bill.number}${r.bill.vendorRef ? ` (Inv ${r.bill.vendorRef})` : ""}` })),
+      { accountId: cash.coaId, credit: total, description: `Pembayaran dari ${cash.name}` },
+    ],
+    createdById: userId, number,
+  });
+  await tx.payment.update({ where: { id: pay.id }, data: { journalEntryId: jeId } });
+  for (const r of rows) {
+    const newPaid = r2(Number(r.bill.amountPaid) + r.amount);
+    await tx.vendorBill.update({
+      where: { id: r.bill.id },
+      data: { amountPaid: new Prisma.Decimal(newPaid), status: newPaid >= Number(r.bill.total) - 0.5 ? "PAID" : "PARTIAL" },
+    });
+  }
+  return { paymentId: pay.id, number, journalEntryId: jeId };
+}
+
+/** Bill IDR yang belum lunas per vendor, untuk pilihan "bayar sekalian" di dialog Bayar. */
+export async function openIdrBillsByVendor(db: PrismaClient, vendorIds: string[]) {
+  const rows = vendorIds.length ? await db.vendorBill.findMany({
+    where: { vendorId: { in: [...new Set(vendorIds)] }, currency: IDR, status: { in: ["UNPAID", "PARTIAL"] } },
+    orderBy: [{ dueDate: "asc" }, { number: "asc" }],
+    select: { id: true, number: true, vendorRef: true, vendorId: true, total: true, amountPaid: true },
+  }) : [];
+  const out: Record<string, { id: string; number: string; vendorRef: string | null; outstanding: number }[]> = {};
+  for (const b of rows) (out[b.vendorId] ??= []).push({ id: b.id, number: b.number, vendorRef: b.vendorRef, outstanding: r2(Number(b.total) - Number(b.amountPaid)) });
+  return out;
+}
+
 /** Pembayaran ke vendor dalam transaksinya sendiri. */
-export async function recordVendorPaymentCore(db: PrismaClient, billId: string, input: VendorPaymentInput, userId?: string): Promise<void> {
-  await db.$transaction((tx) => recordVendorPaymentTx(tx, billId, input, userId));
+export async function recordVendorPaymentCore(db: PrismaClient, billId: string, input: VendorPaymentInput, userId?: string): Promise<PaymentRecorded> {
+  return db.$transaction((tx) => recordVendorPaymentTx(tx, billId, input, userId));
+}
+
+/** Pembayaran beberapa bill IDR satu vendor dalam transaksinya sendiri. */
+export async function recordVendorPaymentMultiCore(db: PrismaClient, items: { billId: string; amount: number }[], input: Omit<VendorPaymentInput, "amount" | "amountForeign" | "paymentRate">, userId?: string): Promise<PaymentRecorded> {
+  return db.$transaction((tx) => recordVendorPaymentMultiTx(tx, items, input, userId));
 }
 
 type Db = PrismaClient | Prisma.TransactionClient;
