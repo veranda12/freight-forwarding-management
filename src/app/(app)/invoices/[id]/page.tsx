@@ -20,6 +20,7 @@ import { InvoiceStatusBadge } from "@/components/status-badge";
 import { Breadcrumbs } from "@/components/breadcrumbs";
 import { DocVouchersCard } from "@/components/doc-vouchers-card";
 import { vouchersOfDoc } from "@/lib/doc-vouchers";
+import { displayUnits } from "@/lib/rate-card";
 
 export const dynamic = "force-dynamic";
 
@@ -36,6 +37,9 @@ export default async function InvoiceDetail({ params }: { params: Promise<{ id: 
     },
   });
   if (!inv) notFound();
+  // Baris tanpa unit (mis. reimburse dari buying) memakai unit dari rate card: 40HC, B/L, dst.
+  const units = await displayUnits(prisma, inv.customerId, inv.lines.map((l) => ({ chargeCodeId: l.chargeCodeId, unitLabel: l.unitLabel, jobId: l.jobId ?? inv.jobId })));
+  inv.lines.forEach((l, i) => { l.unitLabel = units[i]; });
 
   const journal = inv.journalEntryId
     ? await prisma.journalEntry.findUnique({ where: { id: inv.journalEntryId }, include: { lines: { include: { account: true } } } })

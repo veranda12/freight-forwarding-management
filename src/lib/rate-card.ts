@@ -277,3 +277,53 @@ export async function reapplyRateCardAfterLaneChange(db: PrismaClient, jobId: st
     return { recalculated: false, error: e instanceof Error ? e.message : "Gagal menghitung ulang rate card." };
   }
 }
+
+/** Unit cetak dari dasar hitung rate card: per B/L jadi "B/L", per container jadi tipe container job (campuran: "20GP/40HC"). */
+export function unitFromBasis(basis: RateItem["basis"], groups: ContainerGroup[]): string | null {
+  if (basis === "PER_BL") return "B/L";
+  return groups.length ? groups.map((g) => g.code).join("/") : null;
+}
+
+/**
+ * Unit untuk baris yang tidak membawa unit, mis. reimburse dari biaya buying (LOLO, Storage, Parking, Behandle):
+ * mengikuti dasar hitung charge itu di rate card, sesuai kolom Unit di rate card client (permintaan 13 Nov).
+ * Tarif khusus customer didahulukan. Charge tanpa tarif tidak masuk peta (unit tetap kosong).
+ */
+export async function rateCardUnits(
+  db: Pick<PrismaClient, "rateCardItem">, customerId: string | null, chargeCodeIds: string[], groups: ContainerGroup[],
+): Promise<Map<string, string>> {
+  const ids = [...new Set(chargeCodeIds)];
+  const out = new Map<string, string>();
+  if (!ids.length) return out;
+  const items = await db.rateCardItem.findMany({
+    where: { isActive: true, chargeCodeId: { in: ids }, OR: [{ customerId: null }, ...(customerId ? [{ customerId }] : [])] },
+    select: { chargeCodeId: true, basis: true, customerId: true }, orderBy: { sortOrder: "asc" },
+  });
+  for (const id of ids) {
+    const rows = items.filter((i) => i.chargeCodeId === id);
+    const pick = rows.find((r) => r.customerId) ?? rows[0];
+    const unit = pick ? unitFromBasis(pick.basis, groups) : null;
+    if (unit) out.set(id, unit);
+  }
+  return out;
+}
+
+/**
+ * Unit tampilan per baris (invoice bisa lintas job): baris yang sudah punya unit dipakai apa adanya,
+ * yang kosong diisi dari rate card sesuai container job baris itu.
+ */
+export async function displayUnits(
+  db: PrismaClient, customerId: string | null, lines: { chargeCodeId: string; unitLabel: string | null; jobId: string | null }[],
+): Promise<(string | null)[]> {
+  const need = lines.filter((l) => !l.unitLabel);
+  if (!need.length) return lines.map((l) => l.unitLabel);
+  const jobIds = [...new Set(need.flatMap((l) => (l.jobId ? [l.jobId] : [])))];
+  const containers = jobIds.length ? await db.jobContainer.findMany({ where: { jobId: { in: jobIds } }, include: { containerType: true } }) : [];
+  const maps = new Map<string, Map<string, string>>();
+  for (const jobId of jobIds) {
+    const groups = groupContainers(containers.filter((c) => c.jobId === jobId));
+    maps.set(jobId, await rateCardUnits(db, customerId, need.filter((l) => l.jobId === jobId).map((l) => l.chargeCodeId), groups));
+  }
+  const noJob = need.some((l) => !l.jobId) ? await rateCardUnits(db, customerId, need.filter((l) => !l.jobId).map((l) => l.chargeCodeId), []) : new Map<string, string>();
+  return lines.map((l) => l.unitLabel ?? (l.jobId ? maps.get(l.jobId) : noJob)?.get(l.chargeCodeId) ?? null);
+}

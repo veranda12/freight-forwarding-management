@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { mergeReceiptLines } from "@/lib/pdf/invoice-print-lines";
+import { unitFromBasis } from "@/lib/rate-card";
 
 const line = (name: string, note: string | null, qty: number, unitPrice: number, asReceipt = true, unitLabel: string | null = null) =>
   ({ section: "LOCAL" as const, name, note, qty, unitLabel, unitPrice, amount: qty * unitPrice, asReceipt });
@@ -29,5 +30,15 @@ describe("mergeReceiptLines", () => {
       { ...line("LOLO Fee", "lift on", 1, 1_000), bl: "BL-B" },
     ]);
     expect(out).toHaveLength(4);
+  });
+});
+
+describe("unitFromBasis", () => {
+  const g = (code: string) => ({ containerTypeId: code, code, count: 1 });
+  it("per B/L jadi B/L, per container jadi tipe container job", () => {
+    expect(unitFromBasis("PER_BL", [g("40HC")])).toBe("B/L");
+    expect(unitFromBasis("PER_CONTAINER", [g("40HC")])).toBe("40HC");
+    expect(unitFromBasis("PER_CONTAINER", [g("20GP"), g("40HC")])).toBe("20GP/40HC");
+    expect(unitFromBasis("PER_CONTAINER", [])).toBeNull();
   });
 });

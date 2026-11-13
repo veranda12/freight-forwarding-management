@@ -8,6 +8,7 @@ import { LANE_LABELS } from "@/lib/enums";
 import { formatIDR, formatMoney, formatNumber, formatPercent } from "@/lib/format";
 import { chargeLockReason } from "@/lib/job-charges";
 import { summarizeContainers } from "@/lib/job-containers";
+import { displayUnits } from "@/lib/rate-card";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -39,8 +40,11 @@ export default async function JobCostingPage({ params }: { params: Promise<{ id:
   if (!job) notFound();
 
   const isAir = job.mode === "AIR";
-  const selling = job.costings.filter((c) => c.side === "SELLING");
-  const buying = job.costings.filter((c) => c.side === "BUYING");
+  // Baris tanpa unit (mis. reimburse dari buying) memakai unit dari rate card: 40HC, B/L, dst.
+  const units = await displayUnits(prisma, job.customerId, job.costings.map((c) => ({ chargeCodeId: c.chargeCodeId, unitLabel: c.unitLabel, jobId: job.id })));
+  const costings = job.costings.map((c, i) => ({ ...c, unitLabel: units[i] }));
+  const selling = costings.filter((c) => c.side === "SELLING");
+  const buying = costings.filter((c) => c.side === "BUYING");
   const canBill = can(user.role, "bills", "write");
   // Jalan pintas ke Buat Invoice dengan job ini terpilih, selama masih ada selling yang belum ditagih.
   const canInvoice = can(user.role, "invoices", "write") && job.status !== "CANCELLED" && selling.some((c) => !c.invoiced);

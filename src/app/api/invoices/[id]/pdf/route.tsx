@@ -5,7 +5,7 @@ import { renderToBuffer } from "@react-pdf/renderer";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { can } from "@/lib/rbac";
-import { groupContainers } from "@/lib/rate-card";
+import { displayUnits, groupContainers } from "@/lib/rate-card";
 import { mergeReceiptLines } from "@/lib/pdf/invoice-print-lines";
 import { InvoiceDocument, type PdfExcludedLine, type PdfInvoice, type PdfInvoiceCompany } from "@/lib/pdf/invoice-document";
 
@@ -56,6 +56,9 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
   const multi = jobs.length > 1;
   const blOf = (j: (typeof jobs)[number]) => j.hblNo ?? j.mblNo ?? j.hawbNo ?? j.mawbNo ?? j.number;
 
+  // Baris tanpa unit (mis. reimburse dari buying) memakai unit dari rate card, sesuai kolom Unit rate card client.
+  const units = await displayUnits(prisma, inv.customerId, inv.lines.map((l) => ({ chargeCodeId: l.chargeCodeId, unitLabel: l.unitLabel, jobId: l.jobId ?? inv.jobId })));
+
   const pdfInv: PdfInvoice = {
     ppnRate: Number(inv.ppnRate),
     number: inv.number, date: inv.date, dueDate: inv.dueDate,
@@ -73,9 +76,9 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
       containerNos: multi ? null : job.containers.map((c) => c.containerNo).join(", ") || null,
     } : null,
     // Reimburse dengan charge yang sama (mis. LOLO lift on dan lift off beda vendor) dicetak satu baris.
-    lines: mergeReceiptLines(inv.lines.map((l) => ({
+    lines: mergeReceiptLines(inv.lines.map((l, i) => ({
       section: l.section ?? l.chargeCode.invoiceSection, name: l.description ?? l.chargeCode.name, note: l.note,
-      qty: Number(l.qty), unitLabel: l.unitLabel, unitPrice: Number(l.unitPrice), amount: Number(l.amount), asReceipt: l.asReceipt,
+      qty: Number(l.qty), unitLabel: units[i], unitPrice: Number(l.unitPrice), amount: Number(l.amount), asReceipt: l.asReceipt,
       bl: multi && l.job ? blOf(l.job) : null,
     }))).map(({ bl, ...l }) => ({ ...l, note: bl ? [`B/L ${bl}`, l.note].filter(Boolean).join(" · ") : l.note })),
     excluded: multi ? [] : excluded,
