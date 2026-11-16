@@ -15,7 +15,13 @@ export const dynamic = "force-dynamic";
 export default async function TrackingPage() {
   await requireCan("tracking", "read");
   const jobs = await prisma.job.findMany({
-    where: { status: { in: ["BOOKED", "STUFFING", "DEPARTED", "IN_TRANSIT", "ARRIVED", "CUSTOMS_CLEARANCE"] } },
+    // Job Delivered tetap tampil sampai sudah punya invoice (yang tidak dibatalkan), supaya ketahuan mana yang belum ditagih.
+    where: {
+      OR: [
+        { status: { in: ["BOOKED", "STUFFING", "DEPARTED", "IN_TRANSIT", "ARRIVED", "CUSTOMS_CLEARANCE"] } },
+        { status: "DELIVERED", invoices: { none: { status: { not: "CANCELLED" } } } },
+      ],
+    },
     orderBy: { etd: "asc" },
     include: {
       customer: { select: { name: true } },
@@ -27,7 +33,7 @@ export default async function TrackingPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Tracking" description={`${jobs.length} shipment aktif · tiap job punya halaman tracking publik`} />
+      <PageHeader title="Tracking" description={`${jobs.length} shipment aktif · job Delivered tetap tampil sampai invoice dibuat · tiap job punya halaman tracking publik`} />
       <Card>
         <CardContent className="p-0">
           <Table>
