@@ -5,7 +5,7 @@ import { Prisma, type JobStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { assertCan } from "@/lib/auth-helpers";
 import { writeAudit } from "@/lib/audit";
-import { JOB_STATUS_LABELS, modeDirKey } from "@/lib/enums";
+import { JOB_STATUS_LABELS, isBackwardStatus, modeDirKey } from "@/lib/enums";
 import { genJobNumber } from "@/lib/sequence";
 import { computeChargeable } from "@/lib/chargeable";
 import { getWeightRules } from "@/lib/weight-rules";
@@ -88,6 +88,11 @@ export async function updateJobStatus(jobId: string, status: JobStatus) {
   const admin = user.role === "ADMIN";
   if (status === "CLOSED" && !admin) throw new Error("Status Closed terisi otomatis setelah invoice lunas.");
   if (!admin) await assertJobEditable(prisma, jobId);
+  const before = await prisma.job.findUniqueOrThrow({ where: { id: jobId }, select: { status: true } });
+  if (!admin && isBackwardStatus(before.status, status)) {
+    // Dikembalikan, bukan dilempar: pesan error server action disamarkan Next di production.
+    return { ok: false as const, error: `Status tidak bisa mundur dari ${JOB_STATUS_LABELS[before.status]} ke ${JOB_STATUS_LABELS[status]}. Minta Admin kalau salah pilih.` };
+  }
   const job = await prisma.job.update({
     where: { id: jobId },
     data: {
@@ -99,13 +104,13 @@ export async function updateJobStatus(jobId: string, status: JobStatus) {
   });
   await writeAudit({
     entity: "Job", entityId: jobId, action: "STATUS_CHANGE",
-    summary: `Status → ${JOB_STATUS_LABELS[status]}`, userId: user.id,
+    summary: `Status ${JOB_STATUS_LABELS[before.status]} → ${JOB_STATUS_LABELS[status]}`, userId: user.id,
   });
   // Pelunasan bisa datang lebih dulu, jadi Close juga diperiksa saat status menjadi Delivered.
   if (status === "DELIVERED") await closeJobIfSettled(prisma, jobId);
   revalidatePath(`/jobs/${jobId}`);
   revalidatePath("/jobs");
-  return { ok: true, status: job.status };
+  return { ok: true as const, status: job.status };
 }
 
 /** Simpan nomor B/L atau AWB. Nomornya biasanya baru ada setelah job dibuat. */

@@ -92,6 +92,15 @@ export const JOB_STATUS_FLOW: JobStatus[] = [
   "CLOSED",
 ];
 
+/**
+ * Status job hanya boleh maju (permintaan client 16 Nov): sudah Departed tidak bisa kembali ke Stuffing/Pickup.
+ * Melompat ke depan boleh. Batalkan Job dan status di luar alur (Cancelled) tidak dihitung mundur.
+ */
+export function isBackwardStatus(from: JobStatus, to: JobStatus): boolean {
+  const a = JOB_STATUS_FLOW.indexOf(from), b = JOB_STATUS_FLOW.indexOf(to);
+  return a >= 0 && b >= 0 && b < a;
+}
+
 export const QUO_STATUS_LABELS: Record<QuotationStatus, string> = {
   DRAFT: "Draft",
   SENT: "Sent",
