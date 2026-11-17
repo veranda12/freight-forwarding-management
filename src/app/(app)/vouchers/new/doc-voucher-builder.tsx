@@ -22,7 +22,8 @@ const dash = (n: number) => (n ? formatIDR(n) : "-");
 
 /**
  * Voucher dari invoice (voucher penerimaan) atau vendor bill (voucher pengeluaran): centang baris satu dokumen, lalu
- * simpan. Voucher hanya dokumen pencatatan: tidak membuat jurnal dan tidak mengubah status invoice/bill.
+ * simpan. Voucher sekaligus mencatat pelunasannya (invoice: penerimaan, bill: pembayaran) dengan nomor BM/BK/KM/KK,
+ * lalu cetakannya langsung terbuka.
  * Tabel Kode COA - Debit - Kredit terisi otomatis dari akun charge dan rekening, sama dengan isi cetakannya.
  */
 export function DocVoucherBuilder({ kind, docs, focusId, q, today, closedMonths, cashAccounts, defaultCashId }: {
@@ -71,17 +72,22 @@ export function DocVoucherBuilder({ kind, docs, focusId, q, today, closedMonths,
 
   function save() {
     if (!doc || !calc) return;
+    // Tab cetak dibuka saat klik (sebelum menunggu server) supaya tidak diblokir popup blocker.
+    const win = window.open("", "_blank");
+    if (win) win.document.write("<p style=\"font-family:sans-serif;padding:24px\">Menyiapkan voucher...</p>");
     start(async () => {
       const common = { lineIds: selected, dateKey, bankAccountId, reference, notes };
       const res = isInvoice
         ? await createInvoiceVoucherAction({ ...common, invoiceId: doc.id })
         : await createBillVoucherAction({ ...common, billId: doc.id });
       if (res.ok) {
-        toast.success(`Voucher ${res.number} tersimpan.`);
+        toast.success(`Voucher ${res.number} tersimpan, ${isInvoice ? "penerimaan" : "pembayaran"} sudah dicatat.`);
+        const url = `/api/vouchers/${res.id}/pdf`;
+        if (win) win.location.href = url; else window.open(url, "_blank");
         // Semua jenis voucher sesudah disimpan ke daftar Voucher, voucher baru disorot di atas (keputusan 2026-11-09).
         router.push(`/vouchers?baru=${res.id}`);
         router.refresh();
-      } else toast.error(res.error);
+      } else { win?.close(); toast.error(res.error); }
     });
   }
 
@@ -134,8 +140,8 @@ export function DocVoucherBuilder({ kind, docs, focusId, q, today, closedMonths,
         <CardHeader><CardTitle className="text-base">Voucher {isInvoice ? "penerimaan" : "pengeluaran"}</CardTitle></CardHeader>
         <CardContent className="space-y-3 text-sm">
           <p className="text-xs text-muted-foreground">
-            Voucher hanya pencatatan: tidak membuat jurnal dan tidak mengubah status {isInvoice ? "invoice" : "bill"}.
-            {isInvoice ? " Penerimaan tetap dicatat lewat Catat Pembayaran." : " Pembayaran tetap dicatat lewat Bayar."}
+            Simpan = {isInvoice ? "penerimaan" : "pembayaran"} sebesar nilai voucher langsung dicatat, {isInvoice ? "invoice" : "bill"} lunas
+            sebesar itu, dan nomor voucher memakai nomor bukti {isInvoice ? "BM / KM" : "BK / KK"} sesuai kas atau rekening yang dipilih.
           </p>
           <div className="space-y-1.5">
             <Label htmlFor="dv-date">Tanggal</Label>

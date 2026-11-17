@@ -9,7 +9,7 @@ import { closeJobsOfInvoice } from "./job-lock";
 import { getClosedMonths, isClosedKey, closedMessage } from "./period-lock";
 import { formatDate } from "./format";
 import { effectiveRate, IDR, latestRate } from "./fx";
-import type { PaymentRecorded } from "./payables";
+import { cancelVoucherOfPayment, type PaymentRecorded } from "./payables";
 
 export type InvoiceOpts = { currency?: string; rate?: number; date?: string; dueDate?: string; notes?: string | null };
 
@@ -392,9 +392,14 @@ export async function receiptCancelState(db: Db, paymentId: string) {
  * tertutup otomatis dibuka lagi. Nomor invoice tidak berubah; pelunasan ulang memakai nomor bukti baru.
  */
 export async function cancelReceiptCore(db: PrismaClient, paymentId: string, reason: string, userId?: string) {
+  return db.$transaction((tx) => cancelReceiptTx(tx, paymentId, reason, userId));
+}
+
+/** Isi pembatalan pelunasan, juga dipakai saat voucher invoice yang mencatat pelunasan dibatalkan. */
+export async function cancelReceiptTx(tx: Tx, paymentId: string, reason: string, userId?: string) {
   const why = reason.trim();
   if (why.length < 3) throw new Error("Alasan pembatalan wajib diisi.");
-  return db.$transaction(async (tx) => {
+  {
     const { pay, block, invoices } = await receiptCancelState(tx, paymentId);
     if (block) throw new Error(block);
     const marked = await tx.payment.updateMany({
@@ -429,6 +434,7 @@ export async function cancelReceiptCore(db: PrismaClient, paymentId: string, rea
         changes: { invoices, amount: Number(pay.amount), reopenedJobs: reopened },
       },
     });
+    await cancelVoucherOfPayment(tx, pay.id, why);
     return { number: pay.number, invoices, reopened };
-  });
+  }
 }

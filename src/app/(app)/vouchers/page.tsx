@@ -42,7 +42,7 @@ export default async function VouchersPage({ searchParams }: { searchParams: Pro
     payee: v.payee, total: Number(v.total), status: v.status, proofNumber: v.proofNumber, journalEntryId: v.journalEntryId,
     hasPayment: !!v.paymentId,
   }));
-  // Hanya voucher biaya job yang punya proses bayar; voucher invoice/bill hanya catatan.
+  // Hanya voucher biaya job yang punya langkah Bayar; voucher invoice/bill langsung mencatat pelunasan saat dibuat.
   const freshRow = fresh ? rows.find((r) => r.id === fresh) ?? null : null;
   const ordered = freshRow ? [freshRow, ...rows.filter((r) => r !== freshRow)] : rows;
   const unpaid = rows.filter((r) => r.source.kind === "JOB" && r.status === "ISSUED");
@@ -57,7 +57,7 @@ export default async function VouchersPage({ searchParams }: { searchParams: Pro
         { label: "Biaya job belum dibayar", value: unpaid.length, tone: unpaid.length ? "warning" : undefined },
         { label: "Nilai belum dibayar", value: formatIDR(unpaid.reduce((s, r) => s + r.total, 0)), tone: "warning" },
       ]} />
-      <VouchersTable data={ordered} freshId={freshRow?.id ?? null} canWrite={canWrite} cashAccounts={cash.options} defaultCashId={cash.defaultId} today={today} />
+      <VouchersTable data={ordered} freshId={freshRow?.id ?? null} canWrite={canWrite} isAdmin={user.role === "ADMIN"} cashAccounts={cash.options} defaultCashId={cash.defaultId} today={today} />
     </div>
   );
 }

@@ -13,8 +13,8 @@ import { DocVoucherBuilder } from "./doc-voucher-builder";
 export const dynamic = "force-dynamic";
 
 const TABS = [
-  { key: "invoice", label: "Invoice", hint: "Centang baris invoice (mis. per job). Voucher penerimaan hanya catatan: tanpa jurnal, status invoice tidak berubah" },
-  { key: "bill", label: "Vendor Bill", hint: "Centang baris bill (mis. per job). Voucher pengeluaran hanya catatan: tanpa jurnal, status bill tidak berubah" },
+  { key: "invoice", label: "Invoice", hint: "Centang baris invoice yang dibayar customer (mis. per job). Simpan langsung mencatat penerimaan dengan nomor BM / KM" },
+  { key: "bill", label: "Vendor Bill", hint: "Centang baris bill yang dibayar (mis. per job). Simpan langsung mencatat pembayaran dengan nomor BK / KK" },
   { key: "job", label: "Biaya job", hint: "Biaya job tanpa tagihan vendor (nota Ops). Voucher terbit dulu, lalu dibayar" },
 ] as const;
 type Tab = (typeof TABS)[number]["key"];

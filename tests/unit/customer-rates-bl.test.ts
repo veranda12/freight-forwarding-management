@@ -91,14 +91,13 @@ describe("tolak No. B/L ganda", () => {
 describe("batal pembayaran vendor bill", () => {
   const base = {
     direction: "PAYMENT", hasBill: true, cancelledAt: null, date: new Date("2026-11-05T05:00:00Z"), closedMonths: [],
-    reconciled: false, reconciledAt: null, fxRevalAfter: false, voucherNumber: null,
+    reconciled: false, reconciledAt: null, fxRevalAfter: false,
   };
   it("pesan untuk setiap batasan", () => {
     expect(vendorPaymentCancelBlock(base)).toBeNull();
     expect(vendorPaymentCancelBlock({ ...base, direction: "RECEIPT" })).toMatch(/vendor bill/);
     expect(vendorPaymentCancelBlock({ ...base, hasBill: false })).toMatch(/vendor bill/);
     expect(vendorPaymentCancelBlock({ ...base, cancelledAt: new Date() })).toMatch(/sudah dibatalkan/);
-    expect(vendorPaymentCancelBlock({ ...base, voucherNumber: "SLG/VC/26/11/001" })).toMatch(/voucher SLG\/VC\/26\/11\/001/);
     expect(vendorPaymentCancelBlock({ ...base, reconciled: true, reconciledAt: new Date("2026-11-07T05:00:00Z") })).toMatch(/direkonsiliasi pada 07 Nov 2026/);
     expect(vendorPaymentCancelBlock({ ...base, closedMonths: ["2026-11"] })).toBe("Periode November 2026 sudah closing. Buka bulan itu untuk koreksi di menu Tutup Buku.");
     expect(vendorPaymentCancelBlock({ ...base, closedMonths: ["2026-10", "2026-12"] })).toBeNull();

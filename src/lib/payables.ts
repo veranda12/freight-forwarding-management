@@ -437,11 +437,10 @@ type Db = PrismaClient | Prisma.TransactionClient;
 /** Alasan pembayaran vendor bill tidak bisa dibatalkan, atau null bila bisa. Murni. */
 export function vendorPaymentCancelBlock(p: {
   direction: string; hasBill: boolean; cancelledAt: Date | null; date: Date; closedMonths: string[];
-  reconciled: boolean; reconciledAt: Date | null; fxRevalAfter: boolean; voucherNumber: string | null;
+  reconciled: boolean; reconciledAt: Date | null; fxRevalAfter: boolean;
 }): string | null {
   if (p.direction !== "PAYMENT" || !p.hasBill) return "Yang bisa dibatalkan di sini hanya pembayaran vendor bill.";
   if (p.cancelledAt) return "Pembayaran ini sudah dibatalkan.";
-  if (p.voucherNumber) return `Pembayaran ini tercatat lewat voucher ${p.voucherNumber}. Koreksi lewat Jurnal Umum.`;
   if (p.reconciled) {
     const when = p.reconciledAt ? ` pada ${formatDate(p.reconciledAt)}` : "";
     return `Pembayaran ini sudah direkonsiliasi${when}. Buka dulu rekonsiliasinya di menu Rekonsiliasi Bank.`;
@@ -456,7 +455,6 @@ export async function vendorPaymentCancelState(db: Db, paymentId: string) {
   const pay = await db.payment.findUnique({
     where: { id: paymentId },
     include: {
-      voucher: { select: { number: true } },
       allocations: { include: { bill: { select: { id: true, number: true, currency: true, amountPaid: true, amountPaidForeign: true, status: true } } } },
     },
   });
@@ -471,7 +469,7 @@ export async function vendorPaymentCancelState(db: Db, paymentId: string) {
   const block = vendorPaymentCancelBlock({
     direction: pay.direction, hasBill: pay.allocations.some((a) => a.bill), cancelledAt: pay.cancelledAt, date: pay.date,
     closedMonths: await getClosedMonths(db), reconciled: recon.length > 0, reconciledAt: recon.find((l) => l.reconciledAt)?.reconciledAt ?? null,
-    fxRevalAfter: fx > 0, voucherNumber: pay.voucher?.number ?? null,
+    fxRevalAfter: fx > 0,
   });
   const bills = pay.allocations.flatMap((a) => (a.bill ? [a.bill.number] : []));
   return { pay, block, bills };
@@ -483,9 +481,14 @@ export async function vendorPaymentCancelState(db: Db, paymentId: string) {
  * dengan nomor bukti baru. Isi bill dan biaya job tidak berubah.
  */
 export async function cancelVendorPaymentCore(db: PrismaClient, paymentId: string, reason: string, userId?: string) {
+  return db.$transaction((tx) => cancelVendorPaymentTx(tx, paymentId, reason, userId));
+}
+
+/** Isi pembatalan pembayaran vendor, juga dipakai saat voucher bill yang mencatat pembayaran dibatalkan. */
+export async function cancelVendorPaymentTx(tx: Prisma.TransactionClient, paymentId: string, reason: string, userId?: string) {
   const why = reason.trim();
   if (why.length < 3) throw new Error("Alasan pembatalan wajib diisi.");
-  return db.$transaction(async (tx) => {
+  {
     const { pay, block, bills } = await vendorPaymentCancelState(tx, paymentId);
     if (block) throw new Error(block);
     const marked = await tx.payment.updateMany({
@@ -511,6 +514,18 @@ export async function cancelVendorPaymentCore(db: PrismaClient, paymentId: strin
         changes: { bills, amount: Number(pay.amount) },
       },
     });
+    await cancelVoucherOfPayment(tx, pay.id, why);
     return { number: pay.number, bills };
-  });
+  }
+}
+
+/**
+ * Voucher invoice/bill yang mencatat pembayaran ini ikut batal, baris dokumennya dilepas supaya bisa
+ * divoucher ulang. Dipanggil dari pembatalan pembayaran, baik dari voucher maupun dari dokumen.
+ */
+export async function cancelVoucherOfPayment(tx: Prisma.TransactionClient, paymentId: string, why: string) {
+  const v = await tx.voucher.findUnique({ where: { paymentId }, select: { id: true, status: true } });
+  if (!v || v.status === "CANCELLED") return;
+  await tx.voucherDocLine.deleteMany({ where: { voucherId: v.id } });
+  await tx.voucher.update({ where: { id: v.id }, data: { status: "CANCELLED", cancelReason: why } });
 }

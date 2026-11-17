@@ -102,7 +102,8 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
     ];
     info = [
       ["Dibayar kepada", v.payee], ["No. Job", v.job?.number ?? "-"], ["No. B/L", bl || "-"], ["Customer", v.job?.customer.name ?? "-"],
-      ...(v.proofNumber ? [["No. Bukti Bayar", `${v.proofNumber} (${method})`] as [string, string]] : []),
+      // Voucher dibayar sesudah 17 Nov: nomor voucher sudah = nomor bukti, cukup tampilkan metodenya.
+      ...(v.proofNumber ? [(v.proofNumber === v.number ? ["Metode Bayar", method] : ["No. Bukti Bayar", `${v.proofNumber} (${method})`]) as [string, string]] : []),
       ...extra,
     ];
   }

@@ -31,8 +31,8 @@ const SOURCE = { JOB: "Job", INVOICE: "Invoice", BILL: "Bill" } as const;
 
 const STATUS: Record<VoucherStatus, string> = { ISSUED: "Belum dibayar", PAID: "Dibayar", CANCELLED: "Batal" };
 
-export function VouchersTable({ data, freshId = null, canWrite, cashAccounts, defaultCashId, today }: {
-  data: VoucherRow[]; freshId?: string | null; canWrite: boolean; cashAccounts: { id: string; label: string }[]; defaultCashId: string | null; today: string;
+export function VouchersTable({ data, freshId = null, canWrite, isAdmin = false, cashAccounts, defaultCashId, today }: {
+  data: VoucherRow[]; freshId?: string | null; canWrite: boolean; isAdmin?: boolean; cashAccounts: { id: string; label: string }[]; defaultCashId: string | null; today: string;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -93,11 +93,13 @@ export function VouchersTable({ data, freshId = null, canWrite, cashAccounts, de
         const r = row.original;
         return (
           <div>
-            {r.source.kind === "JOB"
+            {r.source.kind === "JOB" || r.hasPayment
               ? <Badge variant="outline" className={r.status === "PAID" ? "border-success/50 text-success" : r.status === "ISSUED" ? "border-warning/50 text-warning" : ""}>{STATUS[r.status]}</Badge>
-              // Voucher invoice/bill hanya catatan: tanpa status, kecuali bila dibatalkan.
+              // Voucher invoice/bill lama (versi "hanya catatan") tanpa pembayaran: tanpa status, kecuali bila dibatalkan.
               : r.status === "CANCELLED" ? <Badge variant="outline">{STATUS.CANCELLED}</Badge> : <span className="text-muted-foreground">-</span>}
-            {r.proofNumber && r.journalEntryId && <div><Link href={`/accounting/journal/${r.journalEntryId}`} className="text-xs text-primary hover:underline">{r.proofNumber}</Link></div>}
+            {r.proofNumber && r.journalEntryId && r.status !== "CANCELLED" && (
+              <div><Link href={`/accounting/journal/${r.journalEntryId}`} className="text-xs text-primary hover:underline">{r.proofNumber === r.number ? "Lihat jurnal" : r.proofNumber}</Link></div>
+            )}
           </div>
         );
       },
@@ -110,7 +112,7 @@ export function VouchersTable({ data, freshId = null, canWrite, cashAccounts, de
           <div className="flex justify-end gap-1">
             <Button asChild size="sm" variant="ghost"><a href={`/api/vouchers/${r.id}/pdf`} target="_blank" rel="noopener"><Printer /> Print</a></Button>
             {canWrite && r.source.kind === "JOB" && r.status === "ISSUED" && <Button size="sm" variant="outline" onClick={() => setPay(r)}><Wallet /> Bayar</Button>}
-            {canWrite && r.status === "ISSUED" && !r.hasPayment && <Button size="sm" variant="ghost" className="text-destructive" onClick={() => { setCancel(r); setReason(""); }}><Ban /> Batalkan</Button>}
+            {canWrite && ((r.status === "ISSUED" && !r.hasPayment) || (isAdmin && r.hasPayment && r.source.kind !== "JOB" && r.status !== "CANCELLED")) && <Button size="sm" variant="ghost" className="text-destructive" onClick={() => { setCancel(r); setReason(""); }}><Ban /> Batalkan</Button>}
           </div>
         );
       },
@@ -154,7 +156,11 @@ export function VouchersTable({ data, freshId = null, canWrite, cashAccounts, de
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Batalkan voucher {cancel?.number}?</DialogTitle>
-            <DialogDescription>Nomornya tidak dipakai lagi, dan baris biaya atau baris invoice/bill-nya terbuka lagi.</DialogDescription>
+            <DialogDescription>
+              {cancel?.hasPayment
+                ? "Pelunasannya ikut dibatalkan: jurnal dibalik, invoice/bill kembali belum lunas, dan barisnya bisa divoucher ulang dengan nomor baru."
+                : "Nomornya tidak dipakai lagi, dan baris biaya atau baris invoice/bill-nya terbuka lagi."}
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-1.5 text-sm"><Label>Alasan</Label><Input value={reason} onChange={(e) => setReason(e.target.value)} /></div>
           <DialogFooter>

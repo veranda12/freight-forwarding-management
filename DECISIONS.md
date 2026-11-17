@@ -50,7 +50,20 @@ Format: **Keputusan** — _alasan_.
   kini hanya baris JU, isian formulir lain tetap tersimpan tetapi tidak tercetak). Nilainya milik SLG, jadi tidak
   di-seed. Jurnal bernomor `JE/…` (transfer, setor pajak, aset, armada) dicetak dengan formulir Jurnal Umum.
 
-## Voucher dari invoice dan vendor bill (2026-11-09, direvisi hari yang sama)
+## Voucher = pelunasan, nomor BK/BM/KK/KM (2026-11-17, menggantikan "dokumen pencatatan saja" di bawah)
+
+- _Client: "voucher ini tujuannya untuk pelunasan dan pembayaran bill dan job", nomornya memakai kode BK, BM, KK, KM._
+- **Voucher invoice/bill mencatat pelunasan saat disimpan** (`recordReceiptTx` / `recordVendorPaymentTx`), dan
+  **nomor voucher = nomor bukti pembayarannya** (BM/KM untuk invoice, BK/KK untuk bill), jadi satu transaksi satu nomor.
+  Hanya dokumen IDR yang belum lunas, nilai voucher ≤ sisa tagihan. Cetakan langsung terbuka sesudah simpan.
+- **Batalkan voucher = batalkan pelunasannya** (khusus Admin, aturan sama dengan Batalkan Pelunasan: jurnal dibalik,
+  ditolak bila sudah direkonsiliasi atau periodenya closing). Sebaliknya, Batalkan Pembayaran/Pelunasan dari dokumen
+  ikut membatalkan vouchernya (`cancelVoucherOfPayment`). Baris dokumen dilepas supaya bisa divoucher ulang.
+- **Voucher biaya job**: tetap terbit lalu dibayar; saat dibayar nomornya diganti nomor bukti BK/KK, VC hanya nomor
+  sementara selama belum dibayar.
+- Voucher VC lama tanpa pembayaran (versi 9 Nov) tetap bisa dibatalkan seperti dulu.
+
+## Voucher dari invoice dan vendor bill (2026-11-09, direvisi hari yang sama; diganti 2026-11-17 di atas)
 
 - **Istilah client**: *voucher job* = voucher dari Invoice / Vendor Bill (plus tab Biaya job); *voucher non-job* =
   Jurnal Penerimaan & Pengeluaran (alurnya tetap, langsung terjurnal). Tidak ada voucher berdiri sendiri (`VoucherKind`).

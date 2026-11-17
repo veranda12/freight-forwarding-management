@@ -5,7 +5,7 @@ import type { DocVoucherSummary } from "@/lib/doc-vouchers";
 
 /**
  * Voucher yang dibuat dari satu invoice atau bill: nomor, baris/job, nilai, dan cetak.
- * Voucher hanya catatan, jadi tidak ada status pelunasan di sini; yang dibatalkan ditandai dan tidak ikut total.
+ * Voucher mencatat pelunasan dengan nomor bukti BM/BK/KM/KK; yang dibatalkan ditandai dan tidak ikut total.
  */
 export function DocVouchersCard({ vouchers }: { vouchers: DocVoucherSummary[] }) {
   if (vouchers.length === 0) return null;
@@ -21,7 +21,7 @@ export function DocVouchersCard({ vouchers }: { vouchers: DocVoucherSummary[] })
               <div className="text-xs text-muted-foreground">
                 {v.cancelled
                   ? `${formatDate(v.date)}${v.cancelReason ? ` · ${v.cancelReason}` : ""}`
-                  : `${formatDate(v.date)} · ${v.lineCount} baris${v.jobs ? ` · ${v.jobs}` : ""}${v.proofNumber ? ` · ${v.proofNumber}` : ""}`}
+                  : `${formatDate(v.date)} · ${v.lineCount} baris${v.jobs ? ` · ${v.jobs}` : ""}${v.proofNumber && v.proofNumber !== v.number ? ` · ${v.proofNumber}` : ""}`}
               </div>
             </div>
             <div className="flex items-center gap-2">

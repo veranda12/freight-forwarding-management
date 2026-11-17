@@ -31,13 +31,17 @@ describe("nilai voucher dokumen", () => {
   });
 });
 
-describe("dokumen yang boleh divoucher (voucher hanya catatan)", () => {
-  it("IDR yang belum maupun sudah lunas boleh", () => {
-    for (const status of ["UNPAID", "PARTIAL", "OVERDUE", "PAID"]) expect(() => validateDocVoucher({ status, currency: "IDR" }, "Invoice")).not.toThrow();
+describe("dokumen yang boleh divoucher (voucher = pelunasan)", () => {
+  const doc = (status: string, currency = "IDR", total = 1000, amountPaid = 0) => ({ status, currency, total, amountPaid });
+  it("IDR yang belum lunas boleh, selama nilai voucher tidak melebihi sisa", () => {
+    for (const status of ["UNPAID", "PARTIAL", "OVERDUE"]) expect(() => validateDocVoucher(doc(status), 1000, "Invoice")).not.toThrow();
+    expect(() => validateDocVoucher(doc("PARTIAL", "IDR", 1000, 400), 600, "Bill")).not.toThrow();
+    expect(() => validateDocVoucher(doc("PARTIAL", "IDR", 1000, 400), 700, "Bill")).toThrow(/melebihi sisa bill/);
   });
-  it("batal dan valas ditolak", () => {
-    expect(() => validateDocVoucher({ status: "CANCELLED", currency: "IDR" }, "Bill")).toThrow(/dibatalkan/);
-    expect(() => validateDocVoucher({ status: "UNPAID", currency: "USD" }, "Bill")).toThrow(/hanya untuk bill IDR/);
+  it("lunas, batal, dan valas ditolak", () => {
+    expect(() => validateDocVoucher(doc("PAID"), 1, "Invoice")).toThrow(/sudah lunas/);
+    expect(() => validateDocVoucher(doc("CANCELLED"), 1, "Bill")).toThrow(/dibatalkan/);
+    expect(() => validateDocVoucher(doc("UNPAID", "USD"), 1, "Bill")).toThrow(/hanya untuk bill IDR/);
   });
 });
 
