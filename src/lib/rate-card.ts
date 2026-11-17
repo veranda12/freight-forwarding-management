@@ -269,7 +269,8 @@ export async function applyRateCard(db: PrismaClient, jobId: string): Promise<nu
       select: { id: true, chargeCodeId: true, unitLabel: true, description: true },
     });
     const keptLine = (c: GeneratedCharge) => manual.find((m) => m.chargeCodeId === c.chargeCodeId && m.unitLabel === c.unitLabel && (!c.description || m.description === c.description));
-    // Charge yang sellingnya sudah dibuat dari biaya buying reimburse (angka kuitansi) tidak ditambah estimasi lagi.
+    // Charge reimburse yang sellingnya sudah dibuat dari biaya buying (angka kuitansi) tidak ditambah estimasi lagi.
+    // Tarif jasa (bukan reimburse) tetap dibuat walau ada kuitansi dengan charge yang sama.
     const fromBuying = new Set((await tx.costingLine.findMany({
       where: { jobId, side: "SELLING", buyingLineId: { not: null } }, select: { chargeCodeId: true },
     })).map((l) => l.chargeCodeId));
@@ -278,7 +279,7 @@ export async function applyRateCard(db: PrismaClient, jobId: string): Promise<nu
     const ordered: string[] = [];
     let created = 0;
     for (const c of charges) {
-      if (fromBuying.has(c.chargeCodeId)) continue;
+      if (c.asReceipt && fromBuying.has(c.chargeCodeId)) continue;
       const kept = keptLine(c);
       if (kept) { ordered.push(kept.id); continue; }
       created++;

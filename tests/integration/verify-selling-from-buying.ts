@@ -94,6 +94,39 @@ async function main() {
   cc2 = await db.costingLine.findMany({ where: { jobId: job2.id, side: "SELLING", chargeCodeId: CC } });
   ok(cc2.length === 1 && Number(cc2[0].unitPrice) === 2_000_000, `setelah container + rate card: CC 1 baris @ ${Number(cc2[0]?.unitPrice)}`);
 
+  // 10. Kuitansi reimburse dengan charge tarif jasa (client 17 Nov: "Pemeriksaan Red Line" 1.650.000 memakai kode REDLINE):
+  //     tarif jasa Red Line 4.500.000 tetap ada, kuitansinya baris reimburse tersendiri, juga setelah hitung ulang.
+  const job3 = await db.job.create({
+    data: {
+      number: `JOB/UJI-SYNC3/${stamp}`, mode: "SEA_FCL", direction: "IMPORT", status: "ARRIVED", customerId: customer.id, customsLane: "RED", distanceKm: 20,
+      containers: { create: [{ containerNo: `SYNC${stamp % 1e7}3`, containerTypeId: t40.id, grossWeightKg: 10000 }] },
+    },
+  });
+  const red3 = async () => db.costingLine.findMany({ where: { jobId: job3.id, side: "SELLING", chargeCodeId: REDLINE }, orderBy: { sortOrder: "asc" } });
+  await applyRateCard(db, job3.id);
+  await addJobCharge(db, job3.id, buy(REDLINE, 1_650_000, true));
+  let r3 = await red3();
+  const svc = (rows: typeof r3) => rows.some((x) => !x.asReceipt && Number(x.unitPrice) === 4_500_000);
+  const rcp = (rows: typeof r3) => rows.some((x) => x.asReceipt && Number(x.actualIdr) === 1_650_000);
+  ok(r3.length === 2 && svc(r3) && rcp(r3), `Red Line jasa 4.500.000 tetap, kuitansi 1.650.000 baris sendiri (${r3.length} baris)`);
+  await applyRateCard(db, job3.id);
+  r3 = await red3();
+  ok(r3.length === 2 && svc(r3) && rcp(r3), `hitung ulang: Red Line jasa dan kuitansi tetap 2 baris (${r3.length})`);
+
+  // 11. Hapus buying non-reimburse terakhir: nama biaya Rp 0 di Selling (charge tanpa tarif rate card) ikut hilang.
+  const noRate = await db.chargeCode.findFirstOrThrow({ where: { isActive: true, rateCardItems: { none: { isActive: true } } }, orderBy: { code: "asc" } });
+  const sellNo = () => db.costingLine.findMany({ where: { jobId: job3.id, side: "SELLING", chargeCodeId: noRate.id } });
+  const nr = await addJobCharge(db, job3.id, buy(noRate.id, 100_000, false));
+  const before = await sellNo();
+  await deleteJobCharge(db, nr);
+  const after = await sellNo();
+  ok(before.length === 1 && Number(before[0].actualIdr) === 0 && after.length === 0, `hapus buying ${noRate.code}: nama biaya Rp 0 di Selling ikut hilang (${before.length} -> ${after.length})`);
+  // Nama biaya yang sudah diberi harga oleh Finance tetap ada.
+  const nr2 = await addJobCharge(db, job3.id, buy(noRate.id, 100_000, false));
+  await db.costingLine.updateMany({ where: { jobId: job3.id, side: "SELLING", chargeCodeId: noRate.id }, data: { actualIdr: 250_000, unitPrice: 250_000 } });
+  await deleteJobCharge(db, nr2);
+  ok((await sellNo()).length === 1, "hapus buying: selling yang sudah diberi harga tetap ada");
+
   const jobAfter = await db.job.findUniqueOrThrow({ where: { id: job.id } });
   ok(Number(jobAfter.revenueIdr) > 0, `revenue job dihitung ulang (${Number(jobAfter.revenueIdr)})`);
 

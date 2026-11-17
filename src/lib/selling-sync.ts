@@ -68,9 +68,10 @@ export async function syncSellingFromBuying(tx: Tx, buyingId: string): Promise<v
       if (linked.invoiceId) await rebuildInvoice(tx, linked.invoiceId);
       return;
     }
-    // Estimasi rate card charge yang sama dan belum ditagih: diganti angka kuitansi (bukan ditambah).
+    // Estimasi reimburse dari rate card untuk charge yang sama dan belum ditagih: diganti angka kuitansi (bukan ditambah).
+    // Tarif jasa (mis. Red Line Rp 4,5 juta) tidak diganti: biaya kuitansinya jadi baris reimburse tersendiri.
     const estimate = await tx.costingLine.findFirst({
-      where: { jobId: b.jobId, side: "SELLING", chargeCodeId: b.chargeCodeId, fromRateCard: true, invoiced: false, buyingLineId: null },
+      where: { jobId: b.jobId, side: "SELLING", chargeCodeId: b.chargeCodeId, fromRateCard: true, asReceipt: true, invoiced: false, buyingLineId: null },
       orderBy: { sortOrder: "asc" },
     });
     if (estimate) {
@@ -120,6 +121,7 @@ export async function syncSellingFromBuying(tx: Tx, buyingId: string): Promise<v
  * Mengembalikan invoice yang perlu dihitung ulang.
  */
 export async function removeSellingOfBuying(tx: Tx, buyingId: string): Promise<string | null> {
+  await removeEmptySellingName(tx, buyingId);
   const linked = await tx.costingLine.findUnique({ where: { buyingLineId: buyingId }, include: { invoice: { select: { status: true, number: true } } } });
   if (!linked) return null;
   if (lockedSelling(linked)) {
@@ -130,4 +132,18 @@ export async function removeSellingOfBuying(tx: Tx, buyingId: string): Promise<s
   }
   await tx.costingLine.delete({ where: { id: linked.id } });
   return linked.invoiceId;
+}
+
+/**
+ * Nama biaya di Selling yang dibuat dari buying non-reimburse dan masih Rp 0 ikut dihapus saat biaya buying
+ * terakhir dengan charge itu dihapus (permintaan client 17 Nov). Selling yang sudah diberi harga atau ditagih tetap.
+ */
+async function removeEmptySellingName(tx: Tx, buyingId: string): Promise<void> {
+  const b = await tx.costingLine.findUnique({ where: { id: buyingId }, select: { jobId: true, chargeCodeId: true, side: true } });
+  if (!b || b.side !== "BUYING") return;
+  const others = await tx.costingLine.count({ where: { jobId: b.jobId, side: "BUYING", chargeCodeId: b.chargeCodeId, id: { not: buyingId } } });
+  if (others) return;
+  await tx.costingLine.deleteMany({
+    where: { jobId: b.jobId, side: "SELLING", chargeCodeId: b.chargeCodeId, fromRateCard: false, buyingLineId: null, invoiced: false, actualIdr: 0 },
+  });
 }
