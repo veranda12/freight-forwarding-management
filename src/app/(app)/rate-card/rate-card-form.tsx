@@ -13,18 +13,32 @@ import { BASIS_LABELS, CONDITION_LABELS } from "@/lib/enums";
 import { createRateCardItemAction, updateRateCardItemAction, type RateCardInput } from "./actions";
 
 type Opt = { id: string; label: string };
-export type RateCardInitial = Omit<RateCardInput, "price" | "thresholdKm" | "sortOrder"> & { id: string; price: number; thresholdKm: number | null; sortOrder: number };
+export type RateCardInitial = Omit<RateCardInput, "price" | "thresholdKm" | "thresholdTon" | "sortOrder"> & {
+  id: string; price: number; thresholdKm: number | null; thresholdKg: number | null; sortOrder: number;
+};
 
 const ALL = "__all__";
+const STD = "__std__";
+const ANY_CITY = "__anycity__";
 
 /** Dialog tambah atau ubah satu tarif di rate card. */
-export function RateCardForm({ charges, containerTypes, initial }: { charges: Opt[]; containerTypes: Opt[]; initial?: RateCardInitial }) {
+export function RateCardForm({ charges, containerTypes, customers, cities, initial, defaultCustomerId = null, defaultCity = null }: {
+  charges: Opt[]; containerTypes: Opt[]; customers: Opt[]; initial?: RateCardInitial;
+  /** Kota pelabuhan Indonesia (master Port), mis. Jakarta, Surabaya. */
+  cities: string[];
+  /** Tambah tarif dari tampilan satu kota: kota itu langsung terpilih. */
+  defaultCity?: string | null;
+  /** Tambah tarif dari tampilan satu customer: customer itu langsung terpilih. */
+  defaultCustomerId?: string | null;
+}) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [open, setOpen] = useState(false);
   const fromInitial = (): RateCardInput => ({
-    chargeCodeId: initial?.chargeCodeId ?? "", containerTypeId: initial?.containerTypeId ?? null, basis: initial?.basis ?? "PER_CONTAINER",
+    chargeCodeId: initial?.chargeCodeId ?? "", containerTypeId: initial?.containerTypeId ?? null,
+    customerId: initial ? initial.customerId : defaultCustomerId, city: initial ? initial.city : defaultCity, basis: initial?.basis ?? "PER_CONTAINER",
     condition: initial?.condition ?? "ALWAYS", price: initial ? String(initial.price) : "", thresholdKm: initial?.thresholdKm == null ? "" : String(initial.thresholdKm),
+    thresholdTon: initial?.thresholdKg == null ? "" : String(initial.thresholdKg / 1000),
     taxable: initial?.taxable ?? false, note: initial?.note ?? "", sortOrder: String(initial?.sortOrder ?? 0), isActive: initial?.isActive ?? true,
   });
   const [f, setF] = useState(fromInitial);
@@ -57,6 +71,36 @@ export function RateCardForm({ charges, containerTypes, initial }: { charges: Op
               <SelectContent>{charges.map((c) => <SelectItem key={c.id} value={c.id}>{c.label}</SelectItem>)}</SelectContent>
             </Select>
           </div>
+          <div className="space-y-1.5 sm:col-span-2">
+            <Label>Customer</Label>
+            <Select value={f.customerId ?? STD} onValueChange={(v) => set({ customerId: v === STD ? null : v })}>
+              <SelectTrigger aria-label="Customer"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value={STD}>Standar (semua customer)</SelectItem>
+                {customers.map((c) => <SelectItem key={c.id} value={c.id}>{c.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            {f.customerId && (
+              <p className="text-xs text-muted-foreground">
+                Tarif khusus menggantikan tarif standar charge yang sama untuk customer ini. Charge lain tetap memakai tarif standar.
+              </p>
+            )}
+          </div>
+          <div className="space-y-1.5 sm:col-span-2">
+            <Label>Kota</Label>
+            <Select value={f.city ?? ANY_CITY} onValueChange={(v) => set({ city: v === ANY_CITY ? null : v })}>
+              <SelectTrigger aria-label="Kota"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ANY_CITY}>Semua kota</SelectItem>
+                {[...new Set([...cities, ...(f.city ? [f.city] : [])])].map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              {f.city
+                ? `Hanya untuk job dengan pelabuhan di ${f.city} (impor: Port of Discharge, ekspor: Port of Loading). Menggantikan tarif "Semua kota" yang setara.`
+                : "Berlaku di semua kota, kecuali kota yang punya tarif sendiri untuk charge ini."}
+            </p>
+          </div>
           <div className="space-y-1.5">
             <Label>Dasar hitung</Label>
             <Select value={f.basis} onValueChange={(v) => set({ basis: v as RateCardInput["basis"] })}>
@@ -82,7 +126,7 @@ export function RateCardForm({ charges, containerTypes, initial }: { charges: Op
             </Select>
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="rc-price">{f.basis === "PER_KM_OVER" ? "Tarif per km (IDR)" : "Tarif (IDR)"}</Label>
+            <Label htmlFor="rc-price">{f.basis === "PER_KM_OVER" ? "Tarif per km (IDR)" : f.basis === "OVERWEIGHT" ? "Tarif flat (IDR)" : "Tarif (IDR)"}</Label>
             <Input id="rc-price" type="number" min={0} value={f.price} onChange={(e) => set({ price: e.target.value })} />
           </div>
           {f.basis === "PER_KM_OVER" && (
@@ -90,6 +134,17 @@ export function RateCardForm({ charges, containerTypes, initial }: { charges: Op
               <Label htmlFor="rc-km">Batas km (termasuk tarif dasar)</Label>
               <Input id="rc-km" type="number" min={0} value={f.thresholdKm} onChange={(e) => set({ thresholdKm: e.target.value })} />
             </div>
+          )}
+          {f.basis === "OVERWEIGHT" && (
+            <div className="space-y-1.5">
+              <Label htmlFor="rc-ton">Batas berat per container (ton)</Label>
+              <Input id="rc-ton" type="number" min={0} step="0.01" value={f.thresholdTon} onChange={(e) => set({ thresholdTon: e.target.value })} />
+            </div>
+          )}
+          {(f.basis === "OVERWEIGHT" || f.basis === "PER_KM_OVER") && (
+            <p className="text-xs text-muted-foreground sm:col-span-2">
+              Surcharge jarak dan overweight tidak ditagih dua-duanya. Per container sistem mengambil yang nominalnya lebih besar.
+            </p>
           )}
           <div className="space-y-1.5">
             <Label htmlFor="rc-sort">Urutan</Label>

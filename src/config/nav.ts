@@ -15,10 +15,22 @@ export type NavItem = {
   perm: PermissionKey;
 };
 
-export type NavGroup = {
+export type NavSubGroup = {
   label: string;
   items: NavItem[];
 };
+
+export type NavGroup = {
+  label: string;
+  items: NavItem[];
+  /** Sub-grup yang bisa dibuka-tutup di dalam grup ini (tampil sesudah items). */
+  subgroups?: NavSubGroup[];
+};
+
+/** Semua menu dalam grup, termasuk yang ada di sub-grup. */
+export function groupItems(g: NavGroup): NavItem[] {
+  return [...g.items, ...(g.subgroups ?? []).flatMap((s) => s.items)];
+}
 
 export const NAV: NavGroup[] = [
   {
@@ -48,26 +60,44 @@ export const NAV: NavGroup[] = [
       { label: "Tarif Domestik", href: "/domestic/tariffs", icon: PackageCheck, perm: "domesticTariffs.view" },
     ],
   },
+  // Finance dibagi tiga sub-grup mengikuti alur: tagihan, lalu uang masuk/keluar, lalu pembukuan dan laporan.
+  // Buat Voucher tidak di sidebar: tombolnya ada di halaman Voucher, detail invoice/bill, dan Jurnal Penerimaan & Pengeluaran.
   {
     label: "Finance",
+    items: [],
+    subgroups: [
+  {
+    label: "Tagihan & Hutang",
     items: [
-      { label: "Cari Bukti", href: "/proofs", icon: FileSearch, perm: "proofs.view" },
       { label: "Costing", href: "/costing", icon: Calculator, perm: "costing.view" },
       { label: "Invoice (AR)", href: "/invoices", icon: Receipt, perm: "invoices.view" },
       { label: "Vendor Bill (AP)", href: "/bills", icon: FileInput, perm: "bills.view" },
-      { label: "Voucher", href: "/vouchers", icon: Ticket, perm: "vouchers.view" },
       { label: "Debit/Credit Note", href: "/notes", icon: StickyNote, perm: "notes.view" },
       { label: "Receipt & Payment", href: "/payments", icon: Wallet, perm: "payments.view" },
-      { label: "Accounting", href: "/accounting", icon: BookMarked, perm: "accounting.view" },
+    ],
+  },
+  {
+    label: "Kas & Bank",
+    items: [
       { label: "Jurnal Penerimaan & Pengeluaran", href: "/accounting/cash-entry", icon: ArrowDownUp, perm: "cashEntry.view" },
-      { label: "Jurnal Umum", href: "/accounting/manual-journal", icon: NotebookPen, perm: "manualJournal.view" },
+      { label: "Voucher", href: "/vouchers", icon: Ticket, perm: "vouchers.view" },
       { label: "Kasir All", href: "/accounting/kasir", icon: ListChecks, perm: "kasir.view" },
-      { label: "Arus Kas", href: "/accounting/cash-flow", icon: ArrowLeftRight, perm: "cashFlow.view" },
-      { label: "Tutup Buku", href: "/accounting/closing", icon: BookCheck, perm: "closing.view" },
-      { label: "Aset Tetap", href: "/accounting/fixed-assets", icon: Building2, perm: "fixedAssets.view" },
-      { label: "Pajak", href: "/accounting/tax", icon: Landmark, perm: "tax.view" },
       { label: "Rekonsiliasi Bank", href: "/accounting/bank-rec", icon: GitCompare, perm: "bankRec.view" },
+    ],
+  },
+  {
+    label: "Akuntansi",
+    items: [
+      { label: "Cari Bukti", href: "/proofs", icon: FileSearch, perm: "proofs.view" },
+      { label: "Jurnal Umum", href: "/accounting/manual-journal", icon: NotebookPen, perm: "manualJournal.view" },
+      { label: "Accounting", href: "/accounting", icon: BookMarked, perm: "accounting.view" },
+      { label: "Arus Kas", href: "/accounting/cash-flow", icon: ArrowLeftRight, perm: "cashFlow.view" },
+      { label: "Pajak", href: "/accounting/tax", icon: Landmark, perm: "tax.view" },
+      { label: "Aset Tetap", href: "/accounting/fixed-assets", icon: Building2, perm: "fixedAssets.view" },
       { label: "Revaluasi Kurs", href: "/accounting/fx", icon: RefreshCw, perm: "fx.view" },
+      { label: "Tutup Buku", href: "/accounting/closing", icon: BookCheck, perm: "closing.view" },
+    ],
+  },
     ],
   },
   {

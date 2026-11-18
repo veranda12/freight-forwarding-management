@@ -7,7 +7,6 @@ import { db, login, pickOption, userId, expectLedgerBalanced } from "./qa-helper
  * (posting di periode terkunci ditolak, lalu dibuka). Buku besar diperiksa seimbang setelah setiap langkah.
  */
 
-const today = () => new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Jakarta" });
 
 async function cashOut(page: Page, desc: string, amount: string, dateKey?: string) {
   await page.goto("/accounting/cash-entry");
@@ -170,26 +169,39 @@ test.describe.serial("QA-03 Akuntansi", () => {
     await expect(page.getByRole("button", { name: `Tutup Buku ${year}`, exact: true }).and(page.locator(":not([disabled])"))).toHaveCount(0);
   });
 
-  test("06 Kunci periode: posting tanggal terkunci ditolak; setelah dibuka bisa lagi", async ({ page }) => {
-    await login(page, "finance@demo.com");
-    const lockDate = new Date(Date.now() - 20 * 86400000).toLocaleDateString("sv-SE", { timeZone: "Asia/Jakarta" });
-    const blocked = new Date(Date.now() - 25 * 86400000).toLocaleDateString("sv-SE", { timeZone: "Asia/Jakarta" });
-    await page.goto("/accounting/closing");
-    await page.getByLabel("Kunci jurnal sampai tanggal").fill(lockDate);
-    await page.getByRole("button", { name: /Kunci periode/ }).click();
-    await expect.poll(async () => (await db.accountingSetting.findUnique({ where: { id: "default" } }))?.lockedUntil).not.toBeNull();
+  test("06 Closing bulanan: posting di bulan closed ditolak; buka bulan butuh izin khusus (Admin), sesudah dibuka bisa lagi", async ({ page }) => {
+    // Status closing dikembalikan seperti semula di akhir uji, supaya uji lain tidak terpengaruh.
+    const snapshot = await db.periodClosing.findMany({ orderBy: { period: "asc" } });
+    const now = new Date(Date.now() + 7 * 3600 * 1000);
+    const prev = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 15)).toISOString().slice(0, 10);
+    const period = prev.slice(0, 7);
+    try {
+      await db.periodClosing.deleteMany({});
+      await db.periodClosing.create({ data: { period, status: "CLOSED" } });
 
-    const desc = `QA periode terkunci ${Date.now()}`;
-    await cashOut(page, desc, "10000", blocked);
-    await expect(page.getByText(/Periode terkunci sampai/)).toBeVisible();
-    expect(await db.journalEntry.count({ where: { description: { contains: desc } } })).toBe(0);
-    await page.keyboard.press("Escape");
+      await login(page, "finance@demo.com");
+      const desc = `QA bulan closing ${Date.now()}`;
+      await cashOut(page, desc, "10000", prev);
+      await expect(page.getByText(/sudah closing\. Buka bulan itu untuk koreksi/)).toBeVisible();
+      expect(await db.journalEntry.count({ where: { description: { contains: desc } } })).toBe(0);
+      await page.keyboard.press("Escape");
 
-    await page.goto("/accounting/closing");
-    await page.getByRole("button", { name: /Buka kunci/ }).click();
-    await expect.poll(async () => (await db.accountingSetting.findUnique({ where: { id: "default" } }))?.lockedUntil ?? null).toBeNull();
-    await cashOut(page, `${desc} (dibuka)`, "10000", today());
-    await expect(page.getByText("Jurnal Pengeluaran dicatat.")).toBeVisible();
-    await expectLedgerBalanced();
+      // Finance tidak memegang closing.reopenMonth: tombol buka tidak ada.
+      await page.goto(`/accounting/closing?tahun=${period.slice(0, 4)}`);
+      await expect(page.getByRole("button", { name: "Buka untuk koreksi" })).toHaveCount(0);
+
+      await login(page, "admin@demo.com");
+      await page.goto(`/accounting/closing?tahun=${period.slice(0, 4)}`);
+      await page.getByRole("button", { name: "Buka untuk koreksi" }).first().click();
+      await page.getByLabel("Alasan").fill("QA koreksi biaya bulan lalu");
+      await page.getByRole("dialog").getByRole("button", { name: "Buka untuk koreksi" }).click();
+      await expect.poll(async () => (await db.periodClosing.findUnique({ where: { period } }))?.status).toBe("REOPENED");
+      await cashOut(page, `${desc} (dibuka)`, "10000", prev);
+      await expect(page.getByText("Jurnal Pengeluaran dicatat.")).toBeVisible();
+      await expectLedgerBalanced();
+    } finally {
+      await db.periodClosing.deleteMany({});
+      if (snapshot.length) await db.periodClosing.createMany({ data: snapshot });
+    }
   });
 });

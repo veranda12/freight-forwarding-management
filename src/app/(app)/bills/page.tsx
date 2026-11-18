@@ -1,21 +1,22 @@
 import Link from "next/link";
-import { Plus } from "lucide-react";
+import { FileSpreadsheet, Plus } from "lucide-react";
 import { hasPerm, requirePerm } from "@/lib/auth-helpers";
 import { billScope, customerScope } from "@/lib/data-scope";
 import { Button } from "@/components/ui/button";
 import { prisma } from "@/lib/prisma";
-import { formatIDR } from "@/lib/format";
+import { formatDate, formatIDR } from "@/lib/format";
 import { latestRate } from "@/lib/fx";
 import { jktKey } from "@/lib/accounting-core";
 import { cashAccountOptions } from "@/lib/cash-accounts";
 import { BILL_STATUS_LABELS } from "@/lib/enums";
 import {
-  GROUPS_PER_PAGE, MAX_BILLS, hasJobFilter, loadBillGroups, parseBillFilter, type BillFilter,
+  GROUPS_PER_PAGE, MAX_BILLS, billQueryOrToday, hasJobFilter, loadBillGroups, parseBillFilter, type BillFilter,
 } from "@/lib/bill-groups";
 import { PageHeader } from "@/components/page-header";
 import { StatStrip } from "@/components/stat-strip";
 import { Card, CardContent } from "@/components/ui/card";
 import { BillGroupsTable } from "./bill-groups-table";
+import { openIdrBillsByVendor } from "@/lib/payables";
 
 export const dynamic = "force-dynamic";
 
@@ -34,8 +35,9 @@ function filterQuery(f: BillFilter, page: number): string {
 
 export default async function BillsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const user = await requirePerm("bills.view");
-  const f = parseBillFilter(await searchParams);
   const today = jktKey(new Date());
+  const { query, requested } = billQueryOrToday(await searchParams, today);
+  const f = parseBillFilter(query);
   const [data, cash, vendors, customers, currencies] = await Promise.all([
     loadBillGroups(prisma, f, today, billScope(user)),
     cashAccountOptions(prisma, "payment"),
@@ -44,6 +46,7 @@ export default async function BillsPage({ searchParams }: { searchParams: Promis
     prisma.vendorBill.findMany({ distinct: ["currency"], select: { currency: true }, orderBy: { currency: "asc" } }),
   ]);
   const { groups, totals, capped } = data;
+  const openBills = await openIdrBillsByVendor(prisma, groups.flatMap((g) => g.portions.flatMap((p) => (p.bill.vendorId ? [p.bill.vendorId] : []))), billScope(user));
   const pages = Math.max(1, Math.ceil(groups.length / GROUPS_PER_PAGE));
   const page = Math.min(f.page, pages);
   const shown = groups.slice((page - 1) * GROUPS_PER_PAGE, page * GROUPS_PER_PAGE);
@@ -55,7 +58,12 @@ export default async function BillsPage({ searchParams }: { searchParams: Promis
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Vendor Bill (AP)" description="Tagihan vendor per job: yang perlu dibayar perusahaan">
+      <PageHeader title="Vendor Bill (AP)" description={requested ? "Tagihan vendor per job sesuai filter" : `Bill bertanggal hari ini, ${formatDate(new Date())}. Gunakan filter untuk data lain.`}>
+        <Button asChild variant="outline">
+          <a href={`/api/bills/export${filterQuery(f, 1)}`} download title="Sesuai filter yang aktif, semua halaman. Bill lintas job diekspor utuh.">
+            <FileSpreadsheet /> Export Excel
+          </a>
+        </Button>
         {hasPerm(user, "bills.create") && <Button asChild><Link href="/bills/new"><Plus /> Buat Bill</Link></Button>}
       </PageHeader>
 
@@ -123,7 +131,7 @@ export default async function BillsPage({ searchParams }: { searchParams: Promis
 
       <BillGroupsTable
         groups={shown} today={today} rates={rates}
-        canPay={hasPerm(user, "bills.pay")} cashAccounts={cash.options} defaultCashId={cash.defaultId}
+        canPay={hasPerm(user, "bills.pay")} cashAccounts={cash.options} defaultCashId={cash.defaultId} openBills={openBills}
       />
 
       {pages > 1 && (

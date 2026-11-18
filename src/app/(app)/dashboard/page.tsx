@@ -5,6 +5,7 @@ import { requirePerm, hasPerm, hasAnyPerm } from "@/lib/auth-helpers";
 import { billScope, customerScope, domesticScope, invoiceScope, jobScope, quotationScope } from "@/lib/data-scope";
 import { getDashboardData, getWorklist } from "@/lib/analytics";
 import { formatIDR } from "@/lib/format";
+import { prisma } from "@/lib/prisma";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ShipmentBarChart, RevenueCostChart, TopCustomerChart, ModePieChart } from "@/components/charts";
@@ -19,7 +20,7 @@ export default async function DashboardPage() {
     job: jobScope(user), invoice: invoiceScope(user), bill: billScope(user),
     customer: customerScope(user), quotation: quotationScope(user), domestic: domesticScope(user),
   };
-  const [d, wl] = await Promise.all([getDashboardData(scope), getWorklist(scope)]);
+  const [d, wl, company] = await Promise.all([getDashboardData(scope), getWorklist(scope), prisma.companySetting.findFirst({ select: { name: true } })]);
 
   // Kartu/panel hanya untuk modul yang boleh dilihat user.
   const seeJobs = hasPerm(user, "jobs.view");
@@ -45,8 +46,8 @@ export default async function DashboardPage() {
   return (
     <div className="space-y-5">
       <PageHeader
-        title={`Halo, ${user.name.split(" ")[0] ?? ""}`}
-        description="Ringkasan operasional PT Samudra Lintas Logistik — antrian yang butuh aksi lebih dulu."
+        title={`Halo, ${user.name?.split(" ")[0] ?? ""}`}
+        description={`Ringkasan operasional${company?.name ? ` ${company.name}` : ""}, antrian yang butuh aksi lebih dulu.`}
       />
 
       {/* KPI strip — compact, bukan kartu raksasa */}

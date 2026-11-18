@@ -6,7 +6,7 @@
  */
 import { PrismaClient, Prisma } from "@prisma/client";
 import { cancelVoucher, createVoucher, payVoucher } from "../../src/lib/vouchers";
-import { getLockKey, setLockKey } from "../../src/lib/period-lock";
+import { lockSnapshot, restoreLock, lockMonth } from "./period-lock-helper";
 import { jktKey } from "../../src/lib/accounting-core";
 
 const db = new PrismaClient();
@@ -21,11 +21,11 @@ async function main() {
   const dbName = (await db.$queryRaw<{ d: string }[]>`SELECT current_database() AS d`)[0].d;
   if (dbName === "ffms" || dbName === "ffms_pgcheck") throw new Error(`Jangan jalankan uji ini di database ${dbName}.`);
   console.log(`   database: ${dbName}`);
-  const original = await getLockKey(db);
+  const original = await lockSnapshot(db);
 
   try {
     const today = jktKey(new Date());
-    const yesterday = addDays(today, -1);
+    const lastMonth = addDays(`${today.slice(0, 7)}-01`, -1); // hari terakhir bulan lalu
     const customer = await db.customer.findFirstOrThrow({ orderBy: { code: "asc" } });
     const cc = await db.chargeCode.findFirstOrThrow({ where: { code: "HANDLING" } });
     const kas = await db.bankAccount.findFirstOrThrow({ where: { kind: "CASH", isActive: true } });
@@ -39,21 +39,21 @@ async function main() {
     const input = (lineId: string, dateKey: string) => ({ jobId: job.id, lineIds: [lineId], dateKey, payee: "Uji Kunci" });
 
     // Voucher kemarin dibuat SEBELUM periode dikunci (belum dibayar)
-    await setLockKey(db, null);
+    await lockMonth(db, null);
     const l1 = await buying();
-    const oldVoucher = await createVoucher(db, input(l1.id, yesterday));
+    const oldVoucher = await createVoucher(db, input(l1.id, lastMonth));
 
-    await setLockKey(db, yesterday);
+    await lockMonth(db, lastMonth);
     const l2 = await buying();
     const seqBefore = await db.sequence.findMany({ where: { key: "PROOF:VC" } });
-    await throws(() => createVoucher(db, input(l2.id, yesterday)), /Periode terkunci sampai .*Voucher tanggal .* tidak bisa dibuat/, "buat voucher bertanggal terkunci ditolak");
+    await throws(() => createVoucher(db, input(l2.id, lastMonth)), /sudah closing/, "buat voucher bertanggal terkunci ditolak");
     const seqAfter = await db.sequence.findMany({ where: { key: "PROOF:VC" } });
     ok(JSON.stringify(seqBefore) === JSON.stringify(seqAfter), "nomor voucher tidak terpakai saat ditolak");
     ok((await db.costingLine.findUniqueOrThrow({ where: { id: l2.id } })).voucherId === null, "biaya tetap bebas setelah ditolak");
 
     const fresh = await createVoucher(db, input(l2.id, today));
     ok(!!fresh, "voucher bertanggal sesudah kunci tetap bisa dibuat");
-    await throws(() => payVoucher(db, fresh, { bankAccountId: kas.id, dateKey: yesterday }), /Periode terkunci/, "bayar voucher bertanggal terkunci ditolak");
+    await throws(() => payVoucher(db, fresh, { bankAccountId: kas.id, dateKey: lastMonth }), /sudah closing/, "bayar voucher bertanggal terkunci ditolak");
     const paid = await payVoucher(db, fresh, { bankAccountId: kas.id, dateKey: today });
     ok(/\/KK\//.test(paid.number), `bayar voucher tanggal hari ini boleh (${paid.number})`);
 
@@ -62,8 +62,7 @@ async function main() {
     ok(v.status === "CANCELLED" && (await db.costingLine.findUniqueOrThrow({ where: { id: l1.id } })).voucherId === null,
       "voucher belum dibayar dari periode terkunci tetap bisa dibatalkan, biayanya terbuka lagi");
   } finally {
-    await setLockKey(db, original);
-    ok((await getLockKey(db)) === original, `kunci periode dikembalikan (${original ?? "tanpa kunci"})`);
+    await restoreLock(db, original);
   }
 
   console.log(failures ? `\n${failures} GAGAL` : "\nSemua lulus");

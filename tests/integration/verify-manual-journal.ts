@@ -7,7 +7,7 @@
 import { PrismaClient } from "@prisma/client";
 import { createManualJournal, cancelManualJournal, listManualJournals, manualAccountInfo, MANUAL_JOURNAL_TAG } from "../../src/lib/manual-journal";
 import { createCashEntry, cancelCashEntry } from "../../src/lib/cash-entry";
-import { getLockKey, setLockKey } from "../../src/lib/period-lock";
+import { lockSnapshot, restoreLock, lockMonth } from "./period-lock-helper";
 import { masaTotals } from "../../src/lib/tax";
 import { getCashFlow } from "../../src/lib/cashflow";
 
@@ -32,7 +32,7 @@ async function main() {
   const dbName = (await db.$queryRaw<{ d: string }[]>`SELECT current_database() AS d`)[0].d;
   if (dbName === "ffms") throw new Error("Jangan jalankan uji ini di database demo ffms. Pakai salinan seperti ffms_test.");
   console.log(`   database: ${dbName}`);
-  const originalLock = await getLockKey(db);
+  const originalLock = await lockSnapshot(db);
 
   // 1. Akun beban operasional baru
   const ops = await db.coaAccount.findMany({ where: { code: { in: ["6310", "6320", "6330", "6340", "6350", "6360", "6390"] } }, include: { parent: true } });
@@ -86,16 +86,15 @@ async function main() {
   ok(blocked.includes("1300") && blocked.includes("2000"), `akun yang diblokir untuk jurnal manual: ${blocked.join(", ")}`);
 
   // 5. Kunci periode: jurnal dan pembalik bertanggal terkunci ditolak
-  await setLockKey(db, "2026-10-20");
-  await throws(async () => createManualJournal(db, { dateKey: "2026-10-20", description: "Dalam periode terkunci", lines: [{ accountId: kas, debit: 1 }, { accountId: await id("6310"), credit: 1 }] }), /Periode terkunci/, "jurnal manual di periode terkunci ditolak");
-  await throws(() => cancelManualJournal(db, mj.journalEntryId, "coba batal mundur", undefined, "2026-10-19"), /Periode terkunci/, "pembalik bertanggal di periode terkunci ditolak");
-  const afterLock = await createManualJournal(db, { dateKey: "2026-10-21", description: "Setelah tanggal kunci", lines: [{ accountId: kas, debit: 1000 }, { accountId: await id("4900"), credit: 1000 }] });
-  ok(!!afterLock.number, "jurnal manual setelah tanggal kunci tetap bisa diposting");
-  await setLockKey(db, TODAY);
+  await lockMonth(db, "2026-10-20");
+  await throws(async () => createManualJournal(db, { dateKey: "2026-10-20", description: "Dalam periode terkunci", lines: [{ accountId: kas, debit: 1 }, { accountId: await id("6310"), credit: 1 }] }), /sudah closing/, "jurnal manual di periode terkunci ditolak");
+  await throws(() => cancelManualJournal(db, mj.journalEntryId, "coba batal mundur", undefined, "2026-10-19"), /sudah closing/, "pembalik bertanggal di periode terkunci ditolak");
+  const afterLock = await createManualJournal(db, { dateKey: "2026-11-02", description: "Bulan sesudah bulan closing", lines: [{ accountId: kas, debit: 1000 }, { accountId: await id("4900"), credit: 1000 }] });
+  ok(!!afterLock.number, "jurnal manual di bulan yang belum closing tetap bisa diposting");
+  await lockMonth(db, TODAY);
   const ce = await db.journalEntry.findFirstOrThrow({ where: { source: "CASH_ENTRY", isReversed: false, isReversal: false }, orderBy: { createdAt: "desc" } });
-  await throws(() => cancelCashEntry(db, ce.id, "batal hari ini saat terkunci"), /Periode terkunci/, "pembatalan kas masuk/keluar ditolak bila hari ini sudah dikunci (pembalik ikut dicek kunci)");
-  await setLockKey(db, originalLock);
-  ok((await getLockKey(db)) === originalLock, `kunci periode dikembalikan ke kondisi awal (${originalLock ?? "tanpa kunci"})`);
+  await throws(() => cancelCashEntry(db, ce.id, "batal hari ini saat terkunci"), /sudah closing/, "pembatalan kas masuk/keluar ditolak bila hari ini sudah dikunci (pembalik ikut dicek kunci)");
+  await restoreLock(db, originalLock);
 
   // 6. Pembatalan jurnal manual
   const bBefore = { b6300: await bal("6300"), b6320: await bal("6320") };

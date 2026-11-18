@@ -18,14 +18,21 @@ import { formatDate, formatIDR } from "@/lib/format";
 import { cancelVoucherAction, payVoucherAction } from "./actions";
 
 export type VoucherRow = {
-  id: string; number: string; date: string; job: string; bl: string; payee: string; total: number;
+  id: string; number: string; date: string; bl: string; payee: string; total: number;
+  source: { kind: "JOB" | "INVOICE" | "BILL"; label: string; href: string | null };
+  /** Teks pencarian: nomor job / invoice / bill. */
+  sourceText: string;
   status: VoucherStatus; proofNumber: string | null; journalEntryId: string | null;
+  /** Voucher invoice/bill lama yang sudah mencatat pembayaran (tidak bisa dibatalkan). */
+  hasPayment: boolean;
 };
+
+const SOURCE = { JOB: "Job", INVOICE: "Invoice", BILL: "Bill" } as const;
 
 const STATUS: Record<VoucherStatus, string> = { ISSUED: "Belum dibayar", PAID: "Dibayar", CANCELLED: "Batal" };
 
-export function VouchersTable({ data, canPay, canCancel, canPrint, cashAccounts, defaultCashId, today }: {
-  data: VoucherRow[]; canPay: boolean; canCancel: boolean; canPrint: boolean; cashAccounts: { id: string; label: string }[]; defaultCashId: string | null; today: string;
+export function VouchersTable({ data, freshId = null, canPay, canCancel, canPrint, cashAccounts, defaultCashId, today }: {
+  data: VoucherRow[]; freshId?: string | null; canPay: boolean; canCancel: boolean; canPrint: boolean; cashAccounts: { id: string; label: string }[]; defaultCashId: string | null; today: string;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -49,17 +56,36 @@ export function VouchersTable({ data, canPay, canCancel, canPrint, cashAccounts,
     if (!cancel) return;
     start(async () => {
       const res = await cancelVoucherAction(cancel.id, reason);
-      if (res.ok) { toast.success("Voucher dibatalkan, biaya terbuka lagi."); setCancel(null); setReason(""); router.refresh(); }
+      if (res.ok) { toast.success("Voucher dibatalkan, barisnya terbuka lagi."); setCancel(null); setReason(""); router.refresh(); }
       else toast.error(res.error);
     });
   }
 
   const columns: ColumnDef<VoucherRow>[] = [
-    { accessorKey: "number", header: "No. Voucher", cell: ({ row }) => <span className="whitespace-nowrap font-medium">{row.original.number}</span> },
+    {
+      accessorKey: "number", header: "No. Voucher",
+      cell: ({ row }) => (
+        <span className="whitespace-nowrap font-medium">
+          {row.original.number}
+          {row.original.id === freshId && <Badge className="ml-1.5 text-[10px]">Baru disimpan</Badge>}
+        </span>
+      ),
+    },
     { accessorKey: "date", header: "Tanggal", cell: ({ row }) => <span className="whitespace-nowrap">{formatDate(row.original.date)}</span> },
-    { accessorKey: "job", header: "No. Job", cell: ({ row }) => <span className="whitespace-nowrap">{row.original.job}</span> },
-    { accessorKey: "bl", header: "No. B/L", cell: ({ row }) => <span className="text-muted-foreground">{row.original.bl || "-"}</span> },
-    { accessorKey: "payee", header: "Dibayar kepada" },
+    {
+      accessorKey: "sourceText", header: "Sumber",
+      cell: ({ row }) => {
+        const s = row.original.source;
+        return (
+          <span className="whitespace-nowrap">
+            <span className="text-xs text-muted-foreground">{SOURCE[s.kind]} </span>
+            {s.href ? <Link href={s.href} className="text-primary hover:underline">{s.label}</Link> : s.label}
+          </span>
+        );
+      },
+    },
+    { accessorKey: "bl", header: "Job / B/L", cell: ({ row }) => <span className="text-muted-foreground">{row.original.bl || "-"}</span> },
+    { accessorKey: "payee", header: "Pihak" },
     { accessorKey: "total", header: "Nilai", cell: ({ row }) => <span className="tabular-nums">{formatIDR(row.original.total)}</span> },
     {
       accessorKey: "status", header: "Status",
@@ -67,8 +93,13 @@ export function VouchersTable({ data, canPay, canCancel, canPrint, cashAccounts,
         const r = row.original;
         return (
           <div>
-            <Badge variant="outline" className={r.status === "PAID" ? "border-success/50 text-success" : r.status === "ISSUED" ? "border-warning/50 text-warning" : ""}>{STATUS[r.status]}</Badge>
-            {r.proofNumber && r.journalEntryId && <div><Link href={`/accounting/journal/${r.journalEntryId}`} className="text-xs text-primary hover:underline">{r.proofNumber}</Link></div>}
+            {r.source.kind === "JOB" || r.hasPayment
+              ? <Badge variant="outline" className={r.status === "PAID" ? "border-success/50 text-success" : r.status === "ISSUED" ? "border-warning/50 text-warning" : ""}>{STATUS[r.status]}</Badge>
+              // Voucher invoice/bill lama (versi "hanya catatan") tanpa pembayaran: tanpa status, kecuali bila dibatalkan.
+              : r.status === "CANCELLED" ? <Badge variant="outline">{STATUS.CANCELLED}</Badge> : <span className="text-muted-foreground">-</span>}
+            {r.proofNumber && r.journalEntryId && r.status !== "CANCELLED" && (
+              <div><Link href={`/accounting/journal/${r.journalEntryId}`} className="text-xs text-primary hover:underline">{r.proofNumber === r.number ? "Lihat jurnal" : r.proofNumber}</Link></div>
+            )}
           </div>
         );
       },
@@ -80,8 +111,8 @@ export function VouchersTable({ data, canPay, canCancel, canPrint, cashAccounts,
         return (
           <div className="flex justify-end gap-1">
             {canPrint && <Button asChild size="sm" variant="ghost"><a href={`/api/vouchers/${r.id}/pdf`} target="_blank" rel="noopener"><Printer /> Print</a></Button>}
-            {canPay && r.status === "ISSUED" && <Button size="sm" variant="outline" onClick={() => setPay(r)}><Wallet /> Bayar</Button>}
-            {canCancel && r.status === "ISSUED" && <Button size="sm" variant="ghost" className="text-destructive" onClick={() => { setCancel(r); setReason(""); }}><Ban /> Batalkan</Button>}
+            {canPay && r.source.kind === "JOB" && r.status === "ISSUED" && <Button size="sm" variant="outline" onClick={() => setPay(r)}><Wallet /> Bayar</Button>}
+            {canCancel && ((r.status === "ISSUED" && !r.hasPayment) || (r.hasPayment && r.source.kind !== "JOB" && r.status !== "CANCELLED")) && <Button size="sm" variant="ghost" className="text-destructive" onClick={() => { setCancel(r); setReason(""); }}><Ban /> Batalkan</Button>}
           </div>
         );
       },
@@ -90,7 +121,7 @@ export function VouchersTable({ data, canPay, canCancel, canPrint, cashAccounts,
 
   return (
     <>
-      <DataTable columns={columns} data={data} searchPlaceholder="Cari no. voucher, no. job, no. B/L, atau penerima…" searchKeys={["number", "job", "bl", "payee"]} emptyTitle="Belum ada voucher" />
+      <DataTable columns={columns} data={data} rowClassName={(r) => (r.id === freshId ? "bg-primary/10 hover:bg-primary/15" : undefined)} searchPlaceholder="Cari no. voucher, no. invoice/bill/job, no. B/L, atau pihak…" searchKeys={["number", "sourceText", "bl", "payee"]} emptyTitle="Belum ada voucher" />
 
       <Dialog open={!!pay} onOpenChange={(v) => !v && setPay(null)}>
         <DialogContent>
@@ -125,7 +156,11 @@ export function VouchersTable({ data, canPay, canCancel, canPrint, cashAccounts,
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Batalkan voucher {cancel?.number}?</DialogTitle>
-            <DialogDescription>Nomornya tidak dipakai lagi, dan biayanya terbuka untuk diedit.</DialogDescription>
+            <DialogDescription>
+              {cancel?.hasPayment
+                ? "Pelunasannya ikut dibatalkan: jurnal dibalik, invoice/bill kembali belum lunas, dan barisnya bisa divoucher ulang dengan nomor baru."
+                : "Nomornya tidak dipakai lagi, dan baris biaya atau baris invoice/bill-nya terbuka lagi."}
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-1.5 text-sm"><Label>Alasan</Label><Input value={reason} onChange={(e) => setReason(e.target.value)} /></div>
           <DialogFooter>

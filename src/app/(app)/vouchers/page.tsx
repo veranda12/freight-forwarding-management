@@ -4,6 +4,7 @@ import { requirePerm, hasPerm } from "@/lib/auth-helpers";
 import { voucherScope } from "@/lib/data-scope";
 import { prisma } from "@/lib/prisma";
 import { formatIDR } from "@/lib/format";
+import { docLineJobs } from "@/lib/doc-vouchers";
 import { cashAccountOptions } from "@/lib/cash-accounts";
 import { PageHeader } from "@/components/page-header";
 import { StatStrip } from "@/components/stat-strip";
@@ -12,35 +13,55 @@ import { VouchersTable, type VoucherRow } from "./vouchers-table";
 
 export const dynamic = "force-dynamic";
 
-export default async function VouchersPage() {
+export default async function VouchersPage({ searchParams }: { searchParams: Promise<{ baru?: string | string[] }> }) {
   const user = await requirePerm("vouchers.view");
+  // ?baru=<id> dari form Buat Voucher: voucher yang baru disimpan ditaruh paling atas dan disorot.
+  const sp = await searchParams;
+  const fresh = (Array.isArray(sp.baru) ? sp.baru[0] : sp.baru ?? "").slice(0, 40) || null;
   const today = new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10);
   const [vouchers, cash] = await Promise.all([
     prisma.voucher.findMany({
       where: voucherScope(user),
       orderBy: [{ date: "desc" }, { number: "desc" }],
-      include: { job: { select: { number: true, hblNo: true, mblNo: true, hawbNo: true, mawbNo: true } } },
+      include: {
+        job: { select: { id: true, number: true, hblNo: true, mblNo: true, hawbNo: true, mawbNo: true } },
+        invoice: { select: { id: true, number: true, status: true, job: { select: { number: true } } } },
+        bill: { select: { id: true, number: true, status: true, job: { select: { number: true } } } },
+        docLines: { select: { invoiceLine: { select: { job: { select: { number: true } } } }, billLine: { select: { job: { select: { number: true } } } } } },
+      },
     }),
     cashAccountOptions(prisma, "payment"),
   ]);
   const rows: VoucherRow[] = vouchers.map((v) => ({
-    id: v.id, number: v.number, date: v.date.toISOString(), job: v.job.number,
-    bl: [v.job.hblNo, v.job.mblNo, v.job.hawbNo, v.job.mawbNo].filter(Boolean).join(" / "),
+    id: v.id, number: v.number, date: v.date.toISOString(),
+    source: v.invoice ? { kind: "INVOICE", label: v.invoice.number, href: `/invoices/${v.invoice.id}` }
+      : v.bill ? { kind: "BILL", label: v.bill.number, href: `/bills/${v.bill.id}` }
+      : { kind: "JOB", label: v.job?.number ?? "-", href: v.job ? `/costing/${v.job.id}` : null },
+    sourceText: v.invoice?.number ?? v.bill?.number ?? v.job?.number ?? "",
+    bl: v.job ? [v.job.hblNo, v.job.mblNo, v.job.hawbNo, v.job.mawbNo].filter(Boolean).join(" / ")
+      : docLineJobs(v),
     payee: v.payee, total: Number(v.total), status: v.status, proofNumber: v.proofNumber, journalEntryId: v.journalEntryId,
+    hasPayment: !!v.paymentId,
   }));
-  const unpaid = rows.filter((r) => r.status === "ISSUED");
+  // Hanya voucher biaya job yang punya langkah Bayar; voucher invoice/bill langsung mencatat pelunasan saat dibuat.
+  const freshRow = fresh ? rows.find((r) => r.id === fresh) ?? null : null;
+  const ordered = freshRow ? [freshRow, ...rows.filter((r) => r !== freshRow)] : rows;
+  const unpaid = rows.filter((r) => r.source.kind === "JOB" && r.status === "ISSUED");
   const canCreate = hasPerm(user, "vouchers.create");
   return (
     <div className="space-y-6">
-      <PageHeader title="Voucher" description="Pengeluaran biaya harian job. Biaya terkunci sejak voucher dibuat">
+      <PageHeader title="Voucher" description="Voucher penerimaan dari invoice, voucher pengeluaran dari vendor bill, atau voucher biaya job">
         {canCreate && <Button asChild><Link href="/vouchers/new"><Plus /> Buat Voucher</Link></Button>}
       </PageHeader>
       <StatStrip items={[
         { label: "Total voucher", value: rows.length },
-        { label: "Belum dibayar", value: unpaid.length, tone: unpaid.length ? "warning" : undefined },
+        { label: "Biaya job belum dibayar", value: unpaid.length, tone: unpaid.length ? "warning" : undefined },
         { label: "Nilai belum dibayar", value: formatIDR(unpaid.reduce((s, r) => s + r.total, 0)), tone: "warning" },
       ]} />
-      <VouchersTable data={rows} canPay={hasPerm(user, "vouchers.pay")} canCancel={hasPerm(user, "vouchers.cancel")} canPrint={hasPerm(user, "vouchers.print")} cashAccounts={cash.options} defaultCashId={cash.defaultId} today={today} />
+      <VouchersTable
+        data={ordered} freshId={freshRow?.id ?? null} canPay={hasPerm(user, "vouchers.pay")} canCancel={hasPerm(user, "vouchers.cancel")}
+        canPrint={hasPerm(user, "vouchers.print")} cashAccounts={cash.options} defaultCashId={cash.defaultId} today={today}
+      />
     </div>
   );
 }

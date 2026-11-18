@@ -23,11 +23,13 @@ async function main() {
   await seedClearance(db, { demo: true });
   await seedClearance(db, { demo: true }); // idempoten
   ok((await db.job.count({ where: { mblNo: "MEDUY1234567" } })) === 1, "seed clearance idempoten (1 job demo)");
-  ok((await db.rateCardItem.count()) === 18, `rate card berisi 18 tarif (${await db.rateCardItem.count()})`);
+  // 18 tarif awal + OVWT (overweight 20GP, 9 Nov).
+  ok((await db.rateCardItem.count()) === 20, `rate card berisi 20 tarif (${await db.rateCardItem.count()})`);
 
   const job = await db.job.findFirstOrThrow({ where: { mblNo: "MEDUY1234567" }, include: { invoices: { include: { lines: { include: { chargeCode: true } } } } } });
   const inv = job.invoices[0];
-  ok(n(inv.total) === 49_847_370 && n(inv.ppnAmount) === 0, `invoice demo ${inv.number} total ${inv.total}, PPN ${inv.ppnAmount}`);
+  // PPN 1,1% hanya dari pendapatan (24.450.000), reimburse tidak (aturan SLG 6 Nov).
+  ok(n(inv.total) === 50_116_320 && n(inv.ppnAmount) === 268_950, `invoice demo ${inv.number} total ${inv.total}, PPN ${inv.ppnAmount}`);
   const sec = (s: string) => inv.lines.filter((l) => l.section === s).reduce((t, l) => t + n(l.amount), 0);
   ok(sec("LOCAL") === 30_786_023, `seksi A Local & Port ${sec("LOCAL")}`);
   ok(sec("DOCUMENTATION") === 18_129_347, `seksi B Documentation ${sec("DOCUMENTATION")}`);
@@ -39,8 +41,8 @@ async function main() {
   ok(line("EXTTRUCK").note === "Container CAIU1234567", "extended trucking membawa nomor container");
   const je = await db.journalEntry.findUniqueOrThrow({ where: { id: inv.journalEntryId! }, include: { lines: true } });
   const d = je.lines.reduce((t, l) => t + n(l.debit), 0), k = je.lines.reduce((t, l) => t + n(l.credit), 0);
-  ok(Math.abs(d - k) < 0.01 && d === 49_847_370, `jurnal invoice seimbang D ${d} = K ${k}`);
-  ok(n(job.revenueIdr) === 49_847_370, `revenue job ${job.revenueIdr}`);
+  ok(Math.abs(d - k) < 0.01 && d === 50_116_320, `jurnal invoice seimbang D ${d} = K ${k}`);
+  ok(n(job.revenueIdr) === 24_450_000, `revenue job tanpa reimburse ${job.revenueIdr}`);
   ok(Math.round((inv.dueDate.getTime() - inv.date.getTime()) / 86400000) === 5, "jatuh tempo 5 hari (TOP customer)");
   ok((await err(() => applyRateCard(db, job.id))).includes("sudah ditagih"), "rate card tidak bisa dihitung ulang setelah ditagih");
 
@@ -50,15 +52,22 @@ async function main() {
     data: {
       number: await genJobNumber(tx, modeDirKey("SEA_FCL", "IMPORT")), mode: "SEA_FCL", direction: "IMPORT", customerId: job.customerId,
       customsLane: "RED", distanceKm: 25,
-      containers: { create: [{ containerNo: "TEST0000001", containerTypeId: t["20GP"] }, { containerNo: "TEST0000002", containerTypeId: t["20GP"] }, { containerNo: "TEST0000003", containerTypeId: t["40HC"] }] },
+      // Berat di bawah batas overweight 20GP (23 ton), supaya yang diuji di sini hanya surcharge jarak.
+      containers: { create: [{ containerNo: "TEST0000001", containerTypeId: t["20GP"], grossWeightKg: 20_000 }, { containerNo: "TEST0000002", containerTypeId: t["20GP"], grossWeightKg: 20_000 }, { containerNo: "TEST0000003", containerTypeId: t["40HC"], grossWeightKg: 20_000 }] },
     },
   }));
+  // Jalur wajib dipilih sebelum rate card dihitung, supaya charge per jalur tidak salah tagih.
+  await db.job.update({ where: { id: red.id }, data: { customsLane: null } });
+  ok((await err(() => applyRateCard(db, red.id))).includes("Jalur bea cukai belum dipilih"), "rate card ditolak bila jalur belum dipilih");
+  ok((await db.costingLine.count({ where: { jobId: red.id } })) === 0, "tidak ada charge dibuat tanpa jalur");
+  await db.job.update({ where: { id: red.id }, data: { customsLane: "RED" } });
   const created = await applyRateCard(db, red.id);
   let rl = await db.costingLine.findMany({ where: { jobId: red.id }, include: { chargeCode: true } });
   const get = (code: string, unit: string) => rl.find((l) => l.chargeCode.code === code && l.unitLabel === unit);
   ok(n(get("CC", "20GP")?.unitPrice) === 1_800_000 && n(get("CC", "20GP")?.qty) === 2, "20GP: clearance 2 x 1.800.000");
-  ok(n(get("GREEN", "20GP")?.unitPrice) === 1_500_000 && n(get("TRUCK", "20GP")?.unitPrice) === 2_900_000, "20GP: green light 1.500.000, trucking 2.900.000");
-  ok(n(get("REDLINE", "40HC")?.actualIdr) === 3_000_000 && n(get("BEHANDLE", "20GP")?.actualIdr) === 5_400_000, "jalur merah: red line dan behandle ikut dihitung");
+  ok(!rl.some((l) => l.chargeCode.code === "GREEN") && n(get("TRUCK", "20GP")?.unitPrice) === 2_900_000, "jalur merah: tanpa green light, trucking 20GP 2.900.000");
+  ok(n(get("REDLINE", "40HC")?.actualIdr) === 4_500_000 && n(get("REDLINE", "20GP")?.actualIdr) === 8_600_000 && n(get("BEHANDLE", "20GP")?.actualIdr) === 5_400_000,
+    "jalur merah: red line 40HC 4.500.000, 20GP 2 x 4.300.000, behandle ikut dihitung");
   ok(!rl.some((l) => l.chargeCode.code === "XDIST"), "jarak 25 km tidak kena surcharge");
   ok(created === rl.length, `${created} baris dibuat`);
 

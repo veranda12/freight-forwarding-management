@@ -1,13 +1,14 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Briefcase, Pencil, Printer } from "lucide-react";
+import { Briefcase, Pencil, Printer, Ticket } from "lucide-react";
 import { requirePerm, hasPerm } from "@/lib/auth-helpers";
 import { invoiceScope } from "@/lib/data-scope";
 import { prisma } from "@/lib/prisma";
 import { formatIDR, formatDate, formatNumber } from "@/lib/format";
 import { InvoiceActions } from "./invoice-actions";
 import { latestRate } from "@/lib/fx";
-import { invoiceEditBlock } from "@/lib/receivables";
+import { invoiceEditBlock, receiptCancelState } from "@/lib/receivables";
+import { CancelReceiptButton } from "../../payments/cancel-receipt-button";
 import { suggestPph23 } from "@/lib/receipt-deductions";
 import { cashAccountOptions } from "@/lib/cash-accounts";
 import { PageHeader } from "@/components/page-header";
@@ -17,6 +18,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { InvoiceStatusBadge } from "@/components/status-badge";
 import { Breadcrumbs } from "@/components/breadcrumbs";
+import { DocVouchersCard } from "@/components/doc-vouchers-card";
+import { vouchersOfDoc } from "@/lib/doc-vouchers";
+import { displayUnits } from "@/lib/rate-card";
 
 export const dynamic = "force-dynamic";
 
@@ -35,6 +39,9 @@ export default async function InvoiceDetail({ params }: { params: Promise<{ id: 
   if (!inv) notFound();
   // tautan job: ke costing bila boleh, ke detail job bila hanya boleh melihat job
   const jobHref = (jobId: string) => (hasPerm(user, "costing.view") ? `/costing/${jobId}` : hasPerm(user, "jobs.view") ? `/jobs/${jobId}` : "#");
+  // Baris tanpa unit (mis. reimburse dari buying) memakai unit dari rate card: 40HC, B/L, dst.
+  const units = await displayUnits(prisma, inv.customerId, inv.lines.map((l) => ({ chargeCodeId: l.chargeCodeId, unitLabel: l.unitLabel, jobId: l.jobId ?? inv.jobId })));
+  inv.lines.forEach((l, i) => { l.unitLabel = units[i]; });
 
   const journal = inv.journalEntryId
     ? await prisma.journalEntry.findUnique({ where: { id: inv.journalEntryId }, include: { lines: { include: { account: true } } } })
@@ -49,6 +56,20 @@ export default async function InvoiceDetail({ params }: { params: Promise<{ id: 
   const ppnLabel = `${(Number(inv.ppnRate) * 100).toLocaleString("id-ID", { maximumFractionDigits: 2 })}%`;
   const reimburse = inv.lines.filter((l) => l.asReceipt).reduce((s, l) => s + Number(l.amount), 0);
   const canEdit = hasPerm(user, "invoices.edit") && !invoiceEditBlock(inv) && inv.costingLines.length > 0;
+  // Batalkan Pelunasan untuk pemegang izin `payments.cancel` (bawaan: Admin), per pelunasan yang masih aktif.
+  const cancelStates = new Map<string, { block: string | null; invoices: string[] }>();
+  if (hasPerm(user, "payments.cancel")) {
+    for (const a of inv.allocations) {
+      if (a.payment.cancelledAt || cancelStates.has(a.payment.id)) continue;
+      const st = await receiptCancelState(prisma, a.payment.id);
+      cancelStates.set(a.payment.id, { block: st.block, invoices: st.invoices });
+    }
+  }
+  const vouchers = await vouchersOfDoc(prisma, { invoiceId: inv.id });
+  // Voucher invoice hanya catatan (tanpa jurnal): invoice IDR yang tidak dibatalkan, lunas atau belum.
+  const canVoucher = hasPerm(user, "vouchers.create") && inv.currency === "IDR" && inv.status !== "CANCELLED";
+  // Batalkan invoice: izin `invoices.cancel` (bawaan: Admin); invoice buatan sendiri butuh `invoices.cancelOwn`.
+  const canCancelInvoice = hasPerm(user, "invoices.cancel") && (inv.createdById !== user.id || hasPerm(user, "invoices.cancelOwn"));
 
   return (
     <div className="space-y-6">
@@ -62,6 +83,7 @@ export default async function InvoiceDetail({ params }: { params: Promise<{ id: 
             </Button>
           )}
           {canEdit && <Button asChild variant="outline"><Link href={`/invoices/${inv.id}/edit`}><Pencil /> Edit</Link></Button>}
+          {canVoucher && <Button asChild variant="outline"><Link href={`/vouchers/new?invoice=${inv.id}`}><Ticket /> Buat Voucher</Link></Button>}
           <InvoiceActions
             invoiceId={inv.id}
             currency={inv.currency}
@@ -72,9 +94,9 @@ export default async function InvoiceDetail({ params }: { params: Promise<{ id: 
             pph23Suggest={pph23Suggest}
             cashAccounts={cash.options}
             defaultCashId={cash.defaultId}
-            canWrite={hasPerm(user, "invoices.receipt") || hasPerm(user, "invoices.cancel")}
-            payable={hasPerm(user, "invoices.receipt") && inv.status !== "CANCELLED" && inv.status !== "PAID"}
-            cancellable={hasPerm(user, "invoices.cancel") && Number(inv.amountPaid) === 0 && inv.status !== "CANCELLED"}
+            canWrite={hasPerm(user, "invoices.receipt") || canCancelInvoice}
+            cancellable={canCancelInvoice && Number(inv.amountPaid) === 0 && inv.status !== "CANCELLED"}
+            payable={hasPerm(user, "invoices.receipt") && inv.status !== "CANCELLED"}
           />
         </PageHeader>
         {jobs.length > 0 && (
@@ -139,16 +161,26 @@ export default async function InvoiceDetail({ params }: { params: Promise<{ id: 
           {inv.allocations.length > 0 && (
             <Card>
               <CardHeader><CardTitle className="text-base">Pembayaran</CardTitle></CardHeader>
-              <CardContent className="space-y-2 text-sm">
-                {inv.allocations.map((a) => (
-                  <div key={a.id} className="flex justify-between">
-                    <Link href={`/payments/${a.payment.id}`} className="text-primary hover:underline">{a.payment.number} · {formatDate(a.payment.date)}</Link>
-                    <span className="tabular-nums">{formatIDR(Number(a.amount))}</span>
-                  </div>
-                ))}
+              <CardContent className="space-y-3 text-sm">
+                {inv.allocations.map((a) => {
+                  const st = cancelStates.get(a.payment.id);
+                  return (
+                    <div key={a.id} className="space-y-1.5">
+                      <div className="flex justify-between gap-2">
+                        <Link href={`/payments/${a.payment.id}`} className={`text-primary hover:underline ${a.payment.cancelledAt ? "line-through opacity-60" : ""}`}>{a.payment.number} · {formatDate(a.payment.date)}</Link>
+                        <span className={`tabular-nums ${a.payment.cancelledAt ? "line-through opacity-60" : ""}`}>{formatIDR(Number(a.amount))}</span>
+                      </div>
+                      {a.payment.cancelledAt && (
+                        <p className="text-xs text-muted-foreground"><Badge variant="outline" className="mr-1.5 text-[10px] text-destructive">BATAL</Badge>{formatDate(a.payment.cancelledAt)} · {a.payment.cancelReason}</p>
+                      )}
+                      {st && <CancelReceiptButton paymentId={a.payment.id} number={a.payment.number} block={st.block} otherInvoices={st.invoices.filter((n) => n !== inv.number)} />}
+                    </div>
+                  );
+                })}
               </CardContent>
             </Card>
           )}
+          <DocVouchersCard vouchers={vouchers} />
           {journal && (
             <Card>
               <CardHeader><CardTitle className="text-base">Jurnal {journal.number}</CardTitle></CardHeader>

@@ -111,8 +111,9 @@ export function ContainerForm({ jobId, types, initial, warehouses, jobDest }: {
             <Input value={sealNo} onChange={(e) => setSealNo(e.target.value.toUpperCase())} placeholder="SL1234567" maxLength={30} />
           </div>
           <div className="space-y-1.5">
-            <Label>Berat kotor (kg, opsional)</Label>
+            <Label>Berat kotor (kg)</Label>
             <Input type="number" min={0} value={gross} onChange={(e) => setGross(e.target.value)} />
+            <p className="text-xs text-muted-foreground">Wajib bila rate card punya tarif overweight untuk tipe ini.</p>
           </div>
           <div className="space-y-1.5">
             <Label>Volume (cbm, opsional)</Label>
@@ -120,7 +121,7 @@ export function ContainerForm({ jobId, types, initial, warehouses, jobDest }: {
           </div>
           <div className="col-span-2 border-t pt-3">
             <p className="font-medium">Tujuan container</p>
-            <p className="text-xs text-muted-foreground">Kosongkan bila sama dengan tujuan job ({jobDest}). Jarak mengikuti surat jalan container ini.</p>
+            <p className="text-xs text-muted-foreground">Jarak mengikuti surat jalan container ini dan dipakai rate card untuk surcharge jarak.{jobDest ? ` Kosong: ikut tujuan lama job (${jobDest}).` : ""}</p>
           </div>
           <div className="space-y-1.5">
             <Label>Gudang tujuan</Label>
@@ -134,11 +135,11 @@ export function ContainerForm({ jobId, types, initial, warehouses, jobDest }: {
           </div>
           <div className="space-y-1.5">
             <Label>Jarak (km)</Label>
-            <Input aria-label="Jarak container" type="number" min={0} step="0.1" value={km} onChange={(e) => setKm(e.target.value)} placeholder="Ikut job" />
+            <Input aria-label="Jarak container" type="number" min={0} step="0.1" value={km} onChange={(e) => setKm(e.target.value)} placeholder={jobDest ? "Ikut job" : "km"} />
           </div>
           <div className="col-span-2 space-y-1.5">
             <Label>Alamat kirim</Label>
-            <Textarea aria-label="Alamat kirim container" rows={2} value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Ikut alamat job" />
+            <Textarea aria-label="Alamat kirim container" rows={2} value={address} onChange={(e) => setAddress(e.target.value)} placeholder={jobDest ? "Ikut alamat job" : "Alamat gudang tujuan"} />
           </div>
         </div>
         <DialogFooter className="sm:justify-between">

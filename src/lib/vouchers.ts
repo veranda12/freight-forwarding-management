@@ -4,9 +4,16 @@ import { r2 } from "./accounting-core";
 import { postJournal } from "./journal";
 import { assertCashCurrency, resolveCashAccount } from "./cash-accounts";
 import { cashProofCode, genProofNumber } from "./sequence";
-import { getLockKey } from "./period-lock";
+import { getClosedMonths, isClosedKey, closedMessage } from "./period-lock";
+import { taxJournalLines, validateTaxRows, type OutTaxRowKind, type TaxRowInput } from "./tax-rows";
+import { cancelVendorPaymentTx } from "./payables";
+import { cancelReceiptTx } from "./receivables";
 
-export type VoucherInput = { jobId: string; lineIds: string[]; dateKey: string; payee: string; vendorId?: string | null; notes?: string | null };
+export type VoucherInput = {
+  jobId: string; lineIds: string[]; dateKey: string; payee: string; vendorId?: string | null; notes?: string | null;
+  /** Baris pajak yang diketik Finance: PPN masukan (Debet), PPh 23/26 dipotong (Kredit). Tidak untuk biaya reimburse. */
+  taxRows?: TaxRowInput[];
+};
 export type VoucherPayment = { bankAccountId: string; dateKey: string; method?: string | null; reference?: string | null };
 
 const dateOf = (key: string) => new Date(`${key}T12:00:00+07:00`);
@@ -22,24 +29,30 @@ export function validateVoucher(input: VoucherInput) {
   return { ...input, payee, notes: (input.notes ?? "").trim() || null };
 }
 
-/** Buat voucher dari baris buying job. Baris langsung terkunci sampai voucher dibatalkan. */
+/**
+ * Buat voucher dari baris buying job. Baris langsung terkunci sampai voucher dibatalkan.
+ * Total voucher = biaya + PPN - PPh = nilai yang dibayar.
+ */
 export async function createVoucher(db: PrismaClient, input: VoucherInput, userId?: string): Promise<string> {
   const v = validateVoucher(input);
   return db.$transaction(async (tx) => {
     // Voucher belum punya jurnal saat dibuat, jadi kunci periode dicek di sini, bukan di postJournal.
-    const lock = await getLockKey(tx);
-    if (lock && v.dateKey <= lock) throw new Error(`Periode terkunci sampai ${lock}. Voucher tanggal ${v.dateKey} tidak bisa dibuat.`);
+    if (isClosedKey(await getClosedMonths(tx), v.dateKey)) throw new Error(closedMessage(v.dateKey));
     const lines = await tx.costingLine.findMany({ where: { id: { in: v.lineIds }, jobId: v.jobId, side: "BUYING" } });
     if (lines.length !== v.lineIds.length) throw new Error("Ada biaya yang tidak ditemukan di job ini. Muat ulang halaman.");
     if (lines.some((l) => l.billed || l.voucherId || l.recordedAt)) throw new Error("Ada biaya yang sudah di-bill atau sudah masuk voucher lain. Muat ulang halaman.");
-    const total = r2(lines.reduce((s, l) => s + Number(l.actualIdr), 0));
-    if (!(total > 0)) throw new Error("Nilai voucher harus lebih dari 0.");
+    const cost = r2(lines.reduce((s, l) => s + Number(l.actualIdr), 0));
+    if (!(cost > 0)) throw new Error("Nilai voucher harus lebih dari 0.");
+    const nonReimburse = r2(lines.filter((l) => !l.asReceipt).reduce((s, l) => s + Number(l.actualIdr), 0));
+    const tax = validateTaxRows(v.taxRows, { total: cost, nonReimburse }, "OUT");
+    const total = tax.net;
     const date = dateOf(v.dateKey);
     const number = await genProofNumber(tx, "VC", date);
     const voucher = await tx.voucher.create({
       data: {
         number, jobId: v.jobId, date, payee: v.payee, vendorId: v.vendorId || null, notes: v.notes,
         total: new Prisma.Decimal(total), createdById: userId,
+        taxLines: { create: tax.rows.map((r, i) => ({ kind: r.kind as OutTaxRowKind, description: r.description, amount: new Prisma.Decimal(r.amount), sortOrder: i })) },
       },
     });
     const marked = await tx.costingLine.updateMany({ where: { id: { in: v.lineIds }, voucherId: null, billed: false }, data: { voucherId: voucher.id } });
@@ -52,8 +65,12 @@ export async function createVoucher(db: PrismaClient, input: VoucherInput, userI
 export async function payVoucher(db: PrismaClient, voucherId: string, input: VoucherPayment, userId?: string) {
   if (!isKey(input.dateKey)) throw new Error("Tanggal tidak valid.");
   return db.$transaction(async (tx) => {
-    const voucher = await tx.voucher.findUnique({ where: { id: voucherId }, include: { lines: { include: { chargeCode: true } }, job: { select: { number: true } } } });
+    const voucher = await tx.voucher.findUnique({
+      where: { id: voucherId },
+      include: { lines: { include: { chargeCode: true } }, taxLines: { orderBy: { sortOrder: "asc" } }, job: { select: { number: true } } },
+    });
     if (!voucher) throw new Error("Voucher tidak ditemukan.");
+    if (voucher.kind !== "JOB") throw new Error("Voucher invoice/bill sudah mencatat pelunasannya saat dibuat, jadi tidak punya langkah Bayar.");
     if (voucher.status !== "ISSUED") throw new Error(voucher.status === "PAID" ? "Voucher sudah dibayar." : "Voucher sudah dibatalkan.");
     const cash = await resolveCashAccount(tx, input.bankAccountId, "payment");
     assertCashCurrency(cash, "IDR", "pembayaran voucher");
@@ -66,18 +83,21 @@ export async function payVoucher(db: PrismaClient, voucherId: string, input: Vou
       byAccount[id] = r2((byAccount[id] ?? 0) + Number(l.actualIdr));
     }
     const total = Number(voucher.total);
-    const description = `Voucher ${voucher.number} - ${voucher.payee} (${voucher.job.number})`;
+    const description = `Voucher ${voucher.number} - ${voucher.payee}${voucher.job ? ` (${voucher.job.number})` : ""}`;
+    const taxLines = taxJournalLines(voucher.taxLines.map((t) => ({ kind: t.kind, amount: Number(t.amount), description: t.description })), acc);
     const journalEntryId = await postJournal(tx, {
       date, description, source: "VOUCHER", sourceId: voucher.id, createdById: userId, number,
       lines: [
         ...Object.entries(byAccount).map(([accountId, debit]) => ({ accountId, debit, description })),
+        ...taxLines,
         { accountId: cash.coaId, credit: total, description: `Pembayaran dari ${cash.name}` },
       ],
     });
+    // Nomor voucher diganti nomor bukti (BK/KK) supaya cetakan dan daftar memakai kode client; VC hanya nomor sementara.
     await tx.voucher.update({
       where: { id: voucherId },
       data: {
-        status: "PAID", paidAt: date, proofNumber: number, journalEntryId, bankAccountId: cash.bankAccountId,
+        number, status: "PAID", paidAt: date, proofNumber: number, journalEntryId, bankAccountId: cash.bankAccountId,
         method: input.method || "TRANSFER", reference: (input.reference ?? "").trim() || null,
       },
     });
@@ -86,19 +106,29 @@ export async function payVoucher(db: PrismaClient, voucherId: string, input: Vou
 }
 
 /**
- * Batalkan voucher yang belum dibayar. Nomornya tidak dipakai ulang, baris biaya terbuka lagi.
- * Tetap boleh di periode terkunci: belum ada jurnal, dan biaya voucher lama yang tak jadi dibayar harus bisa dilepas.
+ * Batalkan voucher. Nomornya tidak dipakai ulang, baris terbuka lagi.
+ * - Voucher biaya job: hanya selama belum dibayar; baris biaya dilepas.
+ * - Voucher invoice/bill yang mencatat pelunasan: pelunasannya dibatalkan (aturan sama dengan Batalkan Pelunasan:
+ *   tidak boleh bila sudah direkonsiliasi atau periodenya closing), baris dokumen dilepas.
+ * - Voucher invoice/bill lama tanpa pembayaran (versi "hanya catatan"): baris dokumen dilepas.
  */
-export async function cancelVoucher(db: PrismaClient, voucherId: string, reason: string) {
+export async function cancelVoucher(db: PrismaClient, voucherId: string, reason: string, userId?: string) {
   const why = (reason ?? "").trim();
   if (why.length < 3) throw new Error("Alasan pembatalan wajib diisi.");
   return db.$transaction(async (tx) => {
     const voucher = await tx.voucher.findUnique({ where: { id: voucherId } });
     if (!voucher) throw new Error("Voucher tidak ditemukan.");
+    // Voucher invoice/bill = pelunasan: batalkan pembayarannya (jurnal dibalik, dokumen belum lunas lagi), voucher ikut batal.
+    if (voucher.kind !== "JOB" && voucher.paymentId && voucher.status !== "CANCELLED") {
+      if (voucher.kind === "BILL") await cancelVendorPaymentTx(tx, voucher.paymentId, why, userId);
+      else await cancelReceiptTx(tx, voucher.paymentId, why, userId);
+      return { jobId: voucher.jobId, invoiceId: voucher.invoiceId, billId: voucher.billId, number: voucher.number };
+    }
     if (voucher.status === "PAID") throw new Error("Voucher sudah dibayar. Koreksi lewat Jurnal Umum.");
     if (voucher.status === "CANCELLED") throw new Error("Voucher sudah dibatalkan.");
-    await tx.costingLine.updateMany({ where: { voucherId }, data: { voucherId: null } });
+    if (voucher.kind === "JOB") await tx.costingLine.updateMany({ where: { voucherId }, data: { voucherId: null } });
+    else await tx.voucherDocLine.deleteMany({ where: { voucherId } });
     await tx.voucher.update({ where: { id: voucherId }, data: { status: "CANCELLED", cancelReason: why } });
-    return { jobId: voucher.jobId, number: voucher.number };
+    return { jobId: voucher.jobId, invoiceId: voucher.invoiceId, billId: voucher.billId, number: voucher.number };
   });
 }

@@ -12,11 +12,11 @@ import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, Di
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { JOB_STATUS_FLOW, JOB_STATUS_LABELS } from "@/lib/enums";
+import { JOB_STATUS_FLOW, JOB_STATUS_LABELS, isBackwardStatus } from "@/lib/enums";
 import { reopenJob, updateJobStatus } from "../actions";
 
-export function StatusControl({ jobId, current, canStatus = true, canCancel = true, canClose = false, canReopen = false, locked = false }: {
-  jobId: string; current: JobStatus; canStatus?: boolean; canCancel?: boolean; canClose?: boolean; canReopen?: boolean; locked?: boolean;
+export function StatusControl({ jobId, current, canStatus = true, canStatusBack = false, canCancel = true, canClose = false, canReopen = false, locked = false }: {
+  jobId: string; current: JobStatus; canStatus?: boolean; canStatusBack?: boolean; canCancel?: boolean; canClose?: boolean; canReopen?: boolean; locked?: boolean;
 }) {
   const [pending, start] = useTransition();
   const router = useRouter();
@@ -26,7 +26,8 @@ export function StatusControl({ jobId, current, canStatus = true, canCancel = tr
   function set(status: JobStatus) {
     start(async () => {
       try {
-        await updateJobStatus(jobId, status);
+        const res = await updateJobStatus(jobId, status);
+        if (!res.ok) { toast.error(res.error); return; }
         toast.success(`Status diperbarui ke ${JOB_STATUS_LABELS[status]}`);
         router.refresh();
       } catch {
@@ -74,9 +75,11 @@ export function StatusControl({ jobId, current, canStatus = true, canCancel = tr
       <DropdownMenuContent align="end" className="w-56">
         <DropdownMenuLabel>Pindahkan status ke</DropdownMenuLabel>
         <DropdownMenuSeparator />
-        {canStatus && JOB_STATUS_FLOW.filter((s) => s !== "CLOSED" || (canClose && locked)).map((s) => (
+        {/* Status hanya maju. Status sebelumnya disembunyikan, kecuali untuk pemegang izin `jobs.statusBack` (bawaan: Admin) yang memperbaiki salah pilih. */}
+        {canStatus && JOB_STATUS_FLOW.filter((s) => (s !== "CLOSED" || (canClose && locked)) && (canStatusBack || !isBackwardStatus(current, s))).map((s) => (
           <DropdownMenuItem key={s} disabled={s === current} onSelect={() => set(s)}>
             {JOB_STATUS_LABELS[s]}
+            {isBackwardStatus(current, s) && <span className="ml-auto text-xs text-muted-foreground">mundur</span>}
           </DropdownMenuItem>
         ))}
         {canStatus && canCancel && <DropdownMenuSeparator />}

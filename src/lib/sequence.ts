@@ -47,9 +47,24 @@ export function cashProofCode(kind: string, direction: "IN" | "OUT"): ProofCode 
   return direction === "IN" ? "BM" : "BK";
 }
 
-/** SLG/BM/26/11/001. Bulan mengikuti tanggal transaksi, nomor urut mulai lagi setiap bulan. */
-export function formatProofNumber(docCode: string, code: ProofCode, year: number, month: number, counter: number): string {
-  return `${docCode}/${code}/${pad(year % 100, 2)}/${pad(month, 2)}/${pad(counter, 3)}`;
+/**
+ * SLG/BK/26/11/06/0258: kode perusahaan / jenis bukti / tahun / bulan / tanggal / nomor urut.
+ * Tanggal mengikuti tanggal transaksi, nomor urut berjalan setahun per jenis bukti.
+ */
+export function formatProofNumber(docCode: string, code: ProofCode, year: number, month: number, day: number, counter: number): string {
+  return `${docCode}/${code}/${pad(year % 100, 2)}/${pad(month, 2)}/${pad(day, 2)}/${pad(counter, 4)}`;
+}
+
+const PROOF_NUMBER = /^(.+\/(?:BM|BK|KM|KK|JU|VC)\/\d{2}\/\d{2}\/)(\d{2})(\/\d{4,})$/;
+
+/**
+ * Nomor bukti setelah tanggal diubah di bulan yang sama: segmen tanggal ikut, nomor urut tetap.
+ * Nomor format lama (tanpa segmen tanggal) dikembalikan apa adanya.
+ */
+export function withProofDay(number: string, date: Date): string {
+  const m = PROOF_NUMBER.exec(number);
+  if (!m) return number;
+  return `${m[1]}${pad(toZonedTime(date, TZ).getDate(), 2)}${m[3]}`;
 }
 
 /** INV/26/11/021. Tampil 3 angka, otomatis 4 angka mulai 1000. */
@@ -64,18 +79,26 @@ export async function getDocCode(db: DocCodeDb): Promise<string> {
   return c?.docCode || "SLG";
 }
 
+// Urutan tahunan disimpan di baris month = 0, terpisah dari urutan bulanan format lama (month 1-12).
+const proofKey = (code: ProofCode) => `PROOF:${code}`;
+
 export async function genProofNumber(tx: Tx, code: ProofCode, date = new Date()): Promise<string> {
-  const { counter, year, month } = await nextCounter(tx, `PROOF:${code}`, date);
-  return formatProofNumber(await getDocCode(tx), code, year, month, counter);
+  const z = toZonedTime(date, TZ);
+  const year = z.getFullYear();
+  const seq = await tx.sequence.upsert({
+    where: { key_year_month: { key: proofKey(code), year, month: 0 } },
+    create: { key: proofKey(code), year, month: 0, counter: 1 },
+    update: { counter: { increment: 1 } },
+  });
+  return formatProofNumber(await getDocCode(tx), code, year, z.getMonth() + 1, z.getDate(), seq.counter);
 }
 
 /** Perkiraan nomor berikutnya untuk ditampilkan di form. Nomor final terbentuk saat disimpan. */
 export async function previewProofNumber(db: DocCodeDb & Pick<Prisma.TransactionClient, "sequence">, code: ProofCode, date = new Date()): Promise<string> {
   const z = toZonedTime(date, TZ);
   const year = z.getFullYear();
-  const month = z.getMonth() + 1;
-  const seq = await db.sequence.findUnique({ where: { key_year_month: { key: `PROOF:${code}`, year, month } } });
-  return formatProofNumber(await getDocCode(db), code, year, month, (seq?.counter ?? 0) + 1);
+  const seq = await db.sequence.findUnique({ where: { key_year_month: { key: proofKey(code), year, month: 0 } } });
+  return formatProofNumber(await getDocCode(db), code, year, z.getMonth() + 1, z.getDate(), (seq?.counter ?? 0) + 1);
 }
 
 /** Nomor invoice: urutan tahunan, supaya nomor yang sama hanya ada satu dalam setahun. */

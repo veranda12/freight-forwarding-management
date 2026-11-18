@@ -73,7 +73,7 @@ export async function listCashAccounts(db: Db, opts: { activeOnly?: boolean } = 
 export async function cashAccountOptions(db: Db, purpose: "receipt" | "payment") {
   const list = await listCashAccounts(db, { activeOnly: true });
   const def = list.find((a) => (purpose === "receipt" ? a.isDefaultReceipt : a.isDefaultPayment)) ?? list.find((a) => a.kind === "BANK") ?? list[0];
-  return { options: list.map((a) => ({ id: a.id, label: `${a.coaCode} · ${a.label}`, currency: a.currency, kind: a.kind })), defaultId: def?.id ?? null };
+  return { options: list.map((a) => ({ id: a.id, label: `${a.coaCode} · ${a.label}`, currency: a.currency, kind: a.kind, coaCode: a.coaCode })), defaultId: def?.id ?? null };
 }
 
 /** Semua akun COA yang termasuk kas dan bank (dipakai arus kas dan rekonsiliasi). */

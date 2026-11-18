@@ -4,6 +4,8 @@ import { requirePerm, hasPerm } from "@/lib/auth-helpers";
 import { customerScope } from "@/lib/data-scope";
 import { prisma } from "@/lib/prisma";
 import { PageHeader } from "@/components/page-header";
+import { MasterImportDialog } from "@/components/master-import-dialog";
+import { IMPORT_PERMS } from "@/lib/master-import";
 import { Button } from "@/components/ui/button";
 import { CustomersTable, type CustomerRow } from "./customers-table";
 
@@ -23,6 +25,7 @@ export default async function CustomersPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="Customer" description={`${rows.length} customer terdaftar`}>
+        {IMPORT_PERMS.customers.every((k) => hasPerm(user, k)) && <MasterImportDialog kind="customers" label="Customer" />}
         {hasPerm(user, "customers.create") && (
           <Button asChild><Link href="/customers/new"><Plus /> Customer Baru</Link></Button>
         )}

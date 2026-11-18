@@ -37,7 +37,8 @@ export function BlForm({ jobId, isAir, master, house }: { jobId: string; isAir: 
         </DialogHeader>
         <div className="grid gap-3 text-sm sm:grid-cols-2">
           <div className="space-y-1.5"><Label htmlFor="bl-master">{labelM}</Label><Input id="bl-master" value={m} onChange={(e) => setM(e.target.value)} /></div>
-          <div className="space-y-1.5"><Label htmlFor="bl-house">{labelH}</Label><Input id="bl-house" value={h} onChange={(e) => setH(e.target.value)} /></div>
+          {/* House B/L tidak dipakai untuk sea; nilai lama tetap tersimpan. */}
+          {isAir && <div className="space-y-1.5"><Label htmlFor="bl-house">{labelH}</Label><Input id="bl-house" value={h} onChange={(e) => setH(e.target.value)} /></div>}
         </div>
         <DialogFooter>
           <DialogClose asChild><Button variant="ghost">Batal</Button></DialogClose>

@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils";
+import { TabTitle } from "@/components/shell/tabs-context";
 
 export function PageHeader({
   title,
@@ -13,6 +14,7 @@ export function PageHeader({
 }) {
   return (
     <div className={cn("flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between", className)}>
+      <TabTitle title={title} />
       <div className="space-y-1">
         <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">{title}</h1>
         {description && <p className="text-sm text-muted-foreground">{description}</p>}

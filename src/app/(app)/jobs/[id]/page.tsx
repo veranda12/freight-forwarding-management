@@ -20,7 +20,6 @@ import { Breadcrumbs } from "@/components/breadcrumbs";
 import { cn } from "@/lib/utils";
 import { StatusControl } from "./status-control";
 import { BlForm } from "./bl-form";
-import { MilestoneTimeline, type MilestoneItem } from "./milestone-timeline";
 import { ClearanceForm } from "./clearance-form";
 import { getJobLock } from "@/lib/job-lock";
 import { summarizeContainers } from "@/lib/job-containers";
@@ -63,9 +62,9 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
   // Job terkunci (Closed, atau Delivered dengan invoice): tombol ubah data disembunyikan; server tetap menolak.
   const canStatus = hasPerm(user, "jobs.status");
   const canCancel = hasPerm(user, "jobs.cancel");
+  const canStatusBack = hasPerm(user, "jobs.statusBack");
   const canClose = hasPerm(user, "jobs.close");
   const canReopen = hasPerm(user, "jobs.reopen");
-  const canMilestone = hasPerm(user, "jobs.milestone") && !lock;
   const canClearance = hasPerm(user, "jobs.clearance") && !lock;
   const canBl = hasPerm(user, "jobs.bl") && !lock;
   const canGenerateDocs = hasPerm(user, "documents.generate");
@@ -100,21 +99,14 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
     ? (await prisma.warehouse.findMany({ where: { customerId: job.customerId, isActive: true }, orderBy: { name: "asc" } }))
         .map((w) => ({ id: w.id, name: w.name, address: w.address, city: w.city, distanceKm: w.distanceKm == null ? null : Number(w.distanceKm) }))
     : [];
-  const jobDest = [job.warehouse?.name ?? job.deliveryAddress, job.distanceKm == null ? null : `${formatNumber(Number(job.distanceKm), 1)} km`].filter(Boolean).join(", ") || "belum diisi";
+  // Data lama: tujuan job dipakai container yang belum punya tujuan sendiri.
+  const jobDest = [job.warehouse?.name ?? job.deliveryAddress, job.distanceKm == null ? null : `${formatNumber(Number(job.distanceKm), 1)} km`].filter(Boolean).join(", ");
   const revenue = Number(job.revenueIdr);
   const cost = Number(job.costIdr);
   const profit = Number(job.profitIdr);
   const margin = Number(job.marginPct);
 
-  const milestoneItems: MilestoneItem[] = job.milestones.map((m) => ({
-    id: m.id, title: m.title, note: m.note,
-    plannedAt: m.plannedAt?.toISOString() ?? null,
-    actualAt: m.actualAt?.toISOString() ?? null,
-    isDone: m.isDone,
-  }));
-
   // Operasional dulu (D-06): milestone berikutnya & hitung mundur ETD
-  const nextMs = job.milestones.find((m) => !m.isDone);
   const nowMs = Date.now();
   const dToEtd = job.etd ? Math.ceil((new Date(job.etd).getTime() - nowMs) / 86400000) : null;
   const etdHint = dToEtd == null ? null : dToEtd > 0 ? `H-${dToEtd}` : dToEtd === 0 ? "hari ini" : `lewat ${-dToEtd}h`;
@@ -133,7 +125,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
           {((canStatus && (!lock || canClose)) || canCancel || canReopen) && (
             <StatusControl
               jobId={job.id} current={job.status} locked={!!lock}
-              canStatus={canStatus && (!lock || canClose)} canCancel={canCancel && !lock} canClose={canClose} canReopen={canReopen}
+              canStatus={canStatus && (!lock || canClose)} canStatusBack={canStatusBack} canCancel={canCancel && !lock} canClose={canClose} canReopen={canReopen}
             />
           )}
         </PageHeader>
@@ -143,13 +135,12 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
 
       {/* Status & jadwal — operasional dulu (D-06) */}
       <Card>
-        <CardContent className="grid grid-cols-2 divide-x divide-y p-0 sm:grid-cols-3 lg:grid-cols-6 lg:divide-y-0">
+        <CardContent className="grid grid-cols-2 divide-x divide-y p-0 sm:grid-cols-3 lg:grid-cols-5 lg:divide-y-0">
           <StripCell label="Status"><JobStatusBadge status={job.status} /></StripCell>
           <StripCell label="Rute"><span className="inline-flex items-center gap-1.5"><Icon className="h-3.5 w-3.5 text-muted-foreground" />{originCode} → {destCode}</span></StripCell>
           <StripCell label="ETD">{formatDate(job.etd)}{etdHint && <span className={cn("ml-1.5 text-xs font-medium", etdTone)}>{etdHint}</span>}</StripCell>
           <StripCell label="ETA">{formatDate(job.eta)}</StripCell>
           <StripCell label="ATD / ATA"><span className="text-sm">{formatDate(job.atd)} / {formatDate(job.ata)}</span></StripCell>
-          <StripCell label="Milestone berikutnya"><span className="truncate text-sm">{nextMs?.title ?? "Selesai"}</span></StripCell>
         </CardContent>
       </Card>
 
@@ -170,7 +161,6 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="parties">Parties</TabsTrigger>
           {!isAir && <TabsTrigger value="containers">Containers ({job.containers.length})</TabsTrigger>}
-          <TabsTrigger value="milestones">Milestones</TabsTrigger>
           <TabsTrigger value="documents">Documents</TabsTrigger>
         </TabsList>
 
@@ -187,7 +177,8 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
                   <Field label={isAir ? "Dest. Airport" : "Port of Discharge"}>{dest ? `${dest.name}` : "-"}</Field>
                   <Field label="Incoterm">{job.incoterm}</Field>
                   {isAir ? <Field label="Flight No">{job.flightNo}</Field> : <Field label="Vessel / Voyage">{job.vesselName} {job.voyageNo}</Field>}
-                  <Field label="Sales PIC">{job.salesPic?.name}</Field>
+                  <Field label="Diinput oleh">{job.salesPic?.name}</Field>
+                  <Field label="Ditagihkan ke">{job.billTo === "SHIPPER" ? `Shipper · ${job.customer.name}` : job.billTo === "CONSIGNEE" ? `Consignee · ${job.customer.name}` : job.customer.name}</Field>
                   <Field label="Gross Weight">{job.grossWeightKg ? `${formatNumber(Number(job.grossWeightKg), 0)} kg` : "-"}</Field>
                   <Field label="Volume">{job.volumeCbm ? `${formatNumber(Number(job.volumeCbm), 2)} CBM` : "-"}</Field>
                   {job.chargeableWeight && <Field label="Chargeable Weight">{`${formatNumber(Number(job.chargeableWeight), 0)} kg`}</Field>}
@@ -211,7 +202,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
                     <Field label="HAWB">{job.hawbNo}</Field>
                   </> : <>
                     <Field label="Master B/L">{job.mblNo}</Field>
-                    <Field label="House B/L">{job.hblNo}</Field>
+                    {job.hblNo && <Field label="House B/L">{job.hblNo}</Field>}
                   </>}
                   <Field label="Dibuka">{formatDate(job.openedAt)}</Field>
                   <Field label="Ditutup">{formatDate(job.closedAt)}</Field>
@@ -230,21 +221,14 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
             </Card>
             <Card className="lg:col-span-2">
               <CardHeader className="flex-row items-center justify-between">
-                <CardTitle className="text-base">Clearance & Delivery</CardTitle>
-                {canClearance && (
-                  <ClearanceForm jobId={job.id} warehouses={warehouses} initial={{
-                    customsLane: job.customsLane, warehouseId: job.warehouseId, deliveryAddress: job.deliveryAddress,
-                    distanceKm: job.distanceKm == null ? null : Number(job.distanceKm),
-                  }} />
-                )}
+                <CardTitle className="text-base">Clearance</CardTitle>
+                {canClearance && <ClearanceForm jobId={job.id} initial={{ customsLane: job.customsLane }} />}
               </CardHeader>
               <CardContent>
-                <dl className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4">
+                <dl className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3">
                   <Field label="Jalur bea cukai">{job.customsLane ? LANE_LABELS[job.customsLane] : "-"}</Field>
-                  <Field label="Gudang utama">{job.warehouse?.name ?? "-"}</Field>
-                  <Field label="Jarak utama">{job.distanceKm == null ? "-" : `${formatNumber(Number(job.distanceKm), 1)} km`}{job.containers.some((c) => c.distanceKm != null) ? <span className="block text-xs text-muted-foreground">Sebagian container punya jarak sendiri</span> : null}</Field>
                   <Field label="Container">{job.containers.length ? summarizeContainers(job.containers) : "-"}</Field>
-                  <div className="col-span-2 sm:col-span-4"><Field label="Alamat kirim">{job.deliveryAddress ?? "-"}</Field></div>
+                  <Field label="Tujuan & jarak">Diisi per container di tab Containers</Field>
                 </dl>
               </CardContent>
             </Card>
@@ -255,8 +239,8 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
         <TabsContent value="parties">
           <div className="grid gap-4 md:grid-cols-3">
             {[
-              { label: "Shipper", name: job.shipperName, addr: job.shipperAddress },
-              { label: "Consignee", name: job.consigneeName, addr: job.consigneeAddress },
+              { label: job.billTo === "SHIPPER" ? "Shipper · ditagih" : "Shipper", name: job.shipperName, addr: job.shipperAddress },
+              { label: job.billTo === "CONSIGNEE" ? "Consignee · ditagih" : "Consignee", name: job.consigneeName, addr: job.consigneeAddress },
               { label: "Notify Party", name: job.notifyName, addr: job.notifyAddress },
             ].map((p) => (
               <Card key={p.label}>
@@ -324,16 +308,6 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
             </Card>
           </TabsContent>
         )}
-
-        {/* MILESTONES */}
-        <TabsContent value="milestones">
-          <Card>
-            <CardHeader><CardTitle className="text-base">Timeline Milestone</CardTitle></CardHeader>
-            <CardContent>
-              <MilestoneTimeline jobId={job.id} items={milestoneItems} canWrite={canMilestone} />
-            </CardContent>
-          </Card>
-        </TabsContent>
 
         {/* DOCUMENTS */}
         <TabsContent value="documents">

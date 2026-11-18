@@ -70,7 +70,10 @@ kirimannya sendiri.
 7. **Login sebagai Finance** (`finance@demo.com`):
    - **Costing**: profitability per job (margin diberi warna; merah bila <10%).
    - **Invoice (AR)**: buka invoice → subtotal, PPN 11%, jurnal otomatis, alokasi pembayaran.
-   - **Vendor Bill (AP)**: PPh 23 2% otomatis pada jasa.
+   - **Vendor Bill (AP)**: PPN/PPh diisi sesuai tagihan vendor; menu Vendor Bill per job menampilkan pajak bill sebagai baris sendiri.
+   - **Voucher dari invoice / vendor bill**: dari detail dokumen (atau menu **Buat Voucher**) centang baris (mis. per job) → tabel Kode COA / Debit / Kredit terisi otomatis → simpan. Voucher hanya catatan: tanpa jurnal, status invoice/bill tidak berubah (pelunasan tetap lewat Catat Pembayaran / Bayar). Bisa dibatalkan dari daftar Voucher. Form Buat Voucher punya tab Invoice, Vendor Bill, dan Biaya job.
+   - **Voucher biaya job**, **Jurnal Pengeluaran**, dan **Jurnal Penerimaan**: tambah **baris pajak**. Pengeluaran: PPN Masukan di Debet, PPh 23/26 di Kredit. Penerimaan: PPN Keluaran di Kredit, PPh 23 dipotong customer di Debet. Biaya reimburse tidak dikenai pajak.
+   - **Cetak**: bukti kas/bank dan voucher memakai template Receipt / Payment Voucher (nomor `SLG/BK/26/11/06/0001`); Jurnal Umum memakai formulir SOP.
    - **Receipt & Payment**: penerimaan/pembayaran dengan alokasi.
    - **Accounting**: **Trial Balance (balance ✓)**, **Laba Rugi**, **Neraca**, **Jurnal**. _(±4 mnt)_
 8. **Reporting**: profitability per mode, shipment per status, sales performance, **AR/AP Aging** + **Export Excel**. _(±1 mnt)_
@@ -79,11 +82,19 @@ kirimannya sendiri.
 
 Master Data (Customer, Vendor, Overseas Agent, Port & Airport, Currency & Kurs, Charge Code, Aturan Berat, Container Type, Commodity, Pajak, COA) · **Ekspor-Impor** (Rate, Quotation, Job, Booking, Dokumentasi PDF, Tracking publik) · **Domestik** (STT antar kota, Cek Tarif, Tarif Domestik) · Finance (Costing, AR Invoice, AP Bill, Debit/Credit Note, Payment, Accounting, Laporan) · Dashboard · Sistem (User, Audit Log, Setting).
 
+**Import Excel** di daftar Customer, Vendor, dan Commodity: tombol *Import Excel* → *Unduh template* → isi sheet Data → *Periksa* (pratinjau per baris) → *Simpan*. Kolom Kode kosong = data baru, terisi = memperbarui data itu (sel kosong tidak mengubah apa pun). Maks. 1.000 baris / 2 MB per file (.xlsx).
+
+**Export Excel** di daftar Invoice dan Vendor Bill: file berisi sheet *Ringkasan* (satu baris per dokumen, baris TOTAL tanpa dokumen Cancelled) dan *Rincian* (satu baris per item). Nilai dalam IDR seperti pembukuan; dokumen valas punya kolom Mata Uang, Kurs, dan Nilai Valas.
+- Invoice: tombol *Export Excel* → pilih periode tanggal invoice (bawaan bulan berjalan) dan status → *Unduh*. Boleh untuk yang bisa membuka daftar Invoice (Finance, Sales).
+- Vendor Bill: tombol *Export Excel* memakai filter yang sedang aktif di halaman (termasuk bawaan "Belum lunas"), semua halaman. Bill lintas job diekspor utuh beserta semua barisnya. Hanya Finance.
+- Maks. 5.000 dokumen per file; lebih dari itu diminta mempersempit filter.
+
 ## 6. Prinsip Teknis
 
 - Uang = `Decimal(18,2)`, kurs = `Decimal(18,6)` — tidak pernah float.
 - Timezone `Asia/Jakarta`; format Rupiah & tanggal locale Indonesia.
-- Penomoran dokumen via tabel `Sequence` (aman dari race), di dalam transaksi DB.
+- Penomoran dokumen via tabel `Sequence` (aman dari race), di dalam transaksi DB. Bukti kas/bank, Jurnal Umum, dan voucher: `SLG/BK/26/11/06/0001`, nomor urut tahunan per jenis bukti.
+- Kotak Doc. No / Revision / Effective Date pada cetakan bukti diisi di **Setting → Formulir bukti (SOP)**.
 - Jurnal selalu seimbang; pembatalan via **reversal** (jurnal tidak dihapus).
 - Seed deterministik (`faker.seed`), nomor kontainer ISO 6346 valid, Trial Balance balance.
 
