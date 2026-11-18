@@ -19,8 +19,8 @@ import type { CashOpt } from "./cash-entry-panel";
 
 type Transfer = { id: string; number: string; date: string; description: string; from: string; to: string; amountIdr: number; feeIdr: number; reversed: boolean };
 
-export function TransferPanel({ cashAccounts, transfers, today, canWrite, rates }: {
-  cashAccounts: CashOpt[]; transfers: Transfer[]; today: string; canWrite: boolean; rates: Record<string, number>;
+export function TransferPanel({ cashAccounts, transfers, today, canWrite, isAdmin = false, rates }: {
+  cashAccounts: CashOpt[]; transfers: Transfer[]; today: string; canWrite: boolean; isAdmin?: boolean; rates: Record<string, number>;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -136,7 +136,7 @@ export function TransferPanel({ cashAccounts, transfers, today, canWrite, rates 
                     <TableCell>{t.reversed ? <Badge variant="outline">Dibatalkan</Badge> : <Badge variant="outline" className="border-success/50 text-success">Berlaku</Badge>}</TableCell>
                     {canWrite && (
                       <TableCell className="text-right">
-                        {!t.reversed && <Button size="sm" variant="ghost" className="text-destructive" onClick={() => { setCancel(t); setReason(""); }}><Ban /> Batalkan</Button>}
+                        {!t.reversed && isAdmin && <Button size="sm" variant="ghost" className="text-destructive" onClick={() => { setCancel(t); setReason(""); }}><Ban /> Batalkan</Button>}
                       </TableCell>
                     )}
                   </TableRow>

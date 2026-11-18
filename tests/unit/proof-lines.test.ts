@@ -7,10 +7,11 @@ const e = (source: ActionEntry["source"], sourceId: string | null = "src1", extr
   ({ id: "je1", source, sourceId, isReversal: false, isReversed: false, ...extra });
 
 describe("entryActions", () => {
-  it("invoice: Finance bisa edit dan batal, cetak PDF invoice", () => {
+  it("invoice: Finance bisa edit, batal khusus Admin (client 17 Nov), cetak PDF invoice", () => {
     expect(entryActions(e("INVOICE"), "FINANCE")).toEqual({
-      editHref: "/invoices/src1/edit", editBlock: null, cancel: "invoice", cancelBlock: null, printHref: "/api/invoices/src1/pdf",
+      editHref: "/invoices/src1/edit", editBlock: null, cancel: null, cancelBlock: "Pembatalan transaksi khusus Admin.", printHref: "/api/invoices/src1/pdf",
     });
+    expect(entryActions(e("INVOICE"), "ADMIN")).toMatchObject({ cancel: "invoice", cancelBlock: null });
   });
 
   it("role baca saja hanya bisa cetak, dengan alasan izin", () => {
@@ -34,9 +35,11 @@ describe("entryActions", () => {
   });
 
   it("bukti kas dan jurnal umum bisa diedit lewat halaman asalnya", () => {
-    expect(entryActions(e("CASH_ENTRY", "bank1"), "FINANCE")).toMatchObject({ editHref: "/accounting/cash-entry?edit=je1", cancel: "cashEntry", editBlock: null, cancelBlock: null });
+    expect(entryActions(e("CASH_ENTRY", "bank1"), "FINANCE")).toMatchObject({ editHref: "/accounting/cash-entry?edit=je1", cancel: null, editBlock: null, cancelBlock: "Pembatalan transaksi khusus Admin." });
+    expect(entryActions(e("CASH_ENTRY", "bank1"), "ADMIN")).toMatchObject({ cancel: "cashEntry", cancelBlock: null });
     expect(MANUAL_TAG).toBe(MANUAL_JOURNAL_TAG);
-    expect(entryActions(e("MANUAL", MANUAL_JOURNAL_TAG), "FINANCE")).toMatchObject({ editHref: "/accounting/manual-journal?edit=je1", cancel: "manual" });
+    expect(entryActions(e("MANUAL", MANUAL_JOURNAL_TAG), "FINANCE")).toMatchObject({ editHref: "/accounting/manual-journal?edit=je1", cancel: null });
+    expect(entryActions(e("MANUAL", MANUAL_JOURNAL_TAG), "ADMIN")).toMatchObject({ cancel: "manual" });
   });
 
   it("jurnal MANUAL otomatis (modal awal, aset) tidak diubah dari sini, ada alasannya", () => {
@@ -49,7 +52,8 @@ describe("entryActions", () => {
   });
 
   it("voucher: batal saja, cetak PDF voucher", () => {
-    const a = entryActions(e("VOUCHER", "v1"), "FINANCE");
+    expect(entryActions(e("VOUCHER", "v1"), "FINANCE")).toMatchObject({ cancel: null, cancelBlock: "Pembatalan transaksi khusus Admin." });
+    const a = entryActions(e("VOUCHER", "v1"), "ADMIN");
     expect(a).toMatchObject({ editHref: null, cancel: "voucher", cancelBlock: null, printHref: "/api/vouchers/v1/pdf" });
     expect(a.editBlock).toMatch(/tidak bisa diedit/);
   });
@@ -70,8 +74,9 @@ describe("entryActions", () => {
 
   it("vendor bill: Finance bisa edit dan batal, alasan blokir berdasarkan data bill", () => {
     expect(entryActions(e("BILL", "b1"), "FINANCE")).toEqual({
-      editHref: "/bills/b1/edit", editBlock: null, cancel: "bill", cancelBlock: null, printHref: "/api/accounting/journals/je1/pdf",
+      editHref: "/bills/b1/edit", editBlock: null, cancel: null, cancelBlock: "Pembatalan transaksi khusus Admin.", printHref: "/api/accounting/journals/je1/pdf",
     });
+    expect(entryActions(e("BILL", "b1"), "ADMIN")).toMatchObject({ cancel: "bill", cancelBlock: null });
     expect(entryActions(e("BILL", "b1"), "MANAGEMENT").cancelBlock).toMatch(/izin/);
     const d = new Date("2026-11-10T05:00:00Z");
     const base = { status: "UNPAID", amountPaid: 0, currency: "IDR", date: d, vouchers: [] as string[], revalued: false, closedMonths: [] as string[] };

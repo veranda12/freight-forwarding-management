@@ -87,6 +87,8 @@ export async function updateJobStatus(jobId: string, status: JobStatus) {
   const user = await assertCan("jobs", "write");
   const admin = user.role === "ADMIN";
   if (status === "CLOSED" && !admin) throw new Error("Status Closed terisi otomatis setelah invoice lunas.");
+  // Batalkan (hapus) job khusus Admin (permintaan client 17 Nov).
+  if (status === "CANCELLED" && !admin) return { ok: false as const, error: "Hanya Admin yang bisa membatalkan job." };
   if (!admin) await assertJobEditable(prisma, jobId);
   const before = await prisma.job.findUniqueOrThrow({ where: { id: jobId }, select: { status: true } });
   if (!admin && isBackwardStatus(before.status, status)) {

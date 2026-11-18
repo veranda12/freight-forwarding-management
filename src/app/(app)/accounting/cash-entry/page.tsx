@@ -77,12 +77,13 @@ export default async function CashEntryPage({ searchParams }: { searchParams: Pr
         </TabsList>
         <TabsContent value="kas">
           <CashEntryPanel
+            isAdmin={user.role === "ADMIN"}
             cashAccounts={cash.options} defaultCashId={cash.defaultId} prefill={prefill} rates={rates}
             inAccounts={inAccounts} outAccounts={outAccounts} entries={entries} today={today} canWrite={canWrite} closedMonths={closedMonths} editId={editId}
           />
         </TabsContent>
         <TabsContent value="transfer">
-          <TransferPanel cashAccounts={cash.options} transfers={transfers} today={today} canWrite={canWrite} rates={rates} />
+          <TransferPanel cashAccounts={cash.options} transfers={transfers} today={today} canWrite={canWrite} isAdmin={user.role === "ADMIN"} rates={rates} />
         </TabsContent>
       </Tabs>
     </div>

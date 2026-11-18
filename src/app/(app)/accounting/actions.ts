@@ -151,6 +151,7 @@ export async function previewProofAction(code: ProofCode, dateKey: string): Prom
 
 export async function cancelCashEntryAction(journalEntryId: string, reason: string): Promise<Result> {
   const user = await assertCan("accounting", "write");
+  if (user.role !== "ADMIN") return { ok: false, error: "Hanya Admin yang bisa membatalkan transaksi kas." };
   try {
     await cancelCashEntry(prisma, journalEntryId, reason, user.id);
     await writeAudit({ entity: "CashEntry", entityId: journalEntryId, action: "CASH_ENTRY_CANCEL", summary: reason, userId: user.id });
@@ -173,6 +174,7 @@ export async function createTransferAction(input: TransferInput): Promise<Result
 
 export async function cancelTransferAction(journalEntryId: string, reason: string): Promise<Result> {
   const user = await assertCan("accounting", "write");
+  if (user.role !== "ADMIN") return { ok: false, error: "Hanya Admin yang bisa membatalkan transfer." };
   try {
     await cancelTransfer(prisma, journalEntryId, reason, user.id);
     await writeAudit({ entity: "BankTransfer", entityId: journalEntryId, action: "CANCEL", summary: reason, userId: user.id });
@@ -230,6 +232,7 @@ export async function remitTaxPeriodAction(kind: TaxKindKey, period: string, dat
 
 export async function cancelTaxRemitAction(id: string, reason: string): Promise<Result> {
   const user = await assertCan("accounting", "write");
+  if (user.role !== "ADMIN") return { ok: false, error: "Hanya Admin yang bisa membatalkan setoran pajak." };
   try {
     const r = await cancelTaxRemittance(prisma, id, reason, user.id);
     await writeAudit({ entity: "TaxRemittance", entityId: id, action: "TAX_REMIT_CANCEL", summary: `Batal setor ${r.kind} masa ${r.period}: ${reason}`, userId: user.id });
@@ -263,6 +266,7 @@ export async function updateManualJournalAction(journalEntryId: string, input: M
 
 export async function cancelManualJournalAction(journalEntryId: string, reason: string, dateKey?: string): Promise<Result<{ reversalNumber: string }>> {
   const user = await assertCan("accounting", "write");
+  if (user.role !== "ADMIN") return { ok: false, error: "Hanya Admin yang bisa membatalkan jurnal umum." };
   try {
     const r = await cancelManualJournal(prisma, journalEntryId, reason, user.id, dateKey || undefined);
     await writeAudit({ entity: "ManualJournal", entityId: journalEntryId, action: "CANCEL", summary: `Dibalik dengan ${r.reversalNumber}: ${reason}`, userId: user.id });

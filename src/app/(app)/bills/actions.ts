@@ -74,6 +74,8 @@ export async function updateBillAction(billId: string, lineIds: string[], opts: 
 /** Batalkan vendor bill yang belum dibayar: jurnal dibalik, biaya job dibuka kembali. Alasan wajib. */
 export async function cancelBillAction(billId: string, reason: string): Promise<Result<{ reopened: number }>> {
   const user = await assertCan("bills", "write");
+  // Hapus/batal transaksi khusus Admin (permintaan client 17 Nov).
+  if (user.role !== "ADMIN") return { ok: false, error: "Hanya Admin yang bisa membatalkan bill." };
   try {
     const r = await cancelBillCore(prisma, billId, reason, user.id);
     await writeAudit({ entity: "VendorBill", entityId: billId, action: "CANCEL", summary: `${r.number}: ${reason.trim()} (${r.reopened} biaya dibuka kembali)`, userId: user.id });

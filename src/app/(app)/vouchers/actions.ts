@@ -39,11 +39,8 @@ export async function payVoucherAction(voucherId: string, input: VoucherPayment)
 
 export async function cancelVoucherAction(voucherId: string, reason: string): Promise<Result> {
   const user = await assertCan("vouchers", "write");
-  // Voucher invoice/bill mencatat pelunasan; membatalkannya = membatalkan pelunasan, jadi khusus Admin seperti Batalkan Pelunasan.
-  const v = await prisma.voucher.findUnique({ where: { id: voucherId }, select: { kind: true, paymentId: true } });
-  if (v && v.kind !== "JOB" && v.paymentId && user.role !== "ADMIN") {
-    return { ok: false, error: "Voucher ini sudah mencatat pelunasan. Hanya Admin yang bisa membatalkannya." };
-  }
+  // Hapus/batal transaksi khusus Admin (permintaan client 17 Nov), termasuk voucher yang mencatat pelunasan.
+  if (user.role !== "ADMIN") return { ok: false, error: "Hanya Admin yang bisa membatalkan voucher." };
   try {
     const r = await cancelVoucher(prisma, voucherId, reason, user.id);
     await writeAudit({ entity: "Voucher", entityId: voucherId, action: "CANCEL", summary: `${r.number}: ${reason}`, userId: user.id });

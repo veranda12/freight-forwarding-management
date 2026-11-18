@@ -88,8 +88,11 @@ export function entryActions(e: ActionEntry, role: Role | null | undefined): Ent
   if (e.isReversal) return none("Jurnal pembalik tidak bisa diubah atau dibatalkan. Bila perlu, input ulang buktinya.");
   if (e.isReversed) return none("Bukti ini sudah dibatalkan.");
   const acc = can(role, "accounting", "write");
-  const ok = (editHref: string | null, editBlock: string | null, cancel: CancelKind | null, cancelBlock: string | null): EntryActions =>
-    ({ editHref, editBlock: editHref ? null : editBlock, cancel, cancelBlock: cancel ? null : cancelBlock, printHref });
+  // Pembatalan transaksi khusus Admin (permintaan client 17 Nov); izin edit tetap per modul.
+  const ok = (editHref: string | null, editBlock: string | null, cancel0: CancelKind | null, cancelBlock: string | null): EntryActions => {
+    const cancel = role === "ADMIN" ? cancel0 : null;
+    return { editHref, editBlock: editHref ? null : editBlock, cancel, cancelBlock: cancel ? null : cancel0 ? "Pembatalan transaksi khusus Admin." : cancelBlock, printHref };
+  };
 
   switch (e.source) {
     case "INVOICE":

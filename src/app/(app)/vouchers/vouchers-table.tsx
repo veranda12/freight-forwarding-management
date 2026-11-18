@@ -112,7 +112,7 @@ export function VouchersTable({ data, freshId = null, canWrite, isAdmin = false,
           <div className="flex justify-end gap-1">
             <Button asChild size="sm" variant="ghost"><a href={`/api/vouchers/${r.id}/pdf`} target="_blank" rel="noopener"><Printer /> Print</a></Button>
             {canWrite && r.source.kind === "JOB" && r.status === "ISSUED" && <Button size="sm" variant="outline" onClick={() => setPay(r)}><Wallet /> Bayar</Button>}
-            {canWrite && ((r.status === "ISSUED" && !r.hasPayment) || (isAdmin && r.hasPayment && r.source.kind !== "JOB" && r.status !== "CANCELLED")) && <Button size="sm" variant="ghost" className="text-destructive" onClick={() => { setCancel(r); setReason(""); }}><Ban /> Batalkan</Button>}
+            {canWrite && isAdmin && ((r.status === "ISSUED" && !r.hasPayment) || (r.hasPayment && r.source.kind !== "JOB" && r.status !== "CANCELLED")) && <Button size="sm" variant="ghost" className="text-destructive" onClick={() => { setCancel(r); setReason(""); }}><Ban /> Batalkan</Button>}
           </div>
         );
       },

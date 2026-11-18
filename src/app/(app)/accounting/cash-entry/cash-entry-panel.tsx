@@ -44,9 +44,9 @@ const SideBadge = ({ side }: { side: "Debet" | "Kredit" }) => (
   <span className={cn(badgeVariants({ variant: "muted" }), "px-1.5 py-0 text-[11px] font-medium")}>{side}</span>
 );
 
-export function CashEntryPanel({ cashAccounts, defaultCashId, inAccounts, outAccounts, entries, today, canWrite, prefill, rates, closedMonths, editId }: {
+export function CashEntryPanel({ cashAccounts, defaultCashId, inAccounts, outAccounts, entries, today, canWrite, isAdmin = false, prefill, rates, closedMonths, editId }: {
   cashAccounts: CashOpt[]; defaultCashId: string | null; inAccounts: Opt[]; outAccounts: Opt[]; entries: Entry[];
-  today: string; canWrite: boolean; prefill?: CashPrefill; rates: Record<string, number>; closedMonths: string[]; editId?: string;
+  today: string; canWrite: boolean; isAdmin?: boolean; prefill?: CashPrefill; rates: Record<string, number>; closedMonths: string[]; editId?: string;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -216,7 +216,7 @@ export function CashEntryPanel({ cashAccounts, defaultCashId, inAccounts, outAcc
                           <span className="inline-flex gap-0.5">
                             <Button asChild size="icon" variant="ghost" className="h-8 w-8"><a href={`/api/accounting/journals/${e.id}/pdf`} target="_blank" rel="noopener" aria-label="Print"><Printer /></a></Button>
                             {!e.reversed && !e.reconciled && !isLocked(e) && <Button size="icon" variant="ghost" className="h-8 w-8" aria-label="Edit" onClick={() => startEdit(e)}><Pencil /></Button>}
-                            {!e.reversed && <Button size="sm" variant="ghost" className="text-destructive" onClick={() => { setCancel(e); setReason(""); }}><Ban /> Batalkan</Button>}
+                            {!e.reversed && isAdmin && <Button size="sm" variant="ghost" className="text-destructive" onClick={() => { setCancel(e); setReason(""); }}><Ban /> Batalkan</Button>}
                           </span>
                         </TableCell>
                       )}

@@ -50,6 +50,17 @@ Format: **Keputusan** — _alasan_.
   kini hanya baris JU, isian formulir lain tetap tersimpan tetapi tidak tercetak). Nilainya milik SLG, jadi tidak
   di-seed. Jurnal bernomor `JE/…` (transfer, setor pajak, aset, armada) dicetak dengan formulir Jurnal Umum.
 
+## Transaksi batal dan hak hapus (2026-11-17)
+
+- **Buku Besar menyembunyikan transaksi batal**: jurnal yang dibalik beserta jurnal baliknya tidak tampil bila keduanya
+  bertanggal sama (WIB), jadi saldo awal/berjalan/akhir tetap sama dengan Trial Balance. Pembalikan di tanggal lain tetap
+  tampil. Centang "Tampilkan transaksi batal" (`?cancelled=1`) untuk audit. Jurnal reversal tetap dibuat seperti biasa.
+- **Batalkan/hapus transaksi khusus Admin**: invoice, bill, voucher (semua jenis), pelunasan/pembayaran, Jurnal
+  Penerimaan & Pengeluaran, transfer, setoran pajak, Jurnal Umum, dan Batalkan Job. Dicek di server action dan tombolnya
+  disembunyikan untuk role lain (Cari Bukti: `entryActions`). Hapus baris biaya dan container di job tetap untuk
+  Finance/Ops karena bagian dari input harian, bukan transaksi yang sudah terjurnal.
+- **Catat Pembayaran invoice langsung membuka cetakan voucher penerimaan** (BM/KM), sama seperti Bayar bill.
+
 ## Voucher = pelunasan, nomor BK/BM/KK/KM (2026-11-17, menggantikan "dokumen pencatatan saja" di bawah)
 
 - _Client: "voucher ini tujuannya untuk pelunasan dan pembayaran bill dan job", nomornya memakai kode BK, BM, KK, KM._

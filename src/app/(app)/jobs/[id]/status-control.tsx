@@ -79,10 +79,14 @@ export function StatusControl({ jobId, current, isAdmin, locked }: { jobId: stri
             {isBackwardStatus(current, s) && <span className="ml-auto text-xs text-muted-foreground">mundur</span>}
           </DropdownMenuItem>
         ))}
-        <DropdownMenuSeparator />
-        <DropdownMenuItem className="text-destructive" onSelect={() => set("CANCELLED")}>
-          Batalkan Job
-        </DropdownMenuItem>
+        {isAdmin && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem className="text-destructive" onSelect={() => set("CANCELLED")}>
+              Batalkan Job
+            </DropdownMenuItem>
+          </>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );

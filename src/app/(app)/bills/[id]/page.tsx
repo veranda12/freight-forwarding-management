@@ -92,7 +92,7 @@ export default async function BillDetail({ params }: { params: Promise<{ id: str
         </PageHeader>
         {change && (
           <div className="mt-3 flex justify-end">
-            <BillChangeButtons billId={bill.id} number={bill.number} editBlock={change.editBlock} cancelBlock={change.cancelBlock} note={change.anyBlock} />
+            <BillChangeButtons billId={bill.id} number={bill.number} editBlock={change.editBlock} cancelBlock={user.role === "ADMIN" ? change.cancelBlock : "Pembatalan bill khusus Admin."} note={change.anyBlock} />
           </div>
         )}
         {jobs.length > 0 && (

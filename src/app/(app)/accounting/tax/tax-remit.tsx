@@ -26,8 +26,8 @@ const TONE: Record<MasaStatus, string> = {
   PAID: "border-success/50 text-success", OVERPAID: "border-destructive/50 text-destructive",
 };
 
-export function TaxPeriodPanel({ rows, history, today, canWrite, cashAccounts, defaultCashId }: {
-  rows: PeriodRow[]; history: History[]; today: string; canWrite: boolean;
+export function TaxPeriodPanel({ rows, history, today, canWrite, isAdmin = false, cashAccounts, defaultCashId }: {
+  rows: PeriodRow[]; history: History[]; today: string; canWrite: boolean; isAdmin?: boolean;
   cashAccounts: { id: string; label: string }[]; defaultCashId: string | null;
 }) {
   const router = useRouter();
@@ -132,7 +132,7 @@ export function TaxPeriodPanel({ rows, history, today, canWrite, cashAccounts, d
                     </TableCell>
                     {canWrite && (
                       <TableCell className="text-right">
-                        {h.status === "POSTED" && (
+                        {h.status === "POSTED" && isAdmin && (
                           <Button size="sm" variant="ghost" className="text-destructive" onClick={() => { setCancel(h); setReason(""); }}><Ban /> Batalkan</Button>
                         )}
                       </TableCell>

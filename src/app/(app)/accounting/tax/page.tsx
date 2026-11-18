@@ -77,7 +77,7 @@ export default async function TaxPage({ searchParams }: { searchParams: Promise<
           <button type="submit" className="h-9 rounded-md border px-3 text-sm hover:bg-muted">Tampilkan</button>
         </form>
       </div>
-      <TaxPeriodPanel rows={periods.rows} history={periods.history} today={today} canWrite={can(user.role, "accounting", "write")} cashAccounts={cash.options} defaultCashId={cash.defaultId} />
+      <TaxPeriodPanel rows={periods.rows} history={periods.history} today={today} canWrite={can(user.role, "accounting", "write")} isAdmin={user.role === "ADMIN"} cashAccounts={cash.options} defaultCashId={cash.defaultId} />
 
       <TaxTable title="PPN Keluaran (invoice, Jurnal Penerimaan)" rows={recap.ppnOut} cols={["Tanggal", "No. Dokumen", "Customer / keterangan", "DPP", "PPN"]}
         render={(r: any) => [r.date, r.number, r.party, r.dpp, r.ppn]} />
