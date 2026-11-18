@@ -10,6 +10,7 @@ import { cancelInvoiceCore, createInvoiceFromJobCore } from "../../src/lib/recei
 import { getTrialBalance } from "../../src/lib/accounting";
 import { genJobNumber } from "../../src/lib/sequence";
 import { modeDirKey } from "../../src/lib/enums";
+import { isoContainerNo } from "./iso-container";
 
 const db = new PrismaClient();
 const dbName = new URL(process.env.DATABASE_URL ?? "").pathname.slice(1);
@@ -38,7 +39,7 @@ async function main() {
   ok(line("XDIST").note?.includes("8 km over 30 km") === true && n(line("XDIST").amount) === 2_400_000, `surcharge jarak: ${line("XDIST").note}`);
   ok(line("LOLO").asReceipt && n(line("LOLO").unitPrice) === 1_704_750 && line("LOLO").unitLabel === "40HC", "LOLO as receipt 3 x 40HC @ 1.704.750");
   ok(!line("CC").asReceipt && n(line("CC").amount) === 6_000_000, "clearance tarif jasa 3 x 2.000.000");
-  ok(line("EXTTRUCK").note === "Container CAIU1234567", "extended trucking membawa nomor container");
+  ok(line("EXTTRUCK").note === "Container CAIU1234561", "extended trucking membawa nomor container");
   const je = await db.journalEntry.findUniqueOrThrow({ where: { id: inv.journalEntryId! }, include: { lines: true } });
   const d = je.lines.reduce((t, l) => t + n(l.debit), 0), k = je.lines.reduce((t, l) => t + n(l.credit), 0);
   ok(Math.abs(d - k) < 0.01 && d === 50_116_320, `jurnal invoice seimbang D ${d} = K ${k}`);
@@ -53,7 +54,7 @@ async function main() {
       number: await genJobNumber(tx, modeDirKey("SEA_FCL", "IMPORT")), mode: "SEA_FCL", direction: "IMPORT", customerId: job.customerId,
       customsLane: "RED", distanceKm: 25,
       // Berat di bawah batas overweight 20GP (23 ton), supaya yang diuji di sini hanya surcharge jarak.
-      containers: { create: [{ containerNo: "TEST0000001", containerTypeId: t["20GP"], grossWeightKg: 20_000 }, { containerNo: "TEST0000002", containerTypeId: t["20GP"], grossWeightKg: 20_000 }, { containerNo: "TEST0000003", containerTypeId: t["40HC"], grossWeightKg: 20_000 }] },
+      containers: { create: [{ containerNo: isoContainerNo("TST", 1), containerTypeId: t["20GP"], grossWeightKg: 20_000 }, { containerNo: isoContainerNo("TST", 2), containerTypeId: t["20GP"], grossWeightKg: 20_000 }, { containerNo: isoContainerNo("TST", 3), containerTypeId: t["40HC"], grossWeightKg: 20_000 }] },
     },
   }));
   // Jalur wajib dipilih sebelum rate card dihitung, supaya charge per jalur tidak salah tagih.

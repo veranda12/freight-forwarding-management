@@ -39,7 +39,8 @@ async function main() {
 
   // Semua quotation seed yang punya rute laut dikenal harus terpetakan
   const quos = await db.quotation.findMany({ where: { mode: { in: ["SEA_FCL", "SEA_LCL", "AIR"] } }, select: { number: true, mode: true, originText: true, destText: true } });
-  let mapped = 0, unmapped: string[] = [];
+  let mapped = 0;
+  const unmapped: string[] = [];
   for (const q of quos) {
     const r = await resolveQuotationRoute(db, q.mode, q.originText, q.destText) as Record<string, string | null>;
     const ids = Object.values(r);

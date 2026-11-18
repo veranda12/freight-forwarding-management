@@ -10,6 +10,7 @@ import { applyRateCard } from "../../src/lib/rate-card";
 import { createInvoiceFromJobCore } from "../../src/lib/receivables";
 import { genJobNumber } from "../../src/lib/sequence";
 import { modeDirKey } from "../../src/lib/enums";
+import { isoContainerNo } from "./iso-container";
 
 const db = new PrismaClient();
 let failures = 0;
@@ -28,9 +29,9 @@ async function main() {
   const ts = Date.now().toString().slice(-6);
   // [nomor container (dibuat unik), jarak km, berat kg, charge yang diharapkan, nominal]
   const cases: [string, number, number, string, number][] = [
-    [`OWAU${ts}1`, 24, 25_000, "OVWT", 600_000],
-    [`OWBU${ts}2`, 32, 24_000, "OVWT", 600_000],
-    [`OWCU${ts}3`, 42, 26_000, "XDIST", 1_080_000],
+    [isoContainerNo("OWA", ts), 24, 25_000, "OVWT", 600_000],
+    [isoContainerNo("OWB", ts), 32, 24_000, "OVWT", 600_000],
+    [isoContainerNo("OWC", ts), 42, 26_000, "XDIST", 1_080_000],
   ];
 
   const job = await db.$transaction(async (tx) => tx.job.create({
@@ -57,11 +58,11 @@ async function main() {
   ok(!!truck && Number(truck.qty) === 3 && Number(truck.unitPrice) === 2_900_000, "tarif dasar trucking 20GP tetap 3 x 2.900.000");
 
   // Container ke-4 tanpa berat → Hitung dari rate card ditolak dengan pesan yang jelas.
-  await db.jobContainer.create({ data: { jobId: job.id, containerNo: `OWDU${ts}4`, containerTypeId: t20.id, distanceKm: new Prisma.Decimal(20) } });
+  await db.jobContainer.create({ data: { jobId: job.id, containerNo: isoContainerNo("OWD", ts), containerTypeId: t20.id, distanceKm: new Prisma.Decimal(20) } });
   let msg = "";
   try { await applyRateCard(db, job.id); } catch (e) { msg = (e as Error).message; }
-  ok(/berat/.test(msg) && msg.includes(`OWDU${ts}4`), `berat kosong ditolak: "${msg}"`);
-  await db.jobContainer.deleteMany({ where: { containerNo: `OWDU${ts}4` } });
+  ok(/berat/.test(msg) && msg.includes(isoContainerNo("OWD", ts)), `berat kosong ditolak: "${msg}"`);
+  await db.jobContainer.deleteMany({ where: { containerNo: isoContainerNo("OWD", ts) } });
   await applyRateCard(db, job.id);
 
   const invId = await createInvoiceFromJobCore(db, job.id);

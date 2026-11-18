@@ -125,7 +125,10 @@ export function BillBuilder({ lines, currencies, today, edit, focusJob }: {
           {focusVendors.length > 0 && (
             <p className="text-xs text-muted-foreground">
               Dari Costing {focusJob}: hanya vendor yang punya biaya belum di-bill di job ini{focusVendors.length > 1 ? ", pilih salah satu" : ""}.
-              {" "}<a href="/bills/new" className="text-primary hover:underline">Tampilkan semua vendor</a>
+              {" "}
+              {/* Muat ulang penuh (bukan <Link>) supaya pilihan vendor/biaya di builder ikut kosong. */}
+              {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+              <a href="/bills/new" className="text-primary hover:underline">Tampilkan semua vendor</a>
             </p>
           )}
           {jobFilter.length > 0 && (

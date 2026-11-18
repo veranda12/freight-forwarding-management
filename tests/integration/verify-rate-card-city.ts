@@ -6,6 +6,7 @@
  */
 import { PrismaClient, Prisma } from "@prisma/client";
 import { applyRateCard } from "../../src/lib/rate-card";
+import { isoContainerNo } from "./iso-container";
 
 const db = new PrismaClient();
 let failures = 0;
@@ -31,7 +32,7 @@ async function main() {
     const mk = (s: string, podId: string) => db.job.create({
       data: {
         number: `JOB/UJI-KOTA/${ts}/${s}`, mode: "SEA_FCL", direction: "IMPORT", status: "ARRIVED", customerId: customer.id, podId, customsLane: "GREEN", distanceKm: 10,
-        containers: { create: [{ containerNo: `KOTA${s}${String(ts).slice(-6)}`, containerTypeId: t40.id, grossWeightKg: 20_000 }] },
+        containers: { create: [{ containerNo: isoContainerNo(`KT${s}`, ts), containerTypeId: t40.id, grossWeightKg: 20_000 }] },
       },
     });
     const sby = await mk("S", sub.id);

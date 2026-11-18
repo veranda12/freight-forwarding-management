@@ -6,6 +6,7 @@
  */
 import { PrismaClient } from "@prisma/client";
 import { applyRateCard, reapplyRateCardAfterLaneChange } from "../../src/lib/rate-card";
+import { isoContainerNo } from "./iso-container";
 
 const db = new PrismaClient();
 let failures = 0;
@@ -23,7 +24,7 @@ async function main() {
     data: {
       number: `JOB/UJI-LANE/${stamp}`, mode: "SEA_FCL", direction: "IMPORT", status: "ARRIVED", customerId: customer.id,
       customsLane: "GREEN", distanceKm: 20,
-      containers: { create: [{ containerNo: `LANE${String(stamp).slice(-7)}`, containerTypeId: t40.id, grossWeightKg: 20_000 }] },
+      containers: { create: [{ containerNo: isoContainerNo("LAN", stamp), containerTypeId: t40.id, grossWeightKg: 20_000 }] },
     },
   });
   const codes = async () => (await db.costingLine.findMany({ where: { jobId: job.id, side: "SELLING" }, include: { chargeCode: true } })).map((l) => l.chargeCode.code);

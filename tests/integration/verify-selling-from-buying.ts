@@ -9,6 +9,7 @@
 import { PrismaClient } from "@prisma/client";
 import { addJobCharge, deleteJobCharge, updateJobCharge } from "../../src/lib/job-charges";
 import { applyRateCard } from "../../src/lib/rate-card";
+import { isoContainerNo } from "./iso-container";
 
 const db = new PrismaClient();
 let failures = 0;
@@ -29,7 +30,7 @@ async function main() {
     data: {
       number: `JOB/UJI-SYNC/${stamp}`, mode: "SEA_FCL", direction: "IMPORT", status: "ARRIVED", customerId: customer.id,
       customsLane: "RED", distanceKm: 20,
-      containers: { create: [{ containerNo: `SYNC${stamp % 1e7}`, containerTypeId: t40.id, grossWeightKg: 10000 }] },
+      containers: { create: [{ containerNo: isoContainerNo("SYA", stamp), containerTypeId: t40.id, grossWeightKg: 10000 }] },
     },
   });
   const selling = () => db.costingLine.findMany({ where: { jobId: job.id, side: "SELLING" }, include: { chargeCode: true }, orderBy: { sortOrder: "asc" } });
@@ -89,7 +90,7 @@ async function main() {
   await addJobCharge(db, job2.id, buy(CC, 1_500_000, false));
   let cc2 = await db.costingLine.findMany({ where: { jobId: job2.id, side: "SELLING", chargeCodeId: CC } });
   ok(cc2.length === 1 && Number(cc2[0].actualIdr) === 0, "tanpa container: CC muncul di selling Rp 0");
-  await db.jobContainer.create({ data: { jobId: job2.id, containerNo: `SYNC${stamp % 1e7}9`, containerTypeId: t40.id, grossWeightKg: 10000, distanceKm: 20 } });
+  await db.jobContainer.create({ data: { jobId: job2.id, containerNo: isoContainerNo("SYB", stamp), containerTypeId: t40.id, grossWeightKg: 10000, distanceKm: 20 } });
   await applyRateCard(db, job2.id);
   cc2 = await db.costingLine.findMany({ where: { jobId: job2.id, side: "SELLING", chargeCodeId: CC } });
   ok(cc2.length === 1 && Number(cc2[0].unitPrice) === 2_000_000, `setelah container + rate card: CC 1 baris @ ${Number(cc2[0]?.unitPrice)}`);
@@ -99,7 +100,7 @@ async function main() {
   const job3 = await db.job.create({
     data: {
       number: `JOB/UJI-SYNC3/${stamp}`, mode: "SEA_FCL", direction: "IMPORT", status: "ARRIVED", customerId: customer.id, customsLane: "RED", distanceKm: 20,
-      containers: { create: [{ containerNo: `SYNC${stamp % 1e7}3`, containerTypeId: t40.id, grossWeightKg: 10000 }] },
+      containers: { create: [{ containerNo: isoContainerNo("SYC", stamp), containerTypeId: t40.id, grossWeightKg: 10000 }] },
     },
   });
   const red3 = async () => db.costingLine.findMany({ where: { jobId: job3.id, side: "SELLING", chargeCodeId: REDLINE }, orderBy: { sortOrder: "asc" } });

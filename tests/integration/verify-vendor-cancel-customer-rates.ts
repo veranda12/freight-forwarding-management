@@ -10,6 +10,7 @@ import { assertBlUnique } from "../../src/lib/job-bl";
 import { recalcJobTotals } from "../../src/lib/job-charges";
 import { lockSnapshot, restoreLock, lockMonth } from "./period-lock-helper";
 import { getTrialBalance } from "../../src/lib/accounting";
+import { isoContainerNo } from "./iso-container";
 
 const db = new PrismaClient();
 let failures = 0;
@@ -107,7 +108,7 @@ async function main() {
   const mkRateJob = (customerId: string, suffix: string) => db.job.create({
     data: {
       number: `JOB/UJI/RC/${ts}/${suffix}`, mode: "SEA_FCL", direction: "IMPORT", status: "ARRIVED", customerId, mblNo: `RC${ts}${suffix}`, customsLane: "GREEN",
-      distanceKm: new Prisma.Decimal(20), containers: { create: [{ containerNo: `RCAU${ts.slice(-6)}${suffix === "A" ? 1 : 2}`, containerTypeId: t20.id, grossWeightKg: new Prisma.Decimal(20_000) }] },
+      distanceKm: new Prisma.Decimal(20), containers: { create: [{ containerNo: isoContainerNo(suffix === "A" ? "RCA" : "RCB", ts), containerTypeId: t20.id, grossWeightKg: new Prisma.Decimal(20_000) }] },
     },
   });
   try {
