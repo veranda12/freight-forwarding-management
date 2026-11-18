@@ -58,6 +58,32 @@ export async function GET(req: NextRequest) {
     ws.addRow({ name: "TOTAL", b1: data.totals["0-30"], b2: data.totals["31-60"], b3: data.totals["61-90"], b4: data.totals[">90"], total: data.grandTotal });
     styleHeader(ws);
     ws.lastRow!.font = { bold: true };
+
+    // Rincian dokumen yang membentuk angka aging: invoice belum dibayar customer / bill belum dibayar ke vendor.
+    const ar = type === "ar-aging";
+    const wd = wb.addWorksheet("Rincian");
+    wd.columns = [
+      { header: ar ? "Customer" : "Vendor", key: "party", width: 32 },
+      { header: ar ? "No. Invoice" : "No. Bill", key: "number", width: 22 },
+      ...(ar ? [] : [{ header: "Ref Vendor", key: "ref", width: 22 }]),
+      { header: "Job / B/L", key: "jobs", width: 40 },
+      { header: "Tanggal", key: "date", width: 13, style: { numFmt: "dd/mm/yyyy" } },
+      { header: "Jatuh Tempo", key: "due", width: 13, style: { numFmt: "dd/mm/yyyy" } },
+      { header: "Lewat (hari)", key: "days", width: 12 },
+      { header: "Umur", key: "bucket", width: 10 },
+      { header: "Total", key: "total", width: 16, style: { numFmt: money } },
+      { header: "Dibayar", key: "paid", width: 16, style: { numFmt: money } },
+      { header: "Sisa", key: "outstanding", width: 16, style: { numFmt: money } },
+    ];
+    for (const r of data.rows) {
+      for (const d of r.docs) {
+        wd.addRow({
+          party: r.name, number: d.number, ref: d.ref ?? "", jobs: d.jobs, date: new Date(d.date), due: new Date(d.dueDate),
+          days: d.days, bucket: `${d.bucket} hari`, total: d.total, paid: d.paid, outstanding: d.outstanding,
+        });
+      }
+    }
+    styleHeader(wd);
   } else {
     return NextResponse.json({ error: "unknown report" }, { status: 400 });
   }

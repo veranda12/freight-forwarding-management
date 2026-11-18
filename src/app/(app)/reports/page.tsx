@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { JobStatus, TransportMode } from "@prisma/client";
+import { AgingCard } from "./aging-card";
 
 export const dynamic = "force-dynamic";
 
@@ -127,52 +128,12 @@ export default async function ReportsPage() {
         </TabsContent>
 
         <TabsContent value="ar">
-          <AgingCard title="AR Aging (Piutang)" data={arAging} exportType="ar-aging" entity="Customer" />
+          <AgingCard title="AR Aging (Piutang)" data={arAging} exportType="ar-aging" entity="Customer" kind="AR" />
         </TabsContent>
         <TabsContent value="ap">
-          <AgingCard title="AP Aging (Hutang)" data={apAging} exportType="ap-aging" entity="Vendor" />
+          <AgingCard title="AP Aging (Hutang)" data={apAging} exportType="ap-aging" entity="Vendor" kind="AP" />
         </TabsContent>
       </Tabs>
     </div>
-  );
-}
-
-function AgingCard({ title, data, exportType, entity }: {
-  title: string;
-  data: { rows: { name: string; buckets: Record<string, number>; total: number }[]; totals: Record<string, number>; grandTotal: number; buckets: readonly string[] };
-  exportType: string; entity: string;
-}) {
-  return (
-    <Card>
-      <CardHeader className="flex-row items-center justify-between">
-        <CardTitle className="text-base">{title} · <span className="font-normal text-muted-foreground">{formatIDR(data.grandTotal)}</span></CardTitle>
-        <Button asChild variant="outline" size="sm"><a href={`/api/reports/excel?type=${exportType}`}><FileSpreadsheet /> Export Excel</a></Button>
-      </CardHeader>
-      <CardContent className="p-0">
-        <Table>
-          <TableHeader><TableRow>
-            <TableHead>{entity}</TableHead>
-            {data.buckets.map((b) => <TableHead key={b} className="text-right">{b} hari</TableHead>)}
-            <TableHead className="text-right">Total</TableHead>
-          </TableRow></TableHeader>
-          <TableBody>
-            {data.rows.map((r, i) => (
-              <TableRow key={i}>
-                <TableCell className="font-medium">{r.name}</TableCell>
-                {data.buckets.map((b) => <TableCell key={b} className="text-right tabular-nums">{r.buckets[b] ? formatIDR(r.buckets[b]) : "-"}</TableCell>)}
-                <TableCell className="text-right tabular-nums font-medium">{formatIDR(r.total)}</TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </CardContent>
-      <div className="flex items-center justify-between gap-4 border-t px-5 py-3 text-sm font-semibold">
-        <span>Total</span>
-        <span className="flex gap-6 tabular-nums">
-          {data.buckets.map((b) => <span key={b} className="w-28 text-right">{formatIDR(data.totals[b])}</span>)}
-          <span className="w-28 text-right">{formatIDR(data.grandTotal)}</span>
-        </span>
-      </div>
-    </Card>
   );
 }
