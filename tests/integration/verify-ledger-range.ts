@@ -33,6 +33,24 @@ async function main() {
   const reversed = await getLedgerRange(db, last, first, from, to);
   ok(reversed.length === range.length, "rentang terbalik (akhir ke awal) tetap terbaca");
 
+  // Transaksi batal (permintaan client 17 Nov): pasangan jurnal + balik di hari yang sama disembunyikan, saldo tetap.
+  const pair = await db.journalEntry.findFirst({ where: { isReversal: true }, include: { reversalOf: true, lines: true }, orderBy: { date: "desc" } });
+  if (pair?.reversalOf) {
+    const sameDay = (a: Date, b: Date) => new Date(a.getTime() + 7 * 3600_000).toISOString().slice(0, 10) === new Date(b.getTime() + 7 * 3600_000).toISOString().slice(0, 10);
+    const accountId = pair.lines[0].accountId;
+    const day = new Date(pair.date.getTime() + 7 * 3600_000).toISOString().slice(0, 10);
+    const hidden = await getLedgerDetail(db, accountId, "2026-01-01", day);
+    const shown = await getLedgerDetail(db, accountId, "2026-01-01", day, { showCancelled: true });
+    const has = (rows: { entryId: string }[], id: string) => rows.some((r) => r.entryId === id);
+    if (sameDay(pair.date, pair.reversalOf.date)) {
+      ok(!has(hidden.rows, pair.id) && !has(hidden.rows, pair.reversalOf.id), `batal ${pair.reversalOf.number} + balik ${pair.number} tidak tampil`);
+      ok(has(shown.rows, pair.id) && has(shown.rows, pair.reversalOf.id), "pilihan tampilkan transaksi batal memunculkannya lagi");
+    } else {
+      ok(has(hidden.rows, pair.id), `pembalikan beda tanggal tetap tampil (${pair.number})`);
+    }
+    ok(hidden.closingBalance === shown.closingBalance && hidden.openingBalance === shown.openingBalance, `saldo awal dan akhir sama dengan atau tanpa transaksi batal (${hidden.closingBalance})`);
+  } else console.log("   (tidak ada jurnal balik di database uji, uji transaksi batal dilewati)");
+
   console.log(failures ? `\n${failures} GAGAL` : "\nSemua lulus");
   if (failures) process.exitCode = 1;
 }

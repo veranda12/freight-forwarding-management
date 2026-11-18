@@ -37,6 +37,7 @@ export function LedgerView({ accounts }: { accounts: Acc[] }) {
   const [to, setTo] = useState("");
   const [q, setQ] = useState("");
   const [side, setSide] = useState<"all" | "debit" | "credit">("all");
+  const [showCancelled, setShowCancelled] = useState(false);
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<Ledger[] | null>(null);
 
@@ -45,15 +46,16 @@ export function LedgerView({ accounts }: { accounts: Acc[] }) {
   const heads = [...new Set(accounts.map((a) => a.code.charAt(0)))].sort();
   const ready = mode === "single" ? !!code : !!accFrom && !!accTo;
 
-  async function load(over: { code?: string; accFrom?: string; accTo?: string; from?: string; to?: string; mode?: "single" | "range" } = {}) {
+  async function load(over: { code?: string; accFrom?: string; accTo?: string; from?: string; to?: string; mode?: "single" | "range"; cancelled?: boolean } = {}) {
     const m = over.mode ?? mode, c = over.code ?? code, af = over.accFrom ?? accFrom, at = over.accTo ?? accTo;
-    const f = over.from ?? from, t = over.to ?? to;
+    const f = over.from ?? from, t = over.to ?? to, cx = over.cancelled ?? showCancelled;
     if (m === "single" ? !c : !af || !at) return;
     setLoading(true);
     try {
       const sp = new URLSearchParams(m === "single" ? { account: c } : { accountFrom: af, accountTo: at });
       if (f) sp.set("from", f);
       if (t) sp.set("to", t);
+      if (cx) sp.set("cancelled", "1");
       const res = await fetch(`/api/accounting/ledger?${sp}`);
       const json = res.ok ? await res.json() : null;
       setData(!json ? null : m === "single" ? (json.account ? [json as Ledger] : []) : (json.ledgers as Ledger[]));
@@ -169,6 +171,11 @@ export function LedgerView({ accounts }: { accounts: Acc[] }) {
               <Button key={k} type="button" variant="outline" size="sm" onClick={() => { const r = quickRange(k); setFrom(r.from); setTo(r.to); load({ from: r.from, to: r.to }); }}>{l}</Button>
             ))}
             <Button type="button" variant="ghost" size="sm" onClick={() => { setFrom(""); setTo(""); load({ from: "", to: "" }); }}>Semua tanggal</Button>
+            {/* Transaksi batal dan jurnal baliknya (di hari yang sama) disembunyikan; saldo tidak berubah. */}
+            <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <input type="checkbox" id="ledger-cancelled" checked={showCancelled} onChange={(e) => { setShowCancelled(e.target.checked); load({ cancelled: e.target.checked }); }} />
+              Tampilkan transaksi batal
+            </label>
             <div className="ml-auto flex gap-2">
               <Button type="button" variant="outline" onClick={exportCsv} disabled={!data?.length || loading}><Download /> Export CSV</Button>
               <Button type="submit" disabled={!ready || loading}>{loading ? <Loader2 className="animate-spin" /> : <Search />} Tampilkan</Button>

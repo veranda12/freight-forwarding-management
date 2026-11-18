@@ -16,13 +16,15 @@ export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
   const from = ISO.test(sp.get("from") ?? "") ? sp.get("from")! : undefined;
   const to = ISO.test(sp.get("to") ?? "") ? sp.get("to")! : undefined;
+  // Transaksi batal + jurnal baliknya disembunyikan, kecuali diminta (?cancelled=1, mis. untuk audit).
+  const opts = { showCancelled: sp.get("cancelled") === "1" };
   // Rentang akun (mis. kepala 1 = 1000 sampai 1999): buku besar per akun di rentang itu.
   const accFrom = sp.get("accountFrom"), accTo = sp.get("accountTo");
-  if (accFrom && accTo) return NextResponse.json({ ledgers: await getLedgerRange(prisma, accFrom, accTo, from, to) });
+  if (accFrom && accTo) return NextResponse.json({ ledgers: await getLedgerRange(prisma, accFrom, accTo, from, to, opts) });
   const code = sp.get("account");
   if (!code) return NextResponse.json({ rows: [] });
   const account = await prisma.coaAccount.findUnique({ where: { code } });
   if (!account) return NextResponse.json({ rows: [] });
-  const ledger = await getLedgerDetail(prisma, account.id, from, to);
+  const ledger = await getLedgerDetail(prisma, account.id, from, to, opts);
   return NextResponse.json({ account: { code: account.code, name: account.name, type: account.type }, ...ledger });
 }
