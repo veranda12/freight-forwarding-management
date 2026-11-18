@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser, hasPerm } from "@/lib/auth-helpers";
+import { customerScope } from "@/lib/data-scope";
 import { writeAudit } from "@/lib/audit";
 import { errorMessage } from "@/lib/action-error";
 import { commitImport, isImportKind, MAX_BYTES, previewImport, IMPORT_LABEL, IMPORT_PERMS } from "@/lib/master-import";
@@ -24,6 +25,8 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ kind: stri
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ ok: false, error: "Sesi berakhir, silakan login ulang." }, { status: 401 });
   if (!IMPORT_PERMS[kind].every((k) => hasPerm(user, k))) return NextResponse.json({ ok: false, error: `Tidak punya izin menambah data ${IMPORT_LABEL[kind]}.` }, { status: 403 });
+  // Customer mengikuti batas data seperti form: baris baru tercatat sebagai buatan user, kode di luar batas dilewati.
+  const scope = { customerScope: customerScope(user), userId: user.id };
 
   let form: FormData;
   try { form = await req.formData(); } catch { return NextResponse.json({ ok: false, error: "Kiriman tidak valid." }, { status: 400 }); }
@@ -36,7 +39,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ kind: stri
   try {
     const buffer = Buffer.from(await file.arrayBuffer());
     if (mode === "commit") {
-      const r = await commitImport(prisma, kind, buffer);
+      const r = await commitImport(prisma, kind, buffer, scope);
       const s = r.summary;
       await writeAudit({
         entity: ENTITY[kind], entityId: "import-excel", action: "IMPORT", userId: user.id,
@@ -46,7 +49,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ kind: stri
       revalidatePath(`/${kind}`);
       return NextResponse.json({ ok: true, committed: true, summary: s, rows: r.rows });
     }
-    const r = await previewImport(prisma, kind, buffer);
+    const r = await previewImport(prisma, kind, buffer, scope);
     return NextResponse.json({ ok: true, committed: false, summary: r.summary, rows: r.rows });
   } catch (e) {
     return NextResponse.json({ ok: false, error: errorMessage(e, "Gagal membaca file.") }, { status: 400 });

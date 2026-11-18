@@ -18,10 +18,11 @@ export const isImportKind = (k: string): k is ImportKind => (IMPORT_KINDS as rea
 
 /**
  * Izin import per jenis. Import menambah DAN mengubah baris (dicocokkan lewat kode), jadi butuh izin tambah dan ubah.
- * Customer juga butuh izin lihat semua customer: tanpa itu import bisa menimpa customer di luar batas data user.
+ * Customer mengikuti batas data seperti form: baris baru tercatat sebagai buatan user, kode customer di luar batas data
+ * user dilewati (lihat `ImportScope`).
  */
 export const IMPORT_PERMS: Record<ImportKind, PermissionKey[]> = {
-  customers: ["customers.create", "customers.edit", "customers.viewAll"],
+  customers: ["customers.create", "customers.edit"],
   vendors: ["vendors.edit"],
   commodities: ["commodities.edit"],
 };
@@ -157,6 +158,8 @@ export type ImportContext = {
   names: Map<string, string>;
   /** Email user Sales/Admin aktif (huruf kecil) → id user. Hanya customer. */
   picEmails: Map<string, string>;
+  /** Kode (huruf besar) yang ada tetapi di luar batas data user: tidak boleh diperbarui lewat import. */
+  outOfScope: Set<string>;
   /** "hs|nama huruf kecil" → commodity yang ada. Hanya commodity. */
   commodities: Map<string, { id: string; isActive: boolean }>;
 };
@@ -211,6 +214,7 @@ export function validateRows(kind: ImportKind, raws: RawRow[], ctx: ImportContex
       if (key) {
         const existing = ctx.codes.get(key);
         if (!existing) errors.push(`Kode ${key} tidak ditemukan. Kosongkan kolom Kode untuk membuat data baru.`);
+        else if (ctx.outOfScope.has(key)) errors.push(`Kode ${key} di luar batas data Anda, tidak bisa diperbarui.`);
         else { action = "update"; id = existing.id; }
         if (seenCodes.has(key)) errors.push(`Kode ${key} muncul lebih dari sekali di file.`);
         seenCodes.add(key);
@@ -337,8 +341,14 @@ export function validateRows(kind: ImportKind, raws: RawRow[], ctx: ImportContex
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
-export async function loadContext(db: Db, kind: ImportKind): Promise<ImportContext> {
-  const ctx: ImportContext = { codes: new Map(), names: new Map(), picEmails: new Map(), commodities: new Map() };
+/**
+ * Batas data customer untuk import (sama dengan form Customer): `scope` = customerScope(user) (kosong = semua),
+ * `userId` dicatat sebagai pembuat customer baru. Tanpa opsi (skrip/uji) = tanpa batas.
+ */
+export type ImportScope = { customerScope?: Prisma.CustomerWhereInput; userId?: string };
+
+export async function loadContext(db: Db, kind: ImportKind, scope: ImportScope = {}): Promise<ImportContext> {
+  const ctx: ImportContext = { codes: new Map(), names: new Map(), picEmails: new Map(), outOfScope: new Set(), commodities: new Map() };
   if (kind === "customers" || kind === "vendors") {
     const rows = kind === "customers"
       ? await db.customer.findMany({ select: { id: true, code: true, name: true } })
@@ -346,6 +356,10 @@ export async function loadContext(db: Db, kind: ImportKind): Promise<ImportConte
     for (const r of rows) {
       ctx.codes.set(r.code.toUpperCase(), { id: r.id, name: r.name });
       if (!ctx.names.has(r.name.toLowerCase())) ctx.names.set(r.name.toLowerCase(), r.code.toUpperCase());
+    }
+    if (kind === "customers" && scope.customerScope && Object.keys(scope.customerScope).length > 0) {
+      const own = new Set((await db.customer.findMany({ where: scope.customerScope, select: { code: true } })).map((c) => c.code.toUpperCase()));
+      for (const code of ctx.codes.keys()) if (!own.has(code)) ctx.outOfScope.add(code);
     }
   }
   if (kind === "customers") {
@@ -377,8 +391,8 @@ export function summarize(rows: RowResult[]): ImportSummary {
 }
 
 /** Pratinjau: tidak menulis apa pun. */
-export async function previewImport(db: PrismaClient, kind: ImportKind, buffer: ArrayBuffer | Buffer) {
-  const rows = validateRows(kind, await readSheet(kind, buffer), await loadContext(db, kind));
+export async function previewImport(db: PrismaClient, kind: ImportKind, buffer: ArrayBuffer | Buffer, scope: ImportScope = {}) {
+  const rows = validateRows(kind, await readSheet(kind, buffer), await loadContext(db, kind, scope));
   return { rows, summary: summarize(rows) };
 }
 
@@ -395,11 +409,11 @@ async function lastNumber(tx: Prisma.TransactionClient, kind: "customers" | "ven
  * Simpan: baca dan validasi ulang file di dalam satu transaksi, lalu buat/perbarui semua baris yang bukan penghalang.
  * Bentrok unik (user lain menyimpan bersamaan) menggagalkan seluruh import, jadi tidak ada data setengah masuk.
  */
-export async function commitImport(db: PrismaClient, kind: ImportKind, buffer: ArrayBuffer | Buffer) {
+export async function commitImport(db: PrismaClient, kind: ImportKind, buffer: ArrayBuffer | Buffer, scope: ImportScope = {}) {
   const raws = await readSheet(kind, buffer);
   try {
     return await db.$transaction(async (tx) => {
-      const rows = validateRows(kind, raws, await loadContext(tx, kind));
+      const rows = validateRows(kind, raws, await loadContext(tx, kind, scope));
       const created: string[] = [];
       if (kind === "commodities") {
         for (const r of rows) {
@@ -420,6 +434,7 @@ export async function commitImport(db: PrismaClient, kind: ImportKind, buffer: A
                 data: {
                   ...(rest as Omit<Prisma.CustomerUncheckedCreateInput, "code" | "creditLimit">), code,
                   creditLimit: new Prisma.Decimal(Number(creditLimit ?? 0)),
+                  ...(scope.userId ? { createdById: scope.userId } : {}),
                   ...(r.contact ? { contacts: { create: [{ ...r.contact, isPrimary: true }] } } : {}),
                 },
               });

@@ -9,6 +9,7 @@ const ctx = (p: Partial<ImportContext> = {}): ImportContext => ({
   codes: new Map([["CUST0003", { id: "c3", name: "PT Lama" }]]),
   names: new Map([["pt lama", "CUST0003"]]),
   picEmails: new Map([["sales@demo.com", "u1"]]),
+  outOfScope: new Set(),
   commodities: new Map([["6109.10.00|kaos katun", { id: "k1", isActive: true }]]),
   ...p,
 });
@@ -78,6 +79,11 @@ describe("validasi customer", () => {
     expect(r.data).toEqual({ city: "Depok", creditLimit: 1_000_000 });
     expect(r.warnings.join()).toMatch(/kontak diabaikan/);
     expect(r.label).toBe("PT Lama");
+  });
+  it("kode customer di luar batas data user: dilewati, tidak diperbarui (Role Management)", () => {
+    const [r] = validateRows("customers", [raw(2, { code: "CUST0003", city: "Depok" })], ctx({ outOfScope: new Set(["CUST0003"]) }));
+    expect(r.action).toBe("skip");
+    expect(r.errors.join()).toMatch(/di luar batas data Anda/);
   });
   it("update tanpa kolom lain = tidak berubah; kode atau nama ganda di file = penghalang", () => {
     const rows = validateRows("customers", [

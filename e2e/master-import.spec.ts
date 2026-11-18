@@ -64,18 +64,28 @@ test.describe("Import Excel master data", () => {
     }
   });
 
-  test("Sales import customer: baru, peringatan, dilewati, update lewat kode", async ({ page }) => {
+  test("Sales import customer: baru, peringatan, dilewati, update lewat kode (hanya customer miliknya)", async ({ page }) => {
     const ts = Date.now() % 1_000_000;
-    const target = await db.customer.findFirstOrThrow({ orderBy: { code: "desc" } });
+    const salesId = (await db.user.findUniqueOrThrow({ where: { email: "sales@demo.com" } })).id;
+    const mine = { OR: [{ salesPicId: salesId }, { createdById: salesId }] };
+    const target = await db.customer.findFirstOrThrow({ where: mine, orderBy: { code: "desc" } });
+    const mineIds = (await db.customer.findMany({ where: mine, select: { id: true } })).map((c) => c.id);
+    const other = await db.customer.findFirstOrThrow({ where: { id: { notIn: mineIds } }, orderBy: { code: "asc" } });
     const file = await xlsx(["Kode", "Nama", "Email", "TOP (hari)", "Kota"], [
       ["", `PT E2E Import ${ts}`, `e2e${ts}@uji.id`, 30, "Bekasi"],
       ["", `PT E2E Peringatan ${ts}`, "bukan-email", "", ""],
       ["", "PT", "", "", ""],
       [target.code, "", "", 75, ""],
+      [other.code, "", "", 99, ""],
     ]);
     await login(page, "sales@demo.com");
     const { dialog, text } = await importVia(page, "/customers", "customer.xlsx", file, "Simpan 3 baris");
-    expect(text).toMatch(/4 baris[\s\S]*2 baru[\s\S]*1 diperbarui[\s\S]*1 dilewati/);
+    expect(text).toMatch(/5 baris[\s\S]*2 baru[\s\S]*1 diperbarui[\s\S]*2 dilewati/);
+    // Batas data (Role Management): customer milik Sales lain tidak bisa ditimpa lewat kode.
+    await expect(dialog.getByText(`Kode ${other.code} di luar batas data Anda, tidak bisa diperbarui.`)).toBeVisible();
+    expect((await db.customer.findUniqueOrThrow({ where: { id: other.id } })).termOfPayment).toBe(other.termOfPayment);
+    // Customer baru tercatat sebagai buatan Sales, jadi masuk batas datanya.
+    expect((await db.customer.findFirstOrThrow({ where: { name: `PT E2E Import ${ts}` } })).createdById).toBe(salesId);
     await expect(dialog.getByText("Nama minimal 3 huruf.")).toBeVisible();
     await expect(dialog.getByRole("button", { name: /Unduh baris yang dilewati/ })).toBeVisible();
     expect(await db.customer.count({ where: { name: { in: [`PT E2E Import ${ts}`, `PT E2E Peringatan ${ts}`] } } })).toBe(2);
