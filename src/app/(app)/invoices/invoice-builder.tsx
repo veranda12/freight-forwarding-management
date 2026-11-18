@@ -15,14 +15,15 @@ import { formatIDR } from "@/lib/format";
 import { createInvoiceAction } from "./actions";
 import type { InvoiceCandidate } from "./candidates";
 
-/** Pilih satu job yang ditagih untuk invoice baru. */
-export function InvoiceBuilder({ candidates, currencies, ppnRate, today }: {
-  candidates: InvoiceCandidate[]; currencies: { code: string; name: string }[]; ppnRate: number; today: string;
+/** Pilih satu job yang ditagih untuk invoice baru. `initialJobId` (dari Costing) langsung dipilih bila siap ditagih. */
+export function InvoiceBuilder({ candidates, currencies, ppnRate, today, initialJobId }: {
+  candidates: InvoiceCandidate[]; currencies: { code: string; name: string }[]; ppnRate: number; today: string; initialJobId?: string;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
-  const [q, setQ] = useState("");
-  const [selected, setSelected] = useState<string[]>([]);
+  const initial = candidates.find((c) => c.jobId === initialJobId);
+  const [q, setQ] = useState(initial?.number ?? "");
+  const [selected, setSelected] = useState<string[]>(initial && !initial.hasZero ? [initial.jobId] : []);
   const [date, setDate] = useState(today);
   const [dueDate, setDueDate] = useState("");
   const [notes, setNotes] = useState("");

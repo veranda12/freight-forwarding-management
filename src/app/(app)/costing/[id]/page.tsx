@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Briefcase } from "lucide-react";
+import { Briefcase, FileInput, Receipt } from "lucide-react";
 import { requirePerm, hasPerm } from "@/lib/auth-helpers";
 import { jobScope } from "@/lib/data-scope";
 import { prisma } from "@/lib/prisma";
@@ -8,6 +8,7 @@ import { LANE_LABELS } from "@/lib/enums";
 import { formatIDR, formatMoney, formatNumber, formatPercent } from "@/lib/format";
 import { chargeLockReason } from "@/lib/job-charges";
 import { summarizeContainers } from "@/lib/job-containers";
+import { displayUnits, jobRateCity } from "@/lib/rate-card";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -30,6 +31,7 @@ export default async function JobCostingPage({ params }: { params: Promise<{ id:
     include: {
       customer: true,
       containers: { include: { containerType: true } },
+      pol: { select: { city: true } }, pod: { select: { city: true } },
       costings: {
         include: { chargeCode: true, vendor: true, vehicle: true, voucher: { select: { number: true } }, invoice: { select: { number: true, status: true } } },
         orderBy: [{ side: "asc" }, { sortOrder: "asc" }],
@@ -39,8 +41,16 @@ export default async function JobCostingPage({ params }: { params: Promise<{ id:
   if (!job) notFound();
 
   const isAir = job.mode === "AIR";
-  const selling = job.costings.filter((c) => c.side === "SELLING");
-  const buying = job.costings.filter((c) => c.side === "BUYING");
+  // Baris tanpa unit (mis. reimburse dari buying) memakai unit dari rate card: 40HC, B/L, dst.
+  const units = await displayUnits(prisma, job.customerId, job.costings.map((c) => ({ chargeCodeId: c.chargeCodeId, unitLabel: c.unitLabel, jobId: job.id })));
+  const costings = job.costings.map((c, i) => ({ ...c, unitLabel: units[i] }));
+  const selling = costings.filter((c) => c.side === "SELLING");
+  const buying = costings.filter((c) => c.side === "BUYING");
+  const canBill = hasPerm(user, "bills.create");
+  // Jalan pintas ke Buat Invoice dengan job ini terpilih, selama masih ada selling yang belum ditagih.
+  const canInvoice = hasPerm(user, "invoices.create") && job.status !== "CANCELLED" && selling.some((c) => !c.invoiced);
+  // Jalan pintas ke Buat Bill dengan job ini: ada biaya vendor yang belum di-bill, belum di voucher, belum dicatat.
+  const billable = canBill && job.status !== "CANCELLED" && buying.some((c) => c.vendorId && !c.billed && !c.voucherId && !c.recordedAt);
   // charge: jobs.charges; beban armada: jobs.fleetCost; rate card: jobs.clearance (sama dengan halaman job)
   const canFleetCost = hasPerm(user, "jobs.fleetCost");
   const canClearance = hasPerm(user, "jobs.clearance") && job.status !== "CANCELLED" && job.status !== "CLOSED";
@@ -79,6 +89,8 @@ export default async function JobCostingPage({ params }: { params: Promise<{ id:
         <PageHeader title={job.number} description={`${job.customer.name}${bl ? ` · B/L ${bl}` : ""}`}>
           <JobStatusBadge status={job.status} />
           <Button asChild variant="outline"><Link href={`/jobs/${job.id}`}><Briefcase /> Buka Job</Link></Button>
+          {billable && <Button asChild variant="outline"><Link href={`/bills/new?job=${encodeURIComponent(job.number)}`}><FileInput /> Buat Bill</Link></Button>}
+          {canInvoice && <Button asChild><Link href={`/invoices/new?job=${job.id}`}><Receipt /> Buat Invoice</Link></Button>}
         </PageHeader>
       </div>
       <div className="space-y-4">
@@ -91,9 +103,13 @@ export default async function JobCostingPage({ params }: { params: Promise<{ id:
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/30 px-4 py-3 text-sm">
             <p className="text-muted-foreground">
               Selling charge bisa dihitung otomatis dari rate card: {job.containers.length ? summarizeContainers(job.containers) : "belum ada container"}
-              {" · "}{job.customsLane ? LANE_LABELS[job.customsLane] : "jalur belum diisi"}{" · "}{job.distanceKm == null ? "jarak belum diisi" : `${formatNumber(Number(job.distanceKm), 1)} km`}.
+              {" · "}{jobRateCity(job) ? `tarif kota ${jobRateCity(job)}` : "tarif tanpa kota (pelabuhan belum diisi)"}
+              {" · "}{job.customsLane ? LANE_LABELS[job.customsLane] : <span className="font-semibold text-destructive">jalur bea cukai belum dipilih</span>}{" · "}{(() => {
+                const missing = job.containers.filter((c) => c.distanceKm == null && job.distanceKm == null).length;
+                return !job.containers.length ? "jarak belum diisi" : missing ? `${missing} container belum ada jarak` : "jarak container lengkap";
+              })()}.
             </p>
-            <ApplyRateCardButton jobId={job.id} hasRateCardLines={selling.some((c) => c.fromRateCard && !c.invoiced)} />
+            <ApplyRateCardButton jobId={job.id} hasRateCardLines={selling.some((c) => c.fromRateCard && !c.invoiced)} customsLane={job.customsLane} />
           </div>
         )}
         <CostTable title="Selling (Revenue)" side="SELLING" jobId={job.id} rows={selling} totalIdr={sumAll(selling)} tone="success" chargeOptions={chargeOptions} />
@@ -122,7 +138,7 @@ function CostTable({
   rows: {
     id: string; side: string; chargeCodeId: string; chargeCode: { code: string; name: string }; description: string | null;
     vendorId: string | null; vehicleId: string | null; vendor: { name: string } | null; vehicle: { plate: string } | null;
-    currency: string; exchangeRate: any; qty: any; unitPrice: any; amountForeign: any; actualIdr: any; taxable: boolean;
+    currency: string; exchangeRate: any; qty: any; unitPrice: any; amountForeign: any; actualIdr: any; ppnIdr: any; taxable: boolean;
     asReceipt: boolean; unitLabel: string | null; invoiced: boolean; billed: boolean; recordedAt: Date | null;
     voucherId: string | null; voucher: { number: string } | null; invoice: { number: string; status: string } | null;
   }[];
@@ -164,7 +180,10 @@ function CostTable({
                   <TableCell className="whitespace-nowrap">{formatNumber(Number(r.qty), 0)}{r.unitLabel && <span className="text-muted-foreground"> × {r.unitLabel}</span>}</TableCell>
                   <TableCell>{formatMoney(Number(r.unitPrice), r.currency, r.currency === "IDR" ? 0 : 2)}</TableCell>
                   <TableCell>{formatMoney(Number(r.amountForeign), r.currency, r.currency === "IDR" ? 0 : 2)}</TableCell>
-                  <TableCell className="text-right tabular-nums">{formatIDR(Number(r.actualIdr))}</TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {formatIDR(Number(r.actualIdr))}
+                    {Number(r.ppnIdr) > 0 && <p className="text-xs text-muted-foreground">+ PPN {formatIDR(Number(r.ppnIdr))}</p>}
+                  </TableCell>
                   <TableCell><span className={cn("text-xs", locked ? "text-muted-foreground" : "text-warning")}>{status}</span></TableCell>
                   {recordable && (
                     <TableCell className="text-right">
@@ -180,6 +199,7 @@ function CostTable({
                           <ChargeForm jobId={jobId} side={side} options={chargeOptions} initial={{
                             id: r.id, chargeCodeId: r.chargeCodeId, description: r.description, qty: Number(r.qty), unitPrice: Number(r.unitPrice),
                             currency: r.currency, rate: Number(r.exchangeRate), asReceipt: r.asReceipt, vendorId: r.vendorId, vehicleId: r.vehicleId,
+                            ppnIdr: Number(r.ppnIdr),
                           }} />
                           <DeleteChargeButton lineId={r.id} label={r.chargeCode.code} />
                         </span>

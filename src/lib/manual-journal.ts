@@ -1,7 +1,7 @@
 import type { PrismaClient } from "@prisma/client";
 import { postJournal, replaceJournal, reverseJournal } from "./journal";
 import { jktKey } from "./accounting-core";
-import { genProofNumber } from "./sequence";
+import { genProofNumber, withProofDay } from "./sequence";
 import { ACC } from "./coa";
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -106,7 +106,7 @@ export async function createManualJournal(db: PrismaClient, input: ManualJournal
   });
 }
 
-/** Edit Jurnal Umum, nomor tetap. Tanggal tidak bisa pindah bulan. */
+/** Edit Jurnal Umum. Nomor urut tetap, segmen tanggal ikut tanggal baru. Tanggal tidak bisa pindah bulan. */
 export async function updateManualJournal(db: PrismaClient, journalEntryId: string, input: ManualJournalInput) {
   return db.$transaction(async (tx) => {
     const e = await tx.journalEntry.findUnique({ where: { id: journalEntryId } });
@@ -115,6 +115,7 @@ export async function updateManualJournal(db: PrismaClient, journalEntryId: stri
     const date = new Date(`${v.dateKey}T12:00:00+07:00`);
     if (jktKey(date).slice(0, 7) !== jktKey(e.date).slice(0, 7)) throw new Error("Tanggal tidak bisa pindah bulan, karena bulan ada di nomor bukti.");
     return replaceJournal(tx, journalEntryId, {
+      number: withProofDay(e.number, date),
       date, description: `Jurnal umum: ${v.description}${v.reference ? ` (${v.reference})` : ""}`,
       lines: v.lines.map((l) => ({ accountId: l.accountId, debit: l.debit, credit: l.credit, description: l.description ?? v.description })),
     });

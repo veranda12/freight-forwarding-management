@@ -1,22 +1,29 @@
 import Link from "next/link";
-import { ExternalLink, Printer, SearchX } from "lucide-react";
-import { requirePerm, hasAnyPerm, hasPerm } from "@/lib/auth-helpers";
-import { billScope, invoiceScope, noteScope, paymentScope, voucherScope } from "@/lib/data-scope";
+import { SearchX } from "lucide-react";
+import { hasAnyPerm, hasPerm, requirePerm } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
 import { formatDate, formatIDR } from "@/lib/format";
+import { proofScopes } from "@/lib/data-scope";
 import {
-  PROOF_KIND_LABEL, PROOF_MIN_QUERY, parseProofQuery, proofKindsFor, searchProofs, type ProofHit,
+  PROOF_KIND_LABEL, PROOF_MIN_QUERY, parseProofFilter, proofKindsFor, proofLineEntries, searchProofs, type ProofHit,
 } from "@/lib/proof-search";
+import { CANCEL_LABEL, entryActions } from "@/lib/proof-lines";
+import { billChangeState } from "@/lib/payables";
+import { invoiceEditBlock } from "@/lib/receivables";
+import { SOURCE_LABEL } from "@/lib/journal-filter";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Table, TableBody, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ProofSearchBox } from "./proof-search-box";
+import { ProofRow } from "./proof-row";
+import { ProofLinesTable, type ProofLineGroup } from "./proof-lines-table";
 
 export const dynamic = "force-dynamic";
 
+/** Per jenis bukti. Satu jenis saja dipilih → daftar lebih panjang. */
 const LIMIT = 20;
+const LIMIT_ONE_KIND = 100;
 
 /** Halaman tujuan "Buka". Voucher, note, dan setoran pajak belum punya halaman detail: diarahkan ke daftarnya. */
 function openHref(h: ProofHit): string {
@@ -31,11 +38,11 @@ function openHref(h: ProofHit): string {
   }
 }
 
-type PrintPerms = { journal: boolean; invoice: boolean; voucher: boolean };
+type PrintPerms = { invoice: boolean; voucher: boolean; journal: boolean };
 
 /**
- * PDF yang sudah ada, hanya bila user boleh mencetaknya (invoices.print / vouchers.print). Jenis tanpa PDF sendiri dicetak
- * lewat PDF jurnalnya (perlu izin akuntansi atau Kasir All).
+ * PDF yang sudah ada, hanya bila user boleh mencetaknya (izin yang sama dengan route PDF-nya). Jenis tanpa PDF
+ * sendiri dicetak lewat PDF jurnalnya, yang butuh izin lihat semua jurnal (journal-access.ts).
  */
 function printHref(h: ProofHit, can: PrintPerms): string | null {
   if (h.kind === "invoice") return can.invoice ? `/api/invoices/${h.id}/pdf` : null;
@@ -43,48 +50,105 @@ function printHref(h: ProofHit, can: PrintPerms): string | null {
   return h.journalEntryId && can.journal ? `/api/accounting/journals/${h.journalEntryId}/pdf` : null;
 }
 
-export default async function ProofsPage({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
+export default async function ProofsPage({ searchParams }: { searchParams: Promise<{ q?: string; from?: string; to?: string; kind?: string }> }) {
   const user = await requirePerm("proofs.view");
   const sp = await searchParams;
-  const query = parseProofQuery(sp.q);
-  const kinds = proofKindsFor(user);
-  const canPrint: PrintPerms = {
-    journal: hasAnyPerm(user, ["accounting.view", "kasir.view"]),
-    invoice: hasPerm(user, "invoices.print"),
-    voucher: hasPerm(user, "vouchers.print"),
-  };
-  const results = query ? (await searchProofs(prisma, query, kinds, {
-    limit: LIMIT,
-    // jurnal & setoran pajak = data akuntansi (tanpa batas per orang); dokumen lain mengikuti batas data modulnya
-    scopes: { invoice: invoiceScope(user), bill: billScope(user), payment: paymentScope(user), voucher: voucherScope(user), note: noteScope(user) },
-  })).filter((r) => r.hits.length > 0) : [];
+  const filter = parseProofFilter(sp);
+  const allowed = proofKindsFor(user);
+  const kinds = filter?.kind && allowed.includes(filter.kind) ? [filter.kind] : allowed;
+  const limit = kinds.length === 1 ? LIMIT_ONE_KIND : LIMIT;
+  // Baris jurnal hanya untuk yang boleh melihat semua jurnal (sama dengan halaman/PDF jurnal, journal-access.ts).
+  const canJournal = hasAnyPerm(user, ["accounting.view", "kasir.view"]);
+  const canPrint: PrintPerms = { invoice: hasPerm(user, "invoices.print"), voucher: hasPerm(user, "vouchers.print"), journal: canJournal };
+  const results = filter
+    ? (await searchProofs(prisma, filter.query, kinds, { limit, from: filter.from, to: filter.to, scopes: proofScopes(user) })).filter((r) => r.hits.length > 0)
+    : [];
   const total = results.reduce((s, r) => s + r.hits.length, 0);
+  const entryIds = results.flatMap((r) => r.hits.map((h) => h.journalEntryId).filter((id): id is string => !!id));
+  // Yang boleh membaca accounting melihat baris jurnalnya langsung (ke akun mana bukti itu terjurnal).
+  // Role lain tetap melihat daftar bukti tanpa jurnal.
+  const entries = canJournal ? await proofLineEntries(prisma, entryIds) : [];
+  // Invoice yang sudah ada pembayaran tidak bisa diedit, jadi ikon edit tidak ditampilkan.
+  const invoiceIds = entries.filter((e) => e.source === "INVOICE" && e.sourceId).map((e) => e.sourceId!);
+  const lockedInvoices = new Map(
+    (invoiceIds.length ? await prisma.invoice.findMany({ where: { id: { in: invoiceIds } }, select: { id: true, status: true, amountPaid: true } }) : [])
+      .map((i) => [i.id, invoiceEditBlock(i)] as const).filter((x): x is readonly [string, string] => !!x[1]),
+  );
+  // Vendor bill: boleh edit/batal atau tidak bergantung datanya (sudah dibayar, ada voucher, revaluasi, tutup buku).
+  const billIds = [...new Set(entries.filter((e) => e.source === "BILL" && e.sourceId && !e.isReversal && !e.isReversed).map((e) => e.sourceId!))];
+  const billStates = new Map(await Promise.all(billIds.map(async (id) => [id, await billChangeState(prisma, id)] as const)));
+  const groups: ProofLineGroup[] = entries.map((e) => {
+        const a = entryActions(e, user);
+        const invoiceBlock = e.source === "INVOICE" && a.editHref ? lockedInvoices.get(e.sourceId ?? "") : undefined;
+        if (invoiceBlock) { a.editHref = null; a.editBlock = invoiceBlock; }
+        const bs = e.source === "BILL" ? billStates.get(e.sourceId ?? "") : undefined;
+        if (bs?.editBlock && a.editHref) { a.editHref = null; a.editBlock = bs.editBlock; }
+        if (bs?.cancelBlock && a.cancel) { a.cancel = null; a.cancelBlock = bs.cancelBlock; }
+        return {
+          id: e.id, date: e.date, number: e.number, source: SOURCE_LABEL[e.source] ?? e.source, user: e.user,
+          status: e.isReversal ? "reversal" : e.isReversed ? "reversed" : "normal",
+          editHref: a.editHref, editBlock: a.editBlock, cancel: a.cancel ? { kind: a.cancel, label: CANCEL_LABEL[a.cancel] } : null, cancelBlock: a.cancelBlock,
+          printHref: a.printHref,
+          lines: e.lines.map((l) => ({ code: l.code, name: l.name, description: l.description || e.description, debit: l.debit, credit: l.credit })),
+        };
+      });
+  // Bukti yang belum punya jurnal (mis. voucher belum dibayar, voucher dokumen) tetap disebut supaya tidak dikira hilang.
+  const unposted = canJournal ? results.flatMap((r) => r.hits.filter((h) => !h.journalEntryId)) : [];
+  const period = filter && (filter.from || filter.to)
+    ? `${filter.from ? formatDate(filter.from) : "awal"} s/d ${filter.to ? formatDate(filter.to) : "hari ini"}`
+    : null;
+  const label = [filter?.query && `“${filter.query.text}”`, period && `periode ${period}`, filter?.kind && kinds.length === 1 && PROOF_KIND_LABEL[kinds[0]]]
+    .filter(Boolean).join(", ");
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Cari Bukti"
-        description={`Satu pencarian untuk semua bukti: ${kinds.map((k) => PROOF_KIND_LABEL[k]).join(", ")}.`}
+        description={`Satu pencarian untuk semua bukti: ${allowed.map((k) => PROOF_KIND_LABEL[k]).join(", ")}.`}
       />
-      <ProofSearchBox initial={sp.q ?? ""} />
+      <ProofSearchBox
+        initial={{ q: sp.q ?? "", from: filter?.from ?? "", to: filter?.to ?? "", kind: filter?.kind ?? "" }}
+        kinds={allowed.map((k) => ({ value: k, label: PROOF_KIND_LABEL[k] }))}
+      />
 
-      {!query ? (
-        <p className="text-sm text-muted-foreground">
-          Ketik minimal {PROOF_MIN_QUERY} karakter. Beberapa kata dipisah spasi harus cocok semua (mis. <code>maersk 2026/11</code>).
-          Nominal boleh ditulis <code>1.250.000</code>, <code>1250000</code>, atau <code>1.250.000,50</code> dan dicocokkan persis.
-        </p>
+      {!filter ? (
+        <div className="space-y-1 text-sm text-muted-foreground">
+          <p>
+            Ketik minimal {PROOF_MIN_QUERY} karakter, <b>atau</b> pilih periode tanggal saja bila no. buktinya tidak diketahui.
+            Sebagian nomor sudah cukup (mis. <code>BK/26/11</code>). Beberapa kata dipisah spasi harus cocok semua (mis. <code>maersk 2026/11</code>).
+          </p>
+          <p>
+            Nominal boleh ditulis <code>1.250.000</code>, <code>1250000</code>, atau <code>1.250.000,50</code> dan dicocokkan persis.
+            {canJournal && <> Hasilnya berupa baris jurnal: akun Debet dan Kredit dari tiap bukti, lengkap dengan user yang menginput.</>}
+          </p>
+        </div>
       ) : results.length === 0 ? (
-        <EmptyState icon={SearchX} title="Tidak ada bukti yang cocok" description={`Tidak ditemukan bukti untuk "${query.text}". Coba kata kunci lain atau sebagian nomor saja.`} />
+        <EmptyState icon={SearchX} title="Tidak ada bukti yang cocok" description={`Tidak ditemukan bukti untuk ${label}. Coba kata kunci lain, sebagian nomor saja, atau perlebar periode.`} />
+      ) : canJournal ? (
+        <>
+          <p className="text-sm text-muted-foreground">
+            {groups.filter((g) => g.status !== "reversal").length} bukti terjurnal untuk {label}{filter.query?.amount != null && <> · termasuk nominal {formatIDR(filter.query.amount, { decimals: filter.query.amount % 1 ? 2 : 0 })}</>}
+            {results.some((r) => r.truncated) && <span className="text-warning"> · Menampilkan {limit} terbaru per jenis bukti, persempit kata kunci, periode, atau pilih satu jenis.</span>}
+          </p>
+          {groups.length > 0 && <ProofLinesTable groups={groups} />}
+          {unposted.length > 0 && (
+            <p className="text-sm text-muted-foreground">
+              Belum terjurnal: {unposted.map((h, i) => (
+                <span key={h.id}>{i > 0 && ", "}<Link href={openHref(h)} className="text-primary hover:underline">{h.number}</Link> ({PROOF_KIND_LABEL[h.kind]}, {h.status})</span>
+              ))}
+            </p>
+          )}
+        </>
       ) : (
         <>
           <p className="text-sm text-muted-foreground">
-            {total} bukti untuk “{query.text}”{query.amount !== null && <> · termasuk nominal {formatIDR(query.amount, { decimals: query.amount % 1 ? 2 : 0 })}</>}
+            {total} bukti untuk {label}{filter.query?.amount != null && <> · termasuk nominal {formatIDR(filter.query.amount, { decimals: filter.query.amount % 1 ? 2 : 0 })}</>}
           </p>
           {results.map((r) => (
             <Card key={r.kind}>
               <CardHeader className="flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-base">{PROOF_KIND_LABEL[r.kind]} <span className="font-normal text-muted-foreground">({r.hits.length}{r.truncated ? "+" : ""})</span></CardTitle>
-                {r.truncated && <span className="text-xs text-warning">Menampilkan {LIMIT} teratas, persempit kata kunci.</span>}
+                {r.truncated && <span className="text-xs text-warning">Menampilkan {limit} terbaru, persempit kata kunci atau periode, atau pilih satu jenis bukti.</span>}
               </CardHeader>
               <CardContent className="p-0">
                 <Table>
@@ -100,32 +164,15 @@ export default async function ProofsPage({ searchParams }: { searchParams: Promi
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {r.hits.map((h) => {
-                      const print = printHref(h, canPrint);
-                      return (
-                        <TableRow key={h.id}>
-                          <TableCell>
-                            <Link href={openHref(h)} className="font-medium text-primary hover:underline">{h.number}</Link>
-                            {h.proofNumber && <div className="text-xs text-muted-foreground">{h.kind === "bill" ? "Ref vendor " : h.kind === "payment" ? "Ref " : "Bukti "}{h.proofNumber}</div>}
-                            {h.description && <div className="max-w-72 truncate text-xs text-muted-foreground" title={h.description}>{h.description}</div>}
-                          </TableCell>
-                          <TableCell className="whitespace-nowrap">{formatDate(h.date)}</TableCell>
-                          <TableCell className="max-w-48 truncate" title={h.party}>{h.party || "-"}</TableCell>
-                          <TableCell className="max-w-56 text-xs text-muted-foreground">
-                            <div className="truncate" title={h.jobs}>{h.jobs || "-"}</div>
-                            {h.bls && <div className="truncate" title={h.bls}>{h.bls}</div>}
-                          </TableCell>
-                          <TableCell className="whitespace-nowrap text-right tabular-nums">{formatIDR(h.amount, { decimals: h.amount % 1 ? 2 : 0 })}</TableCell>
-                          <TableCell className="whitespace-nowrap text-sm">{h.status}</TableCell>
-                          <TableCell className="whitespace-nowrap">
-                            <div className="flex gap-1">
-                              <Button asChild size="sm" variant="ghost"><Link href={openHref(h)}><ExternalLink /> Buka</Link></Button>
-                              {print && <Button asChild size="sm" variant="ghost"><a href={print} target="_blank" rel="noopener"><Printer /> Cetak</a></Button>}
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
+                    {r.hits.map((h) => (
+                      <ProofRow
+                        key={h.id}
+                        hit={h}
+                        openHref={openHref(h)}
+                        printHref={printHref(h, canPrint)}
+                        journals={null}
+                      />
+                    ))}
                   </TableBody>
                 </Table>
               </CardContent>

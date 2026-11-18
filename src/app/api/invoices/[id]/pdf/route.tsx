@@ -5,7 +5,8 @@ import { renderToBuffer } from "@react-pdf/renderer";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser, hasPerm } from "@/lib/auth-helpers";
 import { invoiceScope } from "@/lib/data-scope";
-import { groupContainers } from "@/lib/rate-card";
+import { displayUnits, groupContainers, jobRateCity, rateCardScope } from "@/lib/rate-card";
+import { mergeReceiptLines } from "@/lib/pdf/invoice-print-lines";
 import { InvoiceDocument, type PdfExcludedLine, type PdfInvoice, type PdfInvoiceCompany } from "@/lib/pdf/invoice-document";
 
 export const runtime = "nodejs";
@@ -37,7 +38,10 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
   let excluded: PdfExcludedLine[] = [];
   // Biaya khusus jalur merah dicetak sebagai "Excluded" bila job bukan jalur merah, seperti contoh invoice clearance.
   if (job?.customsLane && job.customsLane !== "RED" && inv.lines.some((l) => l.section === "LOCAL")) {
-    const red = await prisma.rateCardItem.findMany({ where: { isActive: true, condition: "RED_LANE" }, include: { chargeCode: true }, orderBy: { sortOrder: "asc" } });
+    const red = await prisma.rateCardItem.findMany({
+      where: { ...rateCardScope(inv.customerId, jobRateCity(job)), condition: "RED_LANE" },
+      include: { chargeCode: true }, orderBy: { sortOrder: "asc" },
+    });
     const seen = new Set<string>();
     // Tarifnya tidak dicetak (permintaan client), cukup nama biaya dan keterangan "Excluded".
     excluded = red.filter((r) => !seen.has(r.chargeCodeId) && seen.add(r.chargeCodeId)).map((r) => ({
@@ -51,6 +55,9 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
   const jobs = [...new Map(inv.lines.flatMap((l) => (l.job ? [[l.job.id, l.job] as const] : []))).values()];
   const multi = jobs.length > 1;
   const blOf = (j: (typeof jobs)[number]) => j.hblNo ?? j.mblNo ?? j.hawbNo ?? j.mawbNo ?? j.number;
+
+  // Baris tanpa unit (mis. reimburse dari buying) memakai unit dari rate card, sesuai kolom Unit rate card client.
+  const units = await displayUnits(prisma, inv.customerId, inv.lines.map((l) => ({ chargeCodeId: l.chargeCodeId, unitLabel: l.unitLabel, jobId: l.jobId ?? inv.jobId })));
 
   const pdfInv: PdfInvoice = {
     ppnRate: Number(inv.ppnRate),
@@ -68,10 +75,12 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
       lane: !multi && job.customsLane ? LANE_EN[job.customsLane] : null,
       containerNos: multi ? null : job.containers.map((c) => c.containerNo).join(", ") || null,
     } : null,
-    lines: inv.lines.map((l) => ({
-      section: l.section ?? l.chargeCode.invoiceSection, name: l.description ?? l.chargeCode.name, note: multi && l.job ? [`B/L ${blOf(l.job)}`, l.note].filter(Boolean).join(" · ") : l.note,
-      qty: Number(l.qty), unitLabel: l.unitLabel, unitPrice: Number(l.unitPrice), amount: Number(l.amount), asReceipt: l.asReceipt,
-    })),
+    // Reimburse dengan charge yang sama (mis. LOLO lift on dan lift off beda vendor) dicetak satu baris.
+    lines: mergeReceiptLines(inv.lines.map((l, i) => ({
+      section: l.section ?? l.chargeCode.invoiceSection, name: l.description ?? l.chargeCode.name, note: l.note,
+      qty: Number(l.qty), unitLabel: units[i], unitPrice: Number(l.unitPrice), amount: Number(l.amount), asReceipt: l.asReceipt,
+      bl: multi && l.job ? blOf(l.job) : null,
+    }))).map(({ bl, ...l }) => ({ ...l, note: bl ? [`B/L ${bl}`, l.note].filter(Boolean).join(" · ") : l.note })),
     excluded: multi ? [] : excluded,
   };
 

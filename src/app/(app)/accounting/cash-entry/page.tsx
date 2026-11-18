@@ -4,9 +4,12 @@ import { cashAccountOptions, cashCoaIds } from "@/lib/cash-accounts";
 import { listCashEntries } from "@/lib/cash-entry";
 import { listTransfers } from "@/lib/bank-transfer";
 import { latestRate } from "@/lib/fx";
-import { getLockKey } from "@/lib/period-lock";
+import { getClosedMonths } from "@/lib/period-lock";
 import { formatIDR } from "@/lib/format";
+import Link from "next/link";
+import { TicketPlus } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
+import { Button } from "@/components/ui/button";
 import { StatStrip } from "@/components/stat-strip";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CashEntryPanel, type CashPrefill } from "./cash-entry-panel";
@@ -55,12 +58,15 @@ export default async function CashEntryPage({ searchParams }: { searchParams: Pr
   const canEdit = hasPerm(user, "cashEntry.edit");
   const canTransfer = hasPerm(user, "cashEntry.transfer");
   const canTransferCancel = hasPerm(user, "cashEntry.transferCancel");
-  const lock = await getLockKey(prisma);
+  const closedMonths = await getClosedMonths(prisma);
   const editId = canEdit && entries.some((e) => e.id === sp.edit) ? sp.edit : undefined;
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Jurnal Penerimaan & Pengeluaran" description="Transaksi kas dan bank di luar invoice dan bill, serta transfer antar rekening" />
+      <PageHeader title="Jurnal Penerimaan & Pengeluaran" description="Transaksi kas dan bank di luar invoice dan bill, serta transfer antar rekening">
+        {/* Pintasan ke voucher invoice / bill / biaya job (permintaan client: buat voucher dari menu accounting). */}
+        {hasPerm(user, "vouchers.create") && <Button asChild variant="outline"><Link href="/vouchers/new"><TicketPlus /> Buat Voucher</Link></Button>}
+      </PageHeader>
       <StatStrip items={[
         { label: "Transaksi kas", value: active.length },
         { label: "Total penerimaan", value: formatIDR(totalIn), tone: "success" },
@@ -75,7 +81,7 @@ export default async function CashEntryPage({ searchParams }: { searchParams: Pr
         <TabsContent value="kas">
           <CashEntryPanel
             cashAccounts={cash.options} defaultCashId={cash.defaultId} prefill={prefill} rates={rates}
-            inAccounts={inAccounts} outAccounts={outAccounts} entries={entries} today={today} canCreate={canCreate} canCancel={canCancel} canEdit={canEdit} lockKey={lock} editId={editId}
+            inAccounts={inAccounts} outAccounts={outAccounts} entries={entries} today={today} canCreate={canCreate} canCancel={canCancel} canEdit={canEdit} closedMonths={closedMonths} editId={editId}
           />
         </TabsContent>
         <TabsContent value="transfer">

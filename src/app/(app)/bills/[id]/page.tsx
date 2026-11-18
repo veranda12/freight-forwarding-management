@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Briefcase } from "lucide-react";
+import { Briefcase, Ticket } from "lucide-react";
 import { requirePerm, hasPerm } from "@/lib/auth-helpers";
 import { billScope } from "@/lib/data-scope";
 import { prisma } from "@/lib/prisma";
@@ -14,7 +14,13 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { BillStatusBadge } from "@/components/status-badge";
 import { Breadcrumbs } from "@/components/breadcrumbs";
+import { Button } from "@/components/ui/button";
+import { DocVouchersCard } from "@/components/doc-vouchers-card";
+import { vouchersOfDoc } from "@/lib/doc-vouchers";
 import { PayBillButton } from "../pay-bill-button";
+import { billChangeState, openIdrBillsByVendor, vendorPaymentCancelState } from "@/lib/payables";
+import { CancelReceiptButton } from "../../payments/cancel-receipt-button";
+import { BillChangeButtons } from "../bill-change-buttons";
 
 export const dynamic = "force-dynamic";
 
@@ -29,7 +35,7 @@ export default async function BillDetail({ params }: { params: Promise<{ id: str
       vendor: { select: { name: true, code: true, isForeign: true } },
       job: { select: { id: true, number: true } },
       lines: { include: { chargeCode: true, job: { select: { id: true, number: true, hblNo: true, mblNo: true } } } },
-      allocations: { include: { payment: { select: { id: true, number: true, date: true } } } },
+      allocations: { include: { payment: { select: { id: true, number: true, date: true, cancelledAt: true, cancelReason: true } } } },
     },
   });
   if (!bill) notFound();
@@ -43,7 +49,26 @@ export default async function BillDetail({ params }: { params: Promise<{ id: str
   const isFx = bill.currency !== "IDR";
   const defaultPaymentRate = isFx ? await latestRate(prisma, bill.currency, new Date().toISOString().slice(0, 10)) : 1;
   const payable = bill.status !== "PAID" && bill.status !== "CANCELLED";
+  const vouchers = await vouchersOfDoc(prisma, { billId: bill.id });
+  // Voucher bill hanya catatan (tanpa jurnal): bill IDR yang tidak dibatalkan, lunas atau belum.
+  const canVoucher = hasPerm(user, "vouchers.create") && !isFx && bill.status !== "CANCELLED";
   const cash = await cashAccountOptions(prisma, "payment");
+  const otherBills = canPay && payable && !isFx ? ((await openIdrBillsByVendor(prisma, [bill.vendorId], billScope(user)))[bill.vendorId] ?? []).filter((b) => b.id !== bill.id) : [];
+  // Tombol Batalkan Pembayaran per pembayaran aktif, untuk pemegang izin `payments.cancel` (bawaan: Admin).
+  const cancelStates = new Map<string, Awaited<ReturnType<typeof vendorPaymentCancelState>>>();
+  if (hasPerm(user, "payments.cancel")) {
+    for (const a of bill.allocations) {
+      if (a.payment.cancelledAt || cancelStates.has(a.payment.id)) continue;
+      cancelStates.set(a.payment.id, await vendorPaymentCancelState(prisma, a.payment.id));
+    }
+  }
+  // Edit (`bills.edit`) dan Batalkan Bill (`bills.cancel`, bawaan: Admin); bill yang sudah batal tidak punya tombol lagi.
+  const canEditBill = hasPerm(user, "bills.edit");
+  const canCancelBill = hasPerm(user, "bills.cancel");
+  const change = (canEditBill || canCancelBill) && bill.status !== "CANCELLED" ? await billChangeState(prisma, bill.id) : null;
+  const cancelDenied = !canCancelBill
+    ? "Pembatalan bill butuh izin Batalkan vendor bill (bawaan: Admin)."
+    : bill.createdById === user.id && !hasPerm(user, "bills.cancelOwn") ? "Bill buatan Anda sendiri: minta user lain yang berwenang membatalkan." : null;
   const jobs = [...new Map(bill.lines.flatMap((l) => (l.job ? [[l.job.id, l.job] as const] : []))).values()];
   if (jobs.length === 0 && bill.job) jobs.push({ ...bill.job, hblNo: null, mblNo: null });
 
@@ -53,6 +78,7 @@ export default async function BillDetail({ params }: { params: Promise<{ id: str
         <Breadcrumbs items={[{ label: "Vendor Bill (AP)", href: "/bills" }, { label: bill.number }]} />
         <PageHeader title={bill.number} description={`${bill.vendor.name} · ${formatDate(bill.date)}`}>
           <BillStatusBadge status={bill.status} />
+          {canVoucher && <Button asChild variant="outline"><Link href={`/vouchers/new?bill=${bill.id}`}><Ticket /> Buat Voucher</Link></Button>}
           {canPay && payable && (
             <PayBillButton
               billId={bill.id}
@@ -65,9 +91,15 @@ export default async function BillDetail({ params }: { params: Promise<{ id: str
               defaultPaymentRate={defaultPaymentRate}
               cashAccounts={cash.options}
               defaultCashId={cash.defaultId}
+              otherBills={otherBills}
             />
           )}
         </PageHeader>
+        {change && (
+          <div className="mt-3 flex justify-end">
+            <BillChangeButtons billId={bill.id} number={bill.number} editBlock={canEditBill ? change.editBlock : "Tidak punya izin mengubah bill."} cancelBlock={cancelDenied ?? change.cancelBlock} note={change.anyBlock} />
+          </div>
+        )}
         {jobs.length > 0 && (
           <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
             {jobs.map((j) => (
@@ -111,11 +143,22 @@ export default async function BillDetail({ params }: { params: Promise<{ id: str
             <Row label="PPh 26 dipotong" value={`- ${formatIDR(Number(bill.pph26Amount))}`} muted />
             <Row label="Total hutang" value={formatIDR(Number(bill.total))} strong />
             <Row label="Dibayar" value={formatIDR(Number(bill.amountPaid))} muted />
-            <Row label="Sisa" value={formatIDR(outstanding)} strong />
+            {/* Bill batal: hutangnya sudah dihapus lewat jurnal pembalik, jadi tidak ada sisa yang harus dibayar. */}
+            <Row label="Sisa" value={bill.status === "CANCELLED" ? "Rp 0 (dibatalkan)" : formatIDR(outstanding)} strong />
           </div>
         </Card>
 
         <div className="space-y-4">
+          {bill.status === "CANCELLED" && (
+            <Card className="border-destructive/40">
+              <CardHeader><CardTitle className="text-base text-destructive">Bill dibatalkan</CardTitle></CardHeader>
+              <CardContent className="space-y-1 text-sm">
+                {bill.cancelledAt && <Row label="Tanggal batal" value={formatDate(bill.cancelledAt)} muted />}
+                <p className="text-muted-foreground">{bill.cancelReason ?? "Tidak ada alasan tercatat."}</p>
+                <p className="text-xs text-muted-foreground">Jurnal hutangnya sudah dibalik dan biaya job di bill ini sudah bisa di-bill ulang.</p>
+              </CardContent>
+            </Card>
+          )}
           <Card>
             <CardHeader><CardTitle className="text-base">Info</CardTitle></CardHeader>
             <CardContent className="space-y-2 text-sm">
@@ -134,16 +177,27 @@ export default async function BillDetail({ params }: { params: Promise<{ id: str
           {bill.allocations.length > 0 && (
             <Card>
               <CardHeader><CardTitle className="text-base">Pembayaran</CardTitle></CardHeader>
-              <CardContent className="space-y-2 text-sm">
-                {bill.allocations.map((a) => (
-                  <div key={a.id} className="flex justify-between gap-2">
-                    <Link href={`/payments/${a.payment.id}`} className="text-primary hover:underline">{a.payment.number} · {formatDate(a.payment.date)}</Link>
-                    <span className="tabular-nums">{formatIDR(Number(a.amount))}</span>
-                  </div>
-                ))}
+              <CardContent className="space-y-3 text-sm">
+                {bill.allocations.map((a) => {
+                  const st = cancelStates.get(a.payment.id);
+                  const off = a.payment.cancelledAt ? "line-through opacity-60" : "";
+                  return (
+                    <div key={a.id} className="space-y-1.5">
+                      <div className="flex justify-between gap-2">
+                        <Link href={`/payments/${a.payment.id}`} className={`text-primary hover:underline ${off}`}>{a.payment.number} · {formatDate(a.payment.date)}</Link>
+                        <span className={`tabular-nums ${off}`}>{formatIDR(Number(a.amount))}</span>
+                      </div>
+                      {a.payment.cancelledAt && (
+                        <p className="text-xs text-muted-foreground"><Badge variant="outline" className="mr-1.5 text-[10px] text-destructive">BATAL</Badge>{formatDate(a.payment.cancelledAt)} · {a.payment.cancelReason}</p>
+                      )}
+                      {st && <CancelReceiptButton kind="vendor" paymentId={a.payment.id} number={a.payment.number} block={st.block} otherInvoices={st.bills.filter((n) => n !== bill.number)} />}
+                    </div>
+                  );
+                })}
               </CardContent>
             </Card>
           )}
+          <DocVouchersCard vouchers={vouchers} />
           {journal && (
             <Card>
               <CardHeader><CardTitle className="text-base">Jurnal {journal.number}</CardTitle></CardHeader>

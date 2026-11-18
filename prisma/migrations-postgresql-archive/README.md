@@ -15,3 +15,6 @@ Catatan:
 - Migrasi PostgreSQL dari branch client SLG (`20261106120000_slg_adjustments`, `20261107090000_bill_line_job`) dan dari
   `feat/slg-role-management-pg` (`20261108100000_super_admin`) ikut diarsipkan di sini saat di-merge; padanan MariaDB-nya
   ada di `prisma/migrations/` (`20261107120000_slg_adjustments`, `20261108100000_super_admin`).
+- Sinkron client SLG + Role Management (2026-11-19, merge `feat/slg-role-management-pg` @ `a5048ae`): 15 migrasi PostgreSQL
+  `20261109090000_payment_cancel` … `20261122090000_admin_only_cancel` diarsipkan di sini; padanan MariaDB-nya satu
+  migrasi `prisma/migrations/20261122100000_slg_client_sync`.

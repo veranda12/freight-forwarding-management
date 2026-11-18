@@ -15,7 +15,7 @@ import { accountMap } from "../../src/lib/coa";
 import { postJournal, reverseJournal } from "../../src/lib/journal";
 import { genDocNumber } from "../../src/lib/sequence";
 import { remitTaxPeriod, cancelTaxRemittance, masaTotals } from "../../src/lib/tax";
-import { getLockKey, setLockKey } from "../../src/lib/period-lock";
+import { lockMonth, lockSnapshot, restoreLock } from "./period-lock-helper";
 import { searchJournals } from "../../src/lib/journal-search";
 import { DEFAULT_FILTER } from "../../src/lib/journal-filter";
 
@@ -144,15 +144,15 @@ async function main() {
     await post(`${masa}-12T09:00:00+07:00`, "tidak seimbang", [["6300", 100, 0], ["1100", 0, 99]]);
     ok(false, "TC-08 jurnal tidak seimbang seharusnya ditolak");
   } catch (e) { ok(/seimbang|balance/i.test(errMsg(e)), `TC-08 jurnal tidak seimbang ditolak: "${errMsg(e)}"`); }
-  const oldLock = await getLockKey(db);
+  const oldLock = await lockSnapshot(db);
   try {
-    await setLockKey(db, `${masa}-20`);
+    await lockMonth(db, `${masa}-20`);
     try {
       await post(`${masa}-12T09:00:00+07:00`, "di periode terkunci", [["6300", 100, 0], ["1100", 0, 100]]);
       ok(false, "TC-08 posting di periode terkunci seharusnya ditolak");
-    } catch (e) { ok(/terkunci/.test(errMsg(e)), `TC-08 periode terkunci ditolak: "${errMsg(e)}"`); }
+    } catch (e) { ok(/closing/.test(errMsg(e)), `TC-08 periode closing ditolak: "${errMsg(e)}"`); }
   } finally {
-    await setLockKey(db, oldLock);
+    await restoreLock(db, oldLock);
   }
   const revId = await db.$transaction((tx) => reverseJournal(tx, jeBig, { reason: `uji ${RUN}` }));
   const orig = await db.journalEntry.findUniqueOrThrow({ where: { id: jeBig } });

@@ -1,6 +1,7 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { latestRate } from "./fx";
 import { rebuildInvoice } from "./receivables";
+import { removeSellingOfBuying, syncSellingFromBuying } from "./selling-sync";
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -21,9 +22,14 @@ export type JobChargeInput = {
   /** Hanya untuk BUYING: vendor, atau armada sendiri. */
   vendorId?: string | null;
   vehicleId?: string | null;
+  /** Hanya BUYING non-reimburse: PPN masukan (IDR) sesuai faktur/invoice vendor, diketik manual. Kosong/0 = tanpa PPN.
+   *  undefined = tidak diubah (dipakai pemanggil lain seperti rate card). */
+  ppnIdr?: number | string | null;
 };
 
 type Tx = Prisma.TransactionClient;
+
+const REIMBURSE_PPN = "Biaya reimburse tidak punya PPN masukan. Isi nilainya termasuk PPN (faktur atas nama customer), atau hapus centang Reimburse bila faktur atas nama perusahaan.";
 
 /** Validasi murni input charge job. */
 export function validateJobCharge(input: JobChargeInput) {
@@ -38,7 +44,16 @@ export function validateJobCharge(input: JobChargeInput) {
   if (currency !== "IDR" && rate != null && !(rate > 0)) throw new Error("Kurs harus lebih dari 0.");
   const vendorId = input.side === "BUYING" ? input.vendorId || null : null;
   const vehicleId = input.side === "BUYING" && !vendorId ? input.vehicleId || null : null;
+  let ppnIdr: number | undefined = undefined;
+  if (input.ppnIdr !== undefined) {
+    const raw = input.ppnIdr === "" || input.ppnIdr == null ? 0 : Number(input.ppnIdr);
+    if (!Number.isFinite(raw) || raw < 0) throw new Error("PPN tidak boleh minus.");
+    if (raw > 0 && input.side !== "BUYING") throw new Error("PPN per baris hanya untuk buying (PPN masukan).");
+    if (raw > 0 && input.asReceipt) throw new Error(REIMBURSE_PPN);
+    ppnIdr = r2(raw);
+  }
   return {
+    ppnIdr,
     side: input.side, chargeCodeId: input.chargeCodeId, qty: r2(qty), unitPrice: r2(unitPrice), currency, rate,
     taxable: !!input.taxable, vendorId, vehicleId, description: (input.description ?? "").trim() || null,
     asReceipt: input.asReceipt == null ? null : !!input.asReceipt, unitLabel: (input.unitLabel ?? "").trim() || null,
@@ -79,12 +94,17 @@ async function lineData(tx: Tx, v: ReturnType<typeof validateJobCharge>) {
   if (!rate || !(rate > 0)) throw new Error(`Kurs ${v.currency} belum tersedia. Isi kurs secara manual.`);
   const amountForeign = r2(v.qty * v.unitPrice);
   const idr = r2(amountForeign * rate);
+  const asReceipt = v.asReceipt ?? cc.asReceipt;
+  if (v.ppnIdr && asReceipt) throw new Error(REIMBURSE_PPN);
+  if (v.ppnIdr && v.ppnIdr > idr) throw new Error("PPN lebih besar dari nilai biaya. Periksa nominal PPN di invoice vendor.");
+  const ppn = v.ppnIdr === undefined ? {} : { ppnIdr: new Prisma.Decimal(v.ppnIdr) };
   return {
+    ...ppn,
     side: v.side, chargeCodeId: v.chargeCodeId, description: v.description ?? cc.code,
     vendorId: v.vendorId, vehicleId: v.vehicleId, currency: v.currency,
     exchangeRate: new Prisma.Decimal(rate), qty: new Prisma.Decimal(v.qty), unitPrice: new Prisma.Decimal(v.unitPrice),
     amountForeign: new Prisma.Decimal(amountForeign), estimatedIdr: new Prisma.Decimal(idr), actualIdr: new Prisma.Decimal(idr),
-    taxable: v.taxable, asReceipt: v.asReceipt ?? cc.asReceipt, ...(v.unitLabel ? { unitLabel: v.unitLabel } : {}),
+    taxable: v.taxable, asReceipt, ...(v.unitLabel ? { unitLabel: v.unitLabel } : {}),
   };
 }
 
@@ -98,6 +118,7 @@ export async function addJobCharge(db: PrismaClient, jobId: string, input: JobCh
     if (job.status === "CLOSED") throw new Error("Job sudah Closed. Admin perlu membuka job dulu untuk menambah biaya.");
     const last = await tx.costingLine.aggregate({ where: { jobId }, _max: { sortOrder: true } });
     const line = await tx.costingLine.create({ data: { jobId, ...(await lineData(tx, v)), sortOrder: (last._max.sortOrder ?? -1) + 1 } });
+    if (v.side === "BUYING") await syncSellingFromBuying(tx, line.id);
     await recalcJobTotals(tx, jobId);
     return line.id;
   });
@@ -114,6 +135,7 @@ export async function updateJobCharge(db: PrismaClient, lineId: string, input: J
     if (line.side !== v.side) throw new Error("Sisi selling atau buying tidak bisa diubah. Hapus lalu tambah baris baru.");
     // Baris yang diubah manual tidak lagi ditimpa saat rate card dihitung ulang.
     await tx.costingLine.update({ where: { id: lineId }, data: { ...(await lineData(tx, v)), fromRateCard: false } });
+    if (line.side === "BUYING") await syncSellingFromBuying(tx, lineId);
     await recalcJobTotals(tx, line.jobId);
     // Invoice yang belum dibayar ikut diperbarui, nomornya tetap.
     if (line.invoiceId) await rebuildInvoice(tx, line.invoiceId);
@@ -131,9 +153,11 @@ export async function deleteJobCharge(db: PrismaClient, lineId: string) {
     if (line.invoiceId && (await tx.costingLine.count({ where: { invoiceId: line.invoiceId } })) <= 1) {
       throw new Error("Ini baris terakhir di invoice. Batalkan invoicenya kalau tidak jadi ditagih.");
     }
+    const sellingInvoice = line.side === "BUYING" ? await removeSellingOfBuying(tx, lineId) : null;
     await tx.costingLine.delete({ where: { id: lineId } });
     await recalcJobTotals(tx, line.jobId);
     if (line.invoiceId) await rebuildInvoice(tx, line.invoiceId);
+    if (sellingInvoice) await rebuildInvoice(tx, sellingInvoice);
     return line.jobId;
   });
 }

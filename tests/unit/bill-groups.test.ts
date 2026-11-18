@@ -39,16 +39,41 @@ describe("allocate — pembagian sen tepat", () => {
 });
 
 describe("splitBillByJob", () => {
-  it("bill lintas job: PPN/PPh dan pembayaran terbagi proporsional, jumlah persis", () => {
-    const b = bill({ lines: [ln(1_000_000, A), ln(500_000, B)], total: 1_516_500, amountPaid: 500_000, status: "PARTIAL" });
+  it("bill lintas job: pajak tidak disebar, jadi baris sendiri di job kepala bill; jumlah tetap persis", () => {
+    // B kepala bill; PPN 16.500, PPh 23 0
+    const b = bill({ headerJob: B, lines: [ln(1_000_000, A), ln(500_000, B)], total: 1_516_500, ppn: 16_500, amountPaid: 500_000, status: "PARTIAL" });
     const s = splitBillByJob(b);
     expect(s.map((x) => x.key)).toEqual(["A", "B"]);
-    expect(s[0].portion.total + s[1].portion.total).toBe(1_516_500);
+    expect(s[0].portion.total).toBe(1_000_000);
+    expect(s[1].portion.total).toBe(516_500);
+    expect(s[0].portion.tax).toBeNull();
+    expect(s[1].portion.tax).toEqual({ ppn: 16_500, pph23: 0, pph26: 0 });
     expect(s[0].portion.paid + s[1].portion.paid).toBe(500_000);
-    expect(s[0].portion.total).toBe(1_011_000);
     expect(s[0].portion.outstanding + s[1].portion.outstanding).toBe(1_016_500);
     expect(s[0].portion.bill.jobCount).toBe(2);
     expect(s[0].portion.lines).toHaveLength(1);
+  });
+  it("contoh: trucking 1.000.000 + reimburse 500.000 (job A), lift 300.000 (job B), PPN 11.000, PPh 23 20.000", () => {
+    const b = bill({
+      headerJob: A, lines: [ln(1_000_000, A), ln(500_000, A), ln(300_000, B)],
+      total: 1_791_000, ppn: 11_000, pph23: 20_000,
+    });
+    const s = splitBillByJob(b);
+    expect(s.find((x) => x.key === "A")!.portion.total).toBe(1_491_000);
+    expect(s.find((x) => x.key === "B")!.portion.total).toBe(300_000);
+    expect(s.find((x) => x.key === "A")!.portion.lineAmount).toBe(1_500_000);
+  });
+  it("job kepala bill tidak punya baris: pajak ke job baris pertama", () => {
+    const s = splitBillByJob(bill({ headerJob: B, lines: [ln(100, A)], total: 98, pph23: 2 }));
+    expect(s).toHaveLength(1);
+    expect(s[0].key).toBe("A");
+    expect(s[0].portion.total).toBe(98);
+    expect(s[0].portion.tax).toEqual({ ppn: 0, pph23: 2, pph26: 0 });
+  });
+  it("bill tanpa pajak: porsi = nilai baris, tanpa baris pajak", () => {
+    const s = splitBillByJob(bill({ headerJob: A, lines: [ln(600, A), ln(400, B)] }));
+    expect(s.map((x) => x.portion.total)).toEqual([600, 400]);
+    expect(s.every((x) => x.portion.tax === null)).toBe(true);
   });
   it("baris tanpa job ikut job kepala bill (data lama)", () => {
     const s = splitBillByJob(bill({ headerJob: A, lines: [ln(100, null), ln(200, null)] }));

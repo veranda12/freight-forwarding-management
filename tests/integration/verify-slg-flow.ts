@@ -6,14 +6,14 @@
  *   DATABASE_URL=mysql://ffms:ffms123@127.0.0.1:3307/ffms_test node node_modules/tsx/dist/cli.mjs tests/integration/verify-slg-flow.ts
  */
 import { PrismaClient, Prisma } from "@prisma/client";
-import { createInvoiceCore, updateInvoiceCore, recordReceiptCore, cancelInvoiceCore } from "../../src/lib/receivables";
+import { createInvoiceCore, updateInvoiceCore, recordReceiptCore, cancelInvoiceCore, cancelReceiptCore } from "../../src/lib/receivables";
 import { createBillCore, createBillFromJobCore, recordVendorPaymentCore } from "../../src/lib/payables";
 import { createVoucher, payVoucher, cancelVoucher } from "../../src/lib/vouchers";
 import { createCashEntry, updateCashEntry } from "../../src/lib/cash-entry";
 import { createManualJournal, updateManualJournal } from "../../src/lib/manual-journal";
 import { assertJobEditable, closeJobIfSettled } from "../../src/lib/job-lock";
 import { addJobCharge, updateJobCharge, recalcJobTotals, editInvoiceCharges } from "../../src/lib/job-charges";
-import { setLockKey } from "../../src/lib/period-lock";
+import { lockSnapshot, restoreLock, lockMonth } from "./period-lock-helper";
 import { ACC } from "../../src/lib/coa";
 import { PRISMA_CLIENT_OPTIONS } from "../../src/lib/prisma-options";
 
@@ -44,7 +44,7 @@ async function main() {
   const dbName = (await db.$queryRaw<{ d: string }[]>`SELECT DATABASE() AS d`)[0].d;
   if (dbName === "ffms") throw new Error("Jangan jalankan uji ini di database demo ffms.");
   console.log(`   database: ${dbName}`);
-  await setLockKey(db, null);
+  await lockMonth(db, null);
   await db.accountingSetting.upsert({ where: { id: "default" }, update: { ppnRate: 0.011 }, create: { id: "default", ppnRate: 0.011 } });
 
   const customer = await db.customer.findFirstOrThrow();
@@ -113,7 +113,7 @@ async function main() {
   const v2 = await line(j1.id, "BUYING", service.id, 300_000, true, vendor.id);
   const voucherId = await createVoucher(db, { jobId: j1.id, lineIds: [v1.id, v2.id], dateKey: today, payee: vendor.name });
   let vc = await db.voucher.findUniqueOrThrow({ where: { id: voucherId } });
-  ok(/^[A-Z]+\/VC\/\d{2}\/\d{2}\/\d{3,}$/.test(vc.number), `format voucher ${vc.number}`);
+  ok(/^[A-Z]+\/VC\/\d{2}\/\d{2}\/\d{2}\/\d{4,}$/.test(vc.number), `format voucher ${vc.number}`);
   await throws(() => updateJobCharge(db, v1.id, { side: "BUYING", chargeCodeId: service.id, qty: 1, unitPrice: 1, taxable: true }), /voucher/, "biaya terkunci sejak voucher dibuat");
   await cancelVoucher(db, voucherId, "uji batal");
   ok((await db.costingLine.findUniqueOrThrow({ where: { id: v1.id } })).voucherId === null, "batal voucher membuka biaya");
@@ -173,6 +173,37 @@ async function main() {
   await throws(() => addJobCharge(db, j1.id, { side: "BUYING", chargeCodeId: service.id, qty: 1, unitPrice: 1, taxable: false }), /Closed/, "job Closed tidak bisa ditambah biaya");
   ok((await closeJobIfSettled(db, j1.id)) === false, "job Closed tidak ditutup dua kali");
 
+  // 5b. Batalkan pelunasan (Admin): jurnal dibalik, invoice terbuka lagi, nomor invoice tetap
+  const lastRc = await db.payment.findFirstOrThrow({ where: { allocations: { some: { invoiceId: invId } } }, orderBy: { createdAt: "desc" } });
+  await throws(() => cancelReceiptCore(db, lastRc.id, ""), /Alasan/, "batal pelunasan wajib alasan");
+  await lockMonth(db, today);
+  await throws(() => cancelReceiptCore(db, lastRc.id, "uji kunci"), /sudah closing/, "periode tutup buku: batal pelunasan ditolak");
+  await lockMonth(db, null);
+  const rcLine = await db.journalLine.findFirstOrThrow({ where: { entryId: lastRc.journalEntryId!, debit: { gt: 0 } } });
+  await db.journalLine.update({ where: { id: rcLine.id }, data: { reconciledAt: new Date() } });
+  await throws(() => cancelReceiptCore(db, lastRc.id, "uji rekon"), /Rekonsiliasi Bank/, "sudah direkonsiliasi: batal pelunasan ditolak");
+  await db.journalLine.update({ where: { id: rcLine.id }, data: { reconciledAt: null } });
+  const res = await cancelReceiptCore(db, lastRc.id, "Ada biaya yang kurang");
+  ok(res.reopened.includes(j1.number) && (await db.job.findUniqueOrThrow({ where: { id: j1.id } })).status === "DELIVERED", "job yang Closed dibuka kembali");
+  inv = await db.invoice.findUniqueOrThrow({ where: { id: invId }, include: { lines: true } });
+  ok(inv.status === "PARTIAL" && Number(inv.amountPaid) === 1_000_000, "batal satu pelunasan: invoice kembali sebagian");
+  await cancelReceiptCore(db, rc.id, "Ada biaya yang kurang");
+  inv = await db.invoice.findUniqueOrThrow({ where: { id: invId }, include: { lines: true } });
+  ok(inv.status === "UNPAID" && Number(inv.amountPaid) === 0 && inv.number === number, "semua pelunasan batal: invoice belum lunas, nomor tetap");
+  const orig = await db.journalEntry.findUniqueOrThrow({ where: { id: lastRc.journalEntryId! }, include: { reversedBy: true } });
+  ok(orig.isReversed && orig.number === lastRc.number && !!orig.reversedBy && await balanced(orig.reversedBy.id), "jurnal BM lama tetap ada, ditandai batal, jurnal pembalik seimbang");
+  const cancelledRc = await db.payment.findUniqueOrThrow({ where: { id: lastRc.id } });
+  ok(!!cancelledRc.cancelledAt && cancelledRc.cancelReason === "Ada biaya yang kurang", "pelunasan tersimpan dengan tanda batal dan alasan");
+  ok((await db.auditLog.count({ where: { entity: "Payment", action: "CANCEL", entityId: { in: [rc.id, lastRc.id] } } })) === 2, "riwayat pembatalan tercatat");
+  await throws(() => cancelReceiptCore(db, rc.id, "lagi"), /sudah dibatalkan/, "pelunasan tidak bisa dibatalkan dua kali");
+  await editInvoiceCharges(db, invId, { extras: [{ chargeCodeId: service.id, qty: 1, unitPrice: 100_000, asReceipt: false }] });
+  inv = await db.invoice.findUniqueOrThrow({ where: { id: invId }, include: { lines: true } });
+  ok(inv.number === number && Number(inv.total) > total, "invoice bisa diedit lagi setelah pelunasan dibatalkan, nomor tetap");
+  await recordReceiptCore(db, invId, { amount: Number(inv.total), date: today, bankAccountId: bank.id });
+  const again = await db.payment.findFirstOrThrow({ where: { allocations: { some: { invoiceId: invId } } }, orderBy: { createdAt: "desc" } });
+  ok(again.number !== lastRc.number && again.number !== rc.number, `pelunasan ulang memakai nomor baru: ${again.number}`);
+  ok((await db.job.findUniqueOrThrow({ where: { id: j1.id } })).status === "CLOSED", "lunas lagi: job Closed lagi");
+
   // 6. Bukti kas: banyak baris, edit, batas edit
   const cash = await createCashEntry(db, {
     direction: "OUT", bankAccountId: bank.id, dateKey: today, description: "Pembayaran uji",
@@ -197,9 +228,9 @@ async function main() {
   await updateManualJournal(db, ju.journalEntryId, { dateKey: today, description: "Uji jurnal umum revisi", lines: [{ accountId: expense.id, debit: 2000 }, { accountId: expense2.id, credit: 2000 }] });
   ok((await db.journalEntry.findUniqueOrThrow({ where: { id: ju.journalEntryId } })).number === ju.number, "edit jurnal umum: nomor tetap");
 
-  await setLockKey(db, today);
-  await throws(() => updateManualJournal(db, ju.journalEntryId, { dateKey: today, description: "Setelah kunci", lines: [{ accountId: expense.id, debit: 1 }, { accountId: expense2.id, credit: 1 }] }), /terkunci/, "periode dikunci: edit ditolak");
-  await setLockKey(db, null);
+  await lockMonth(db, today);
+  await throws(() => updateManualJournal(db, ju.journalEntryId, { dateKey: today, description: "Setelah kunci", lines: [{ accountId: expense.id, debit: 1 }, { accountId: expense2.id, credit: 1 }] }), /sudah closing/, "periode dikunci: edit ditolak");
+  await lockMonth(db, null);
 
   // 7. Batalkan invoice membuka baris
   const j3 = await mkJob("D", "MBL-D");

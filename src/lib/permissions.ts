@@ -51,7 +51,8 @@ const GROUPS = [
           { key: "jobs.viewAll", label: "Lihat semua job (bukan hanya milik sendiri)", kind: "scope" },
           { key: "jobs.viewFinancials", label: "Lihat nilai uang job (revenue, cost, profit, margin)", kind: "view" },
           { key: "jobs.create", label: "Buat job manual", kind: "action" },
-          { key: "jobs.status", label: "Ubah status job", kind: "action" },
+          { key: "jobs.status", label: "Ubah status job (maju)", kind: "action" },
+          { key: "jobs.statusBack", label: "Mundurkan status job", kind: "approve" },
           { key: "jobs.cancel", label: "Batalkan job", kind: "approve" },
           { key: "jobs.milestone", label: "Centang / tambah milestone", kind: "action" },
           { key: "jobs.charges", label: "Tambah / ubah / hapus charge (costing)", kind: "action" },
@@ -123,7 +124,10 @@ const GROUPS = [
           { key: "bills.view", label: "Lihat vendor bill", kind: "view" },
           { key: "bills.viewAll", label: "Lihat semua vendor bill (bukan hanya milik sendiri)", kind: "scope" },
           { key: "bills.create", label: "Buat vendor bill (biaya satu atau beberapa job)", kind: "action" },
+          { key: "bills.edit", label: "Ubah vendor bill yang belum dibayar (nomor tetap)", kind: "action" },
           { key: "bills.pay", label: "Catat pembayaran ke vendor", kind: "action" },
+          { key: "bills.cancel", label: "Batalkan vendor bill", kind: "approve" },
+          { key: "bills.cancelOwn", label: "Boleh membatalkan vendor bill buatan sendiri", kind: "own" },
         ],
       },
       {
@@ -132,7 +136,7 @@ const GROUPS = [
           { key: "vouchers.viewAll", label: "Lihat semua voucher (bukan hanya milik sendiri)", kind: "scope" },
           { key: "vouchers.create", label: "Buat voucher pengeluaran biaya job", kind: "action" },
           { key: "vouchers.pay", label: "Bayar voucher (posting jurnal BK/KK)", kind: "approve" },
-          { key: "vouchers.cancel", label: "Batalkan voucher yang belum dibayar", kind: "approve" },
+          { key: "vouchers.cancel", label: "Batalkan voucher (beserta pelunasan/pembayarannya)", kind: "approve" },
           { key: "vouchers.cancelOwn", label: "Boleh membatalkan voucher buatan sendiri", kind: "own" },
           { key: "vouchers.print", label: "Cetak voucher (PDF)", kind: "action" },
         ],
@@ -147,6 +151,8 @@ const GROUPS = [
         key: "payments", label: "Receipt & Payment", perms: [
           { key: "payments.view", label: "Lihat receipt & payment", kind: "view" },
           { key: "payments.viewAll", label: "Lihat semua receipt & payment (bukan hanya milik sendiri)", kind: "scope" },
+          { key: "payments.cancel", label: "Batalkan pelunasan invoice / pembayaran vendor", kind: "approve" },
+          { key: "payments.cancelOwn", label: "Boleh membatalkan pelunasan/pembayaran buatan sendiri", kind: "own" },
         ],
       },
     ],
@@ -181,7 +187,8 @@ const GROUPS = [
       {
         key: "closing", label: "Tutup Buku", perms: [
           { key: "closing.view", label: "Lihat tutup buku", kind: "view" },
-          { key: "closing.lockPeriod", label: "Kunci / buka periode", kind: "approve" },
+          { key: "closing.lockPeriod", label: "Closing bulan (dan tutup lagi bulan yang dibuka)", kind: "approve" },
+          { key: "closing.reopenMonth", label: "Buka kembali bulan yang sudah closing", kind: "approve" },
           { key: "closing.closeYear", label: "Tutup buku tahunan", kind: "approve" },
         ],
       },
@@ -373,7 +380,12 @@ export function permissionsOfRole(role: { key: string; isSystem: boolean; permis
 
 const views = (...mods: ModuleKey[]) => mods.map((m) => `${m}.view`);
 
-/** Role awal (seed & migrasi). Admin tidak dicantumkan: sebagai role sistem ia selalu memegang semua izin. */
+/**
+ * Role awal (seed & migrasi). Admin tidak dicantumkan: sebagai role sistem ia selalu memegang semua izin.
+ * Izin batal/hapus transaksi (invoice, bill, voucher, pelunasan, kas, transfer, pajak, jurnal umum, job) dan buka bulan
+ * closing tidak diberikan ke role bawaan: permintaan client 17 Nov, bawaannya khusus Admin. Super Admin bisa memberikannya
+ * ke role kustom bila perlu (migrasi 20261122090000_admin_only_cancel).
+ */
 export const DEFAULT_ROLES: { key: string; name: string; description: string; permissions: string[] }[] = [
   {
     key: "SALES", name: "Sales",
@@ -403,7 +415,7 @@ export const DEFAULT_ROLES: { key: string; name: string; description: string; pe
       "weightRules.view", "weightRules.edit",
       "quotations.view", "quotations.viewAll", "quotations.return", "quotations.send", "quotations.sendLowMargin",
       "quotations.decide", "quotations.convert",
-      "jobs.view", "jobs.viewAll", "jobs.create", "jobs.status", "jobs.cancel", "jobs.milestone", "jobs.charges",
+      "jobs.view", "jobs.viewAll", "jobs.create", "jobs.status", "jobs.milestone", "jobs.charges",
       "jobs.containers", "jobs.clearance", "jobs.fleetCost", "jobs.bl",
       "documents.view", "documents.generate",
       "domestic.view", "domestic.viewAll", "domestic.create", "domestic.status", "domestic.cancel", "domestic.cancelOwn", "domestic.print",
@@ -434,15 +446,15 @@ export const DEFAULT_ROLES: { key: string; name: string; description: string; pe
       "jobs.view", "jobs.viewAll", "jobs.charges", "jobs.fleetCost",
       "jobs.viewFinancials",
       "domestic.view", "domestic.viewAll", "domestic.invoice", "domestic.print",
-      "invoices.view", "invoices.viewAll", "invoices.create", "invoices.edit", "invoices.receipt", "invoices.cancel", "invoices.cancelOwn", "invoices.print",
-      "bills.view", "bills.viewAll", "bills.create", "bills.pay",
-      "vouchers.view", "vouchers.viewAll", "vouchers.create", "vouchers.pay", "vouchers.cancel", "vouchers.cancelOwn", "vouchers.print",
+      "invoices.view", "invoices.viewAll", "invoices.create", "invoices.edit", "invoices.receipt", "invoices.print",
+      "bills.view", "bills.viewAll", "bills.create", "bills.edit", "bills.pay",
+      "vouchers.view", "vouchers.viewAll", "vouchers.create", "vouchers.pay", "vouchers.print",
       "notes.view", "notes.viewAll", "payments.view", "payments.viewAll",
-      "cashEntry.view", "cashEntry.create", "cashEntry.edit", "cashEntry.cancel", "cashEntry.cancelOwn", "cashEntry.transfer", "cashEntry.transferCancel", "cashEntry.transferCancelOwn",
-      "manualJournal.view", "manualJournal.create", "manualJournal.edit", "manualJournal.cancel", "manualJournal.cancelOwn",
+      "cashEntry.view", "cashEntry.create", "cashEntry.edit", "cashEntry.transfer",
+      "manualJournal.view", "manualJournal.create", "manualJournal.edit",
       "closing.view", "closing.lockPeriod", "closing.closeYear",
       "fixedAssets.view", "fixedAssets.manage", "fixedAssets.depreciate",
-      "tax.view", "tax.remit", "tax.cancel", "tax.cancelOwn",
+      "tax.view", "tax.remit",
       "bankRec.view", "bankRec.manage", "fx.view", "fx.revalue",
       "reports.view", "reports.export", "settings.view",
     ],

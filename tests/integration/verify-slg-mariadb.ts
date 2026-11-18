@@ -14,7 +14,7 @@ import { getTaxRecap } from "../../src/lib/tax";
 import { JOURNAL_SOURCES } from "../../src/lib/journal-filter";
 import { billScope, voucherScope, invoiceScope } from "../../src/lib/data-scope";
 import { recalcJobTotals } from "../../src/lib/job-charges";
-import { setLockKey } from "../../src/lib/period-lock";
+import { lockMonth } from "./period-lock-helper";
 import type { SessionUser } from "../../src/lib/auth-helpers";
 import type { PermissionKey } from "../../src/lib/permissions";
 
@@ -43,7 +43,7 @@ async function main() {
   const dbName = (await db.$queryRaw<{ d: string }[]>`SELECT DATABASE() AS d`)[0].d;
   if (dbName === "ffms") throw new Error("Jangan jalankan uji ini di database demo ffms.");
   console.log(`   database: ${dbName}`);
-  await setLockKey(db, null);
+  await lockMonth(db, null);
 
   const [custA, custB] = await db.customer.findMany({ take: 2, orderBy: { code: "asc" } });
   const vendor = await db.vendor.findFirstOrThrow({ where: { isForeign: false } });
@@ -96,7 +96,7 @@ async function main() {
 
   const recap = await getTaxRecap(db, "2026-11-07", "2026-11-07");
   const row = recap.ppnIn.find((r) => r.number === bill.number);
-  ok(!!row && Math.abs(row.dpp - 4_000_000) < 0.01, `C-4: DPP PPN masukan = biaya non-reimburse 4.000.000 (${row?.dpp}), bukan PPN / 11%`);
+  ok(!!row && Math.abs((row.dpp ?? 0) - 4_000_000) < 0.01, `C-4: DPP PPN masukan = biaya non-reimburse 4.000.000 (${row?.dpp}), bukan PPN / 11%`);
   if (!bR) console.log("   (lewati baris reimburse: tidak ada charge code asReceipt di data uji)");
 
   // batas data bill: pemilik job kedua melihat bill, user lain tidak

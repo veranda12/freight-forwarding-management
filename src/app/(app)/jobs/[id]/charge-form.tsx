@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { formatIDR } from "@/lib/format";
+import { MoneyInput } from "@/components/money-input";
 import { addJobChargeAction, deleteJobChargeAction, updateJobChargeAction } from "./charge-actions";
 
 type Opt = { id: string; label: string };
@@ -17,7 +18,7 @@ export type ChargeOpt = { id: string; code: string; name: string; asReceipt: boo
 export type ChargeFormOptions = { charges: ChargeOpt[]; currencies: string[]; rates: Record<string, number>; vendors: Opt[]; vehicles: Opt[] };
 export type ChargeInitial = {
   id: string; chargeCodeId: string; description: string | null; qty: number; unitPrice: number; currency: string;
-  rate: number; asReceipt: boolean; vendorId: string | null; vehicleId: string | null;
+  rate: number; asReceipt: boolean; vendorId: string | null; vehicleId: string | null; ppnIdr: number;
 };
 
 const NONE = "__none__";
@@ -29,12 +30,13 @@ export function ChargeForm({ jobId, side, options, initial }: { jobId: string; s
   const [open, setOpen] = useState(false);
   const blank = {
     chargeCodeId: "", description: "", qty: "1", unitPrice: "", currency: "IDR", rate: "", asReceipt: false,
-    source: "VENDOR" as "VENDOR" | "OWN_FLEET", vendorId: NONE, vehicleId: NONE,
+    source: "VENDOR" as "VENDOR" | "OWN_FLEET", vendorId: NONE, vehicleId: NONE, ppnIdr: "",
   };
   const fromInitial = (i: ChargeInitial) => ({
     chargeCodeId: i.chargeCodeId, description: i.description ?? "", qty: String(i.qty), unitPrice: String(i.unitPrice),
     currency: i.currency, rate: i.currency === "IDR" ? "" : String(i.rate), asReceipt: i.asReceipt,
     source: (i.vehicleId ? "OWN_FLEET" : "VENDOR") as "VENDOR" | "OWN_FLEET", vendorId: i.vendorId ?? NONE, vehicleId: i.vehicleId ?? NONE,
+    ppnIdr: i.ppnIdr > 0 ? String(i.ppnIdr) : "",
   });
   const [f, setF] = useState(initial ? fromInitial(initial) : blank);
   const set = (p: Partial<typeof f>) => setF((x) => ({ ...x, ...p }));
@@ -42,6 +44,8 @@ export function ChargeForm({ jobId, side, options, initial }: { jobId: string; s
   const rate = f.currency === "IDR" ? 1 : Number(f.rate) || options.rates[f.currency] || 0;
   const idr = (Number(f.qty) || 0) * (Number(f.unitPrice) || 0) * rate;
   const label = side === "SELLING" ? "selling" : "buying";
+  const withPpn = side === "BUYING" && !f.asReceipt;
+  const ppnIdr = withPpn ? Number(f.ppnIdr) || 0 : 0;
 
   function submit() {
     start(async () => {
@@ -50,6 +54,7 @@ export function ChargeForm({ jobId, side, options, initial }: { jobId: string; s
         currency: f.currency, rate: f.currency === "IDR" ? null : f.rate || null, taxable: !f.asReceipt, asReceipt: f.asReceipt,
         vendorId: side === "BUYING" && f.source === "VENDOR" && f.vendorId !== NONE ? f.vendorId : null,
         vehicleId: side === "BUYING" && f.source === "OWN_FLEET" && f.vehicleId !== NONE ? f.vehicleId : null,
+        ...(side === "BUYING" ? { ppnIdr: withPpn ? f.ppnIdr || null : null } : {}),
       };
       const res = initial ? await updateJobChargeAction(initial.id, input) : await addJobChargeAction(jobId, input);
       if (res.ok) {
@@ -72,7 +77,9 @@ export function ChargeForm({ jobId, side, options, initial }: { jobId: string; s
         <DialogHeader>
           <DialogTitle>{initial ? `Ubah charge ${label}` : `Tambah charge ${label}`}</DialogTitle>
           <DialogDescription>
-            {side === "SELLING" ? "Baris selling ditagih ke customer lewat menu Invoice." : "Baris buying dibayar lewat Voucher atau Vendor Bill, atau dicatat sebagai beban armada sendiri."}
+            {side === "SELLING"
+              ? "Baris selling ditagih ke customer lewat menu Invoice."
+              : "Baris buying dibayar lewat Voucher atau Vendor Bill. Otomatis muncul di Selling: reimburse dengan nominal sama, biaya lain dengan tarif rate card."}
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-3 sm:grid-cols-2">
@@ -126,8 +133,27 @@ export function ChargeForm({ jobId, side, options, initial }: { jobId: string; s
           <label className="flex items-center gap-2 text-sm sm:col-span-2">
             <input type="checkbox" checked={f.asReceipt} onChange={(e) => set({ asReceipt: e.target.checked })} className="h-4 w-4" /> Reimburse (as receipt), tidak masuk pendapatan dan margin
           </label>
+          {side === "BUYING" && (
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label htmlFor="cf-ppn">PPN masukan (IDR)</Label>
+              <MoneyInput id="cf-ppn" className="w-48" value={withPpn ? f.ppnIdr : ""} disabled={!withPpn} onChange={(v) => set({ ppnIdr: v })} placeholder="0" />
+              <p className="text-xs text-muted-foreground">
+                {withPpn
+                  ? "Isi nominal PPN sesuai invoice vendor bila faktur ditujukan ke perusahaan. Bila harga di invoice sudah termasuk PPN, isi Harga dengan nilai sebelum PPN. Kosongkan bila tanpa PPN."
+                  : "Reimburse: isi Harga dengan nilai termasuk PPN (faktur atas nama customer). Seluruhnya ditagihkan ke customer, bukan PPN Masukan."}
+              </p>
+            </div>
+          )}
         </div>
-        <p className="rounded-md bg-muted/50 px-3 py-2 text-sm">Nilai IDR: <span className="font-semibold tabular-nums">{formatIDR(idr)}</span></p>
+        <div className="space-y-0.5 rounded-md bg-muted/50 px-3 py-2 text-sm">
+          <p>Nilai IDR: <span className="font-semibold tabular-nums">{formatIDR(idr)}</span></p>
+          {ppnIdr > 0 && (
+            <>
+              <p>PPN masukan: <span className="font-semibold tabular-nums">{formatIDR(ppnIdr)}</span></p>
+              <p>Total dibayar ke vendor: <span className="font-semibold tabular-nums">{formatIDR(idr + ppnIdr)}</span></p>
+            </>
+          )}
+        </div>
         <DialogFooter>
           <DialogClose asChild><Button variant="ghost">Batal</Button></DialogClose>
           <Button onClick={submit} disabled={pending || !f.chargeCodeId}>{pending ? <Loader2 className="animate-spin" /> : null} Simpan</Button>

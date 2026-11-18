@@ -4,6 +4,21 @@ import type { JournalFilter } from "./journal-filter";
 const r2 = (n: number) => Math.round(n * 100) / 100;
 const startOf = (d: string) => new Date(`${d}T00:00:00+07:00`);
 const endOf = (d: string) => new Date(`${d}T23:59:59.999+07:00`);
+const dayKey = (d: Date) => new Date(d.getTime() + 7 * 3600_000).toISOString().slice(0, 10);
+
+/**
+ * Transaksi yang dibatalkan beserta jurnal baliknya disembunyikan dari buku besar (permintaan client 17 Nov),
+ * hanya bila keduanya bertanggal sama (WIB). Pasangan itu saling meniadakan di hari yang sama, jadi saldo awal,
+ * saldo berjalan, dan saldo akhir tetap sama dengan Trial Balance. Pembalikan di tanggal lain tetap tampil.
+ */
+export function isHiddenCancelPair(e: {
+  date: Date; isReversed: boolean; isReversal: boolean;
+  reversalOf: { date: Date } | null; reversedBy: { date: Date } | null;
+}): boolean {
+  if (e.isReversal && e.reversalOf) return dayKey(e.reversalOf.date) === dayKey(e.date);
+  if (e.isReversed && e.reversedBy) return dayKey(e.reversedBy.date) === dayKey(e.date);
+  return false;
+}
 
 export type JournalRow = {
   id: string; number: string; date: string; description: string; source: string;
@@ -73,20 +88,28 @@ export async function searchJournals(db: PrismaClient, f: JournalFilter, opts: {
 }
 
 /** Buku besar satu akun: saldo awal, mutasi dengan akun lawan, dan saldo akhir. */
-export async function getLedgerDetail(db: PrismaClient, accountId: string, from?: string, to?: string) {
+export async function getLedgerDetail(db: PrismaClient, accountId: string, from?: string, to?: string, opts: { showCancelled?: boolean } = {}) {
   const [opening, lines] = await Promise.all([
     from
       ? db.journalLine.aggregate({ where: { accountId, entry: { date: { lt: startOf(from) } } }, _sum: { debit: true, credit: true } })
       : Promise.resolve(null),
     db.journalLine.findMany({
       where: { accountId, ...(from || to ? { entry: { date: { ...(from ? { gte: startOf(from) } : {}), ...(to ? { lte: endOf(to) } : {}) } } } : {}) },
-      include: { entry: { include: { lines: { include: { account: { select: { code: true, name: true } } } } } } },
+      include: {
+        entry: {
+          include: {
+            lines: { include: { account: { select: { code: true, name: true } } } },
+            reversalOf: { select: { date: true } }, reversedBy: { select: { date: true } },
+          },
+        },
+      },
       orderBy: [{ entry: { date: "asc" } }, { entry: { number: "asc" } }],
     }),
   ]);
   const openingBalance = opening ? r2(Number(opening._sum.debit ?? 0) - Number(opening._sum.credit ?? 0)) : 0;
   let running = openingBalance, totalDebit = 0, totalCredit = 0;
-  const rows = lines.map((l) => {
+  const shown = opts.showCancelled ? lines : lines.filter((l) => !isHiddenCancelPair(l.entry));
+  const rows = shown.map((l) => {
     const debit = Number(l.debit), credit = Number(l.credit);
     running = r2(running + debit - credit); totalDebit += debit; totalCredit += credit;
     // Akun lawan: baris lain di jurnal yang sama, di sisi berlawanan.
@@ -100,4 +123,22 @@ export async function getLedgerDetail(db: PrismaClient, accountId: string, from?
     };
   });
   return { openingBalance, rows, totalDebit: r2(totalDebit), totalCredit: r2(totalCredit), closingBalance: running };
+}
+
+/**
+ * Buku besar beberapa akun sekaligus: semua akun postable dengan kode dari `fromCode` sampai `toCode`
+ * (mis. 1000 sampai 1999 = kepala 1). Akun tanpa saldo awal dan tanpa mutasi di periode itu dilewati.
+ */
+export async function getLedgerRange(db: PrismaClient, fromCode: string, toCode: string, from?: string, to?: string, opts: { showCancelled?: boolean } = {}) {
+  const [lo, hi] = fromCode <= toCode ? [fromCode, toCode] : [toCode, fromCode];
+  const accounts = await db.coaAccount.findMany({
+    where: { isPostable: true, code: { gte: lo, lte: hi } }, orderBy: { code: "asc" }, select: { id: true, code: true, name: true, type: true },
+  });
+  const out = [];
+  for (const a of accounts) {
+    const l = await getLedgerDetail(db, a.id, from, to, opts);
+    if (l.rows.length === 0 && Math.abs(l.openingBalance) < 0.005) continue;
+    out.push({ account: { code: a.code, name: a.name, type: a.type }, ...l });
+  }
+  return out;
 }

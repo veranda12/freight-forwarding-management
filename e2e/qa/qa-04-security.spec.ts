@@ -173,14 +173,22 @@ test.describe.serial("QA-04 Keamanan & otorisasi", () => {
     await adm.context().close();
   });
 
-  test("07 Operation me-replay batal invoice & catat pembayaran (direkam dari Finance) → ditolak", async ({ browser }) => {
+  test("07 Finance & Operation me-replay batal invoice (direkam dari Admin) → ditolak (batal khusus Admin)", async ({ browser }) => {
+    const adm = await (await browser.newContext()).newPage();
+    await login(adm, "admin@demo.com");
+    const [a, b] = await db.invoice.findMany({ where: { status: "UNPAID", amountPaid: 0, currency: "IDR" }, take: 2, orderBy: { number: "desc" } });
+    await adm.goto(`/invoices/${a.id}`);
+    await adm.getByRole("button", { name: /Batalkan/ }).click();
+    const cancel = await captureAction(adm, () => adm.getByRole("button", { name: /Ya, batalkan invoice/ }).click());
+    await expect(adm.getByText(/Invoice dibatalkan/)).toBeVisible();
+    await adm.context().close();
+
     const fin = await (await browser.newContext()).newPage();
     await login(fin, "finance@demo.com");
-    const [a, b] = await db.invoice.findMany({ where: { status: "UNPAID", amountPaid: 0, currency: "IDR" }, take: 2, orderBy: { number: "desc" } });
-    await fin.goto(`/invoices/${a.id}`);
-    await fin.getByRole("button", { name: /Batalkan/ }).click();
-    const cancel = await captureAction(fin, () => fin.getByRole("button", { name: /Ya, batalkan invoice/ }).click());
-    await expect(fin.getByText(/Invoice dibatalkan/)).toBeVisible();
+    await fin.goto(`/invoices/${b.id}`);
+    await expect(fin.getByRole("button", { name: /Batalkan/ })).toHaveCount(0);
+    expectRejected(await replayAction(fin, cancel, [b.id]), /izin/);
+    expect((await db.invoice.findUniqueOrThrow({ where: { id: b.id } })).status).toBe("UNPAID");
     await fin.context().close();
 
     const ops = await (await browser.newContext()).newPage();

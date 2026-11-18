@@ -8,16 +8,26 @@ export type RateItem = {
   chargeCodeId: string;
   chargeCode: { code: string; name: string; asReceipt: boolean };
   containerTypeId: string | null;
-  basis: "PER_CONTAINER" | "PER_BL" | "PER_KM_OVER";
-  condition: "ALWAYS" | "RED_LANE" | "OPTIONAL";
+  /** Kosong = tarif standar. Diisi = tarif khusus customer (pemanggil hanya mengirim baris milik customer job). */
+  customerId?: string | null;
+  /** Kosong = semua kota. Diisi = tarif kota itu (pemanggil hanya mengirim baris kota job dan baris tanpa kota). */
+  city?: string | null;
+  basis: "PER_CONTAINER" | "PER_BL" | "PER_KM_OVER" | "OVERWEIGHT";
+  condition: "ALWAYS" | "RED_LANE" | "NON_RED_LANE" | "OPTIONAL";
   price: number;
   thresholdKm: number | null;
+  /** OVERWEIGHT: berat maksimal per container (kg) yang sudah termasuk tarif dasar. */
+  thresholdKg: number | null;
   taxable: boolean;
   sortOrder: number;
 };
 
-/** `units` berisi nomor dan jarak tiap container (kosong = ikut jarak job), dipakai untuk surcharge jarak per container. */
-export type ContainerGroup = { containerTypeId: string | null; code: string; count: number; units?: { containerNo: string; distanceKm: number | null }[] };
+/**
+ * `units` berisi nomor, jarak (kosong = ikut jarak job), dan berat kotor tiap container,
+ * dipakai untuk surcharge jarak dan overweight per container.
+ */
+export type ContainerUnit = { containerNo: string; distanceKm: number | null; weightKg?: number | null };
+export type ContainerGroup = { containerTypeId: string | null; code: string; count: number; units?: ContainerUnit[] };
 
 export type GeneratedCharge = {
   chargeCodeId: string;
@@ -33,7 +43,7 @@ const idr = (n: number) => n.toLocaleString("en-US", { maximumFractionDigits: 0 
 
 type ContainerRow = {
   containerTypeId: string | null; containerType: { code: string } | null;
-  containerNo?: string; distanceKm?: Prisma.Decimal | number | null;
+  containerNo?: string; distanceKm?: Prisma.Decimal | number | null; grossWeightKg?: Prisma.Decimal | number | null;
 };
 
 /** Kelompokkan container job per tipe. */
@@ -43,22 +53,34 @@ export function groupContainers(containers: ContainerRow[]): ContainerGroup[] {
     const key = c.containerTypeId ?? "";
     const g = map.get(key) ?? { containerTypeId: c.containerTypeId, code: c.containerType?.code ?? "CONT", count: 0 };
     g.count++;
-    if (c.containerNo) (g.units ??= []).push({ containerNo: c.containerNo, distanceKm: c.distanceKm == null ? null : Number(c.distanceKm) });
+    if (c.containerNo) {
+      (g.units ??= []).push({
+        containerNo: c.containerNo, distanceKm: c.distanceKm == null ? null : Number(c.distanceKm),
+        weightKg: c.grossWeightKg == null ? null : Number(c.grossWeightKg),
+      });
+    }
     map.set(key, g);
   }
   return [...map.values()].sort((a, b) => a.code.localeCompare(b.code));
 }
 
+const SURCHARGE = new Set<RateItem["basis"]>(["PER_KM_OVER", "OVERWEIGHT"]);
+const ton = (kg: number) => (kg / 1000).toLocaleString("en-US", { maximumFractionDigits: 2 });
+
 /**
  * Selling charge dari rate card untuk satu job (murni, tanpa DB).
- * Tarif per container memakai baris khusus tipe container bila ada, selain itu baris umum (tanpa tipe).
- * Baris OPTIONAL tidak dibuat; baris RED_LANE hanya untuk jalur merah.
- * Surcharge jarak dihitung per container: jarak container bila diisi, selain itu jarak job. Container
- * dengan jarak berbeda menjadi baris terpisah yang mencantumkan nomor containernya.
+ * Urutan tarif yang dipakai per charge: khusus customer dan tipe container, khusus customer semua tipe,
+ * standar tipe container, lalu standar semua tipe. Charge yang hanya punya tarif customer ikut ditagih juga.
+ * Baris OPTIONAL tidak dibuat; baris RED_LANE hanya untuk jalur merah; baris NON_RED_LANE untuk selain jalur merah
+ * (jalur belum diisi ikut dibuat, sama seperti sebelum ada kondisi ini).
+ *
+ * Surcharge dihitung per container: jarak container bila diisi (selain itu jarak job) dan berat kotornya.
+ * Kelebihan jarak dan kelebihan berat tidak ditagih dua-duanya: per container diambil yang nominalnya
+ * lebih besar. Container dengan hasil berbeda menjadi baris terpisah yang mencantumkan nomor containernya.
  */
 export function buildRateCardCharges(items: RateItem[], groups: ContainerGroup[], lane: string | null, distanceKm: number | null): GeneratedCharge[] {
   const active = items
-    .filter((i) => i.condition === "ALWAYS" || (i.condition === "RED_LANE" && lane === "RED"))
+    .filter((i) => i.condition === "ALWAYS" || (i.condition === "RED_LANE" && lane === "RED") || (i.condition === "NON_RED_LANE" && lane !== "RED"))
     .sort((a, b) => a.sortOrder - b.sortOrder);
   const needsContainers = active.some((i) => i.basis !== "PER_BL");
   if (needsContainers && groups.length === 0) throw new Error("Tambahkan container (beserta tipenya) di tab Containers dulu.");
@@ -72,56 +94,138 @@ export function buildRateCardCharges(items: RateItem[], groups: ContainerGroup[]
     if (!byKey.has(k)) { byKey.set(k, []); order.push(k); }
     byKey.get(k)!.push(i);
   }
+  const typeMatch = (r: RateItem, g: ContainerGroup) => !!r.containerTypeId && r.containerTypeId === g.containerTypeId;
+  const rateFor = (rows: RateItem[], g: ContainerGroup) =>
+    bestRate(rows.filter((r) => !r.containerTypeId || typeMatch(r, g)), (r) => typeMatch(r, g));
 
-  // Jarak efektif tiap container per tipe, dikelompokkan per km.
-  const kmGroups = (g: ContainerGroup) => {
-    const units = g.units?.length ? g.units : Array.from({ length: g.count }, () => ({ containerNo: "", distanceKm: null }));
-    const map = new Map<number, string[]>();
-    for (const u of units) {
-      const km = u.distanceKm ?? distanceKm;
-      if (km == null) throw new Error(u.containerNo ? `Isi jarak container ${u.containerNo} atau jarak tujuan job dulu.` : "Isi jarak gudang (km) di Clearance & Delivery dulu.");
-      map.set(km, [...(map.get(km) ?? []), u.containerNo]);
+  const unitsOf = (g: ContainerGroup): ContainerUnit[] =>
+    g.units?.length ? g.units : Array.from({ length: g.count }, () => ({ containerNo: "", distanceKm: null, weightKg: null }));
+
+  // Surcharge per container: kandidat dari tiap tarif jarak/overweight, diambil yang terbesar.
+  type Pick = { item: RateItem; amount: number; description: string };
+  const surchargeKeys = order.filter((k) => SURCHARGE.has(byKey.get(k)![0].basis));
+  const pickFor = (g: ContainerGroup, u: ContainerUnit): { pick: Pick | null; sig: string } => {
+    let pick: Pick | null = null;
+    const sig: string[] = [];
+    for (const k of surchargeKeys) {
+      const rows = byKey.get(k)!;
+      const item = rateFor(rows, g);
+      if (rows[0].basis === "PER_KM_OVER") {
+        if (!item) throw new Error(`Rate card ${rows[0].chargeCode.code} belum punya tarif untuk container ${g.code}.`);
+        const km = u.distanceKm ?? distanceKm;
+        if (km == null) throw new Error(u.containerNo ? `Isi jarak container ${u.containerNo} di tab Containers dulu.` : "Isi jarak (km) tiap container di tab Containers dulu.");
+        sig.push(`km${km}`);
+        const threshold = item.thresholdKm ?? 0;
+        const extraKm = r2(Math.max(0, km - threshold));
+        const amount = r2(extraKm * item.price);
+        if (extraKm > 0 && (!pick || amount > pick.amount)) {
+          pick = { item, amount, description: `${extraKm} km over ${threshold} km @ IDR ${idr(item.price)}/km` };
+        }
+      } else {
+        // Overweight hanya untuk tipe yang punya tarifnya; tipe lain tidak dicek beratnya.
+        if (!item) continue;
+        if (u.weightKg == null) throw new Error(u.containerNo ? `Isi berat (gross weight) container ${u.containerNo} dulu untuk cek overweight.` : `Isi berat tiap container ${g.code} di tab Containers dulu untuk cek overweight.`);
+        const limit = item.thresholdKg ?? 0;
+        const over = u.weightKg > limit;
+        sig.push(`ow${over}`);
+        if (over && (!pick || item.price > pick.amount)) {
+          pick = { item, amount: r2(item.price), description: `Overweight ${ton(u.weightKg)} ton over ${ton(limit)} ton` };
+        }
+      }
     }
-    return [...map.entries()].sort((a, b) => a[0] - b[0]);
+    return { pick, sig: sig.join("|") };
   };
-  const needsKm = active.some((i) => i.basis === "PER_KM_OVER");
-  const distinctKm = needsKm ? new Set(groups.flatMap((g) => kmGroups(g).map(([km]) => km))).size : 0;
+  const picks = new Map<ContainerGroup, { unit: ContainerUnit; pick: Pick | null; sig: string }[]>();
+  if (surchargeKeys.length) for (const g of groups) picks.set(g, unitsOf(g).map((unit) => ({ unit, ...pickFor(g, unit) })));
+  const distinctSig = new Set([...picks.values()].flat().map((p) => p.sig)).size;
 
   const out: GeneratedCharge[] = [];
+  let surchargeDone = false;
   for (const k of order) {
     const rows = byKey.get(k)!;
     const first = rows[0];
     const base = { chargeCodeId: first.chargeCodeId, asReceipt: first.chargeCode.asReceipt };
     if (first.basis === "PER_BL") {
-      out.push({ ...base, qty: 1, unitPrice: r2(first.price), taxable: first.taxable, unitLabel: "B/L", description: null });
+      const bl = bestRate(rows, () => false) ?? first;
+      out.push({ ...base, qty: 1, unitPrice: r2(bl.price), taxable: bl.taxable, unitLabel: "B/L", description: null });
+      continue;
+    }
+    if (SURCHARGE.has(first.basis)) {
+      // Semua surcharge keluar sekali, di posisi tarif surcharge pertama.
+      if (surchargeDone) continue;
+      surchargeDone = true;
+      for (const g of groups) {
+        const lines = new Map<string, { pick: Pick; nos: string[] }>();
+        for (const p of picks.get(g) ?? []) {
+          if (!p.pick) continue;
+          const key = `${p.pick.item.chargeCodeId}|${p.pick.amount}|${p.pick.description}`;
+          const l = lines.get(key) ?? { pick: p.pick, nos: [] };
+          l.nos.push(p.unit.containerNo);
+          lines.set(key, l);
+        }
+        for (const { pick, nos } of [...lines.values()].sort((a, b) => a.pick.amount - b.pick.amount)) {
+          const listed = distinctSig > 1 && nos.every(Boolean) ? `${nos.join(", ")}: ` : "";
+          out.push({
+            chargeCodeId: pick.item.chargeCodeId, asReceipt: pick.item.chargeCode.asReceipt, qty: nos.length, unitPrice: pick.amount,
+            taxable: pick.item.taxable, unitLabel: g.code, description: `${listed}${pick.description}`,
+          });
+        }
+      }
       continue;
     }
     for (const g of groups) {
-      const item = rows.find((r) => r.containerTypeId && r.containerTypeId === g.containerTypeId) ?? rows.find((r) => !r.containerTypeId);
+      const item = rateFor(rows, g);
       if (!item) throw new Error(`Rate card ${first.chargeCode.code} belum punya tarif untuk container ${g.code}.`);
-      if (item.basis === "PER_CONTAINER") {
-        out.push({ ...base, qty: g.count, unitPrice: r2(item.price), taxable: item.taxable, unitLabel: g.code, description: null });
-        continue;
-      }
-      // PER_KM_OVER: kelebihan km di atas batas, dikali tarif per km, per container.
-      const threshold = item.thresholdKm ?? 0;
-      for (const [km, nos] of kmGroups(g)) {
-        const extraKm = r2(Math.max(0, km - threshold));
-        if (extraKm <= 0) continue;
-        const listed = distinctKm > 1 && nos.every(Boolean) ? `${nos.join(", ")}: ` : "";
-        out.push({
-          ...base, qty: nos.length, unitPrice: r2(extraKm * item.price), taxable: item.taxable, unitLabel: g.code,
-          description: `${listed}${extraKm} km over ${threshold} km @ IDR ${idr(item.price)}/km`,
-        });
-      }
+      out.push({ ...base, qty: g.count, unitPrice: r2(item.price), taxable: item.taxable, unitLabel: g.code, description: null });
     }
   }
   return out;
 }
 
+/**
+ * Tarif yang paling khusus: customer, lalu kota, lalu tipe container. Urutannya: customer+kota, customer,
+ * standar+kota, standar; di tiap tingkat tarif tipe container didahulukan. Seri: urutan rate card. Murni.
+ */
+export function bestRate<T extends { customerId?: string | null; city?: string | null }>(rows: T[], typeMatch: (r: T) => boolean): T | undefined {
+  let best: T | undefined;
+  let bestScore = -1;
+  for (const r of rows) {
+    const score = (r.customerId ? 4 : 0) + (r.city ? 2 : 0) + (typeMatch(r) ? 1 : 0);
+    if (score > bestScore) { best = r; bestScore = score; }
+  }
+  return best;
+}
+
+/**
+ * Kota tarif sebuah job: impor dari Port of Discharge, selain itu dari Port of Loading
+ * (mis. Tanjung Priok = Jakarta, Tanjung Perak = Surabaya). Tanpa pelabuhan: null (hanya tarif tanpa kota). Murni.
+ */
+export function jobRateCity(job: { direction: string; pol?: { city: string | null } | null; pod?: { city: string | null } | null }): string | null {
+  const port = job.direction === "IMPORT" ? job.pod : job.pol;
+  return port?.city?.trim() || null;
+}
+
+/** Filter Prisma tarif yang berlaku: tarif standar dan tarif customer job, tanpa kota atau kota job. */
+export function rateCardScope(customerId: string | null, city: string | null): Prisma.RateCardItemWhereInput {
+  return {
+    isActive: true,
+    AND: [
+      { OR: [{ customerId: null }, ...(customerId ? [{ customerId }] : [])] },
+      { OR: [{ city: null }, ...(city ? [{ city }] : [])] },
+    ],
+  };
+}
+
+/** Kota tarif job dari id-nya (mengambil pelabuhan). */
+export async function jobRateCityById(db: Pick<PrismaClient, "job">, jobId: string): Promise<string | null> {
+  const job = await db.job.findUnique({ where: { id: jobId }, select: { direction: true, pol: { select: { city: true } }, pod: { select: { city: true } } } });
+  return job ? jobRateCity(job) : null;
+}
+
 export function toRateItem(r: {
   id: string; chargeCodeId: string; chargeCode: { code: string; name: string; asReceipt: boolean }; containerTypeId: string | null;
-  basis: RateItem["basis"]; condition: RateItem["condition"]; price: Prisma.Decimal | number; thresholdKm: number | null; taxable: boolean; sortOrder: number;
+  customerId?: string | null; city?: string | null; basis: RateItem["basis"]; condition: RateItem["condition"]; price: Prisma.Decimal | number; thresholdKm: number | null;
+  thresholdKg: number | null; taxable: boolean; sortOrder: number;
 }): RateItem {
   return { ...r, price: Number(r.price) };
 }
@@ -134,30 +238,48 @@ export async function applyRateCard(db: PrismaClient, jobId: string): Promise<nu
   return db.$transaction(async (tx) => {
     const job = await tx.job.findUnique({
       where: { id: jobId },
-      include: { containers: { include: { containerType: true } } },
+      include: { containers: { include: { containerType: true } }, pol: { select: { city: true } }, pod: { select: { city: true } } },
     });
     if (!job) throw new Error("Job tidak ditemukan.");
     if (job.status === "CANCELLED") throw new Error("Job sudah dibatalkan.");
     const billedRateCard = await tx.costingLine.count({ where: { jobId, fromRateCard: true, invoiced: true } });
     if (billedRateCard > 0) throw new Error("Charge rate card job ini sudah ditagih. Batalkan invoicenya dulu untuk menghitung ulang.");
+    // Jalur menentukan charge yang ditagih (mis. Red Line hanya jalur merah), jadi wajib dipilih supaya tidak salah tagih.
+    if (!job.customsLane) throw new Error("Jalur bea cukai belum dipilih. Pilih jalur hijau, kuning, atau merah di halaman Job, bagian Clearance, lalu hitung lagi.");
 
-    const items = await tx.rateCardItem.findMany({ where: { isActive: true }, include: { chargeCode: true } });
+    // Tarif standar ditambah tarif khusus customer job ini, tanpa kota atau kota pelabuhan job; customer/kota lain tidak ikut.
+    const items = await tx.rateCardItem.findMany({ where: rateCardScope(job.customerId, jobRateCity(job)), include: { chargeCode: true } });
     if (items.length === 0) throw new Error("Rate card masih kosong.");
     const charges = buildRateCardCharges(items.map(toRateItem), groupContainers(job.containers), job.customsLane, job.distanceKm == null ? null : Number(job.distanceKm));
 
     await tx.costingLine.deleteMany({ where: { jobId, side: "SELLING", fromRateCard: true, invoiced: false } });
+    // Baris Rp 0 yang dibuat dari biaya buying saat tarif belum bisa dihitung (mis. container belum ada)
+    // diganti hasil rate card untuk charge yang sama, supaya tidak dobel.
+    const generatedCodes = [...new Set(charges.map((c) => c.chargeCodeId))];
+    await tx.costingLine.deleteMany({
+      where: {
+        jobId, side: "SELLING", fromRateCard: false, invoiced: false, buyingLineId: null,
+        actualIdr: 0, unitLabel: null, chargeCodeId: { in: generatedCodes },
+      },
+    });
     // Baris rate card yang sudah diubah manual (misalnya angka kuitansi) dipertahankan, tidak dibuat dobel.
-    // Surcharge jarak bisa punya beberapa baris per tipe (beda jarak), jadi dicocokkan juga dengan keterangannya.
+    // Surcharge jarak/overweight bisa punya beberapa baris per tipe (beda jarak atau berat), jadi dicocokkan juga dengan keterangannya.
     const manual = await tx.costingLine.findMany({
       where: { jobId, side: "SELLING", fromRateCard: false, unitLabel: { not: null } },
       select: { id: true, chargeCodeId: true, unitLabel: true, description: true },
     });
     const keptLine = (c: GeneratedCharge) => manual.find((m) => m.chargeCodeId === c.chargeCodeId && m.unitLabel === c.unitLabel && (!c.description || m.description === c.description));
+    // Charge reimburse yang sellingnya sudah dibuat dari biaya buying (angka kuitansi) tidak ditambah estimasi lagi.
+    // Tarif jasa (bukan reimburse) tetap dibuat walau ada kuitansi dengan charge yang sama.
+    const fromBuying = new Set((await tx.costingLine.findMany({
+      where: { jobId, side: "SELLING", buyingLineId: { not: null } }, select: { chargeCodeId: true },
+    })).map((l) => l.chargeCodeId));
 
     // Urutan baris mengikuti rate card (termasuk baris yang dipertahankan), lalu baris lain di belakangnya.
     const ordered: string[] = [];
     let created = 0;
     for (const c of charges) {
+      if (c.asReceipt && fromBuying.has(c.chargeCodeId)) continue;
       const kept = keptLine(c);
       if (kept) { ordered.push(kept.id); continue; }
       created++;
@@ -180,4 +302,69 @@ export async function applyRateCard(db: PrismaClient, jobId: string): Promise<nu
     await recalcJobTotals(tx, jobId);
     return created;
   });
+}
+
+/**
+ * Setelah jalur bea cukai diganti: bila selling job sudah pernah dihitung dari rate card, hitung ulang
+ * supaya tarif jalur lama (mis. Green Light) diganti tarif jalur baru (mis. Red Line + Behandle).
+ * Belum pernah dihitung: tidak ada yang dibuat. Gagal (mis. sudah ditagih): pesan dikembalikan, jalur tetap tersimpan.
+ */
+export async function reapplyRateCardAfterLaneChange(db: PrismaClient, jobId: string): Promise<{ recalculated: boolean; error?: string }> {
+  const lines = await db.costingLine.count({ where: { jobId, side: "SELLING", fromRateCard: true } });
+  if (lines === 0) return { recalculated: false };
+  try {
+    await applyRateCard(db, jobId);
+    return { recalculated: true };
+  } catch (e) {
+    return { recalculated: false, error: e instanceof Error ? e.message : "Gagal menghitung ulang rate card." };
+  }
+}
+
+/** Unit cetak dari dasar hitung rate card: per B/L jadi "B/L", per container jadi tipe container job (campuran: "20GP/40HC"). */
+export function unitFromBasis(basis: RateItem["basis"], groups: ContainerGroup[]): string | null {
+  if (basis === "PER_BL") return "B/L";
+  return groups.length ? groups.map((g) => g.code).join("/") : null;
+}
+
+/**
+ * Unit untuk baris yang tidak membawa unit, mis. reimburse dari biaya buying (LOLO, Storage, Parking, Behandle):
+ * mengikuti dasar hitung charge itu di rate card, sesuai kolom Unit di rate card client (permintaan 13 Nov).
+ * Tarif khusus customer didahulukan. Charge tanpa tarif tidak masuk peta (unit tetap kosong).
+ */
+export async function rateCardUnits(
+  db: Pick<PrismaClient, "rateCardItem">, customerId: string | null, chargeCodeIds: string[], groups: ContainerGroup[], city: string | null = null,
+): Promise<Map<string, string>> {
+  const ids = [...new Set(chargeCodeIds)];
+  const out = new Map<string, string>();
+  if (!ids.length) return out;
+  const items = await db.rateCardItem.findMany({
+    where: { ...rateCardScope(customerId, city), chargeCodeId: { in: ids } },
+    select: { chargeCodeId: true, basis: true, customerId: true, city: true }, orderBy: { sortOrder: "asc" },
+  });
+  for (const id of ids) {
+    const pick = bestRate(items.filter((i) => i.chargeCodeId === id), () => false);
+    const unit = pick ? unitFromBasis(pick.basis, groups) : null;
+    if (unit) out.set(id, unit);
+  }
+  return out;
+}
+
+/**
+ * Unit tampilan per baris (invoice bisa lintas job): baris yang sudah punya unit dipakai apa adanya,
+ * yang kosong diisi dari rate card sesuai container job baris itu.
+ */
+export async function displayUnits(
+  db: PrismaClient, customerId: string | null, lines: { chargeCodeId: string; unitLabel: string | null; jobId: string | null }[],
+): Promise<(string | null)[]> {
+  const need = lines.filter((l) => !l.unitLabel);
+  if (!need.length) return lines.map((l) => l.unitLabel);
+  const jobIds = [...new Set(need.flatMap((l) => (l.jobId ? [l.jobId] : [])))];
+  const containers = jobIds.length ? await db.jobContainer.findMany({ where: { jobId: { in: jobIds } }, include: { containerType: true } }) : [];
+  const maps = new Map<string, Map<string, string>>();
+  for (const jobId of jobIds) {
+    const groups = groupContainers(containers.filter((c) => c.jobId === jobId));
+    maps.set(jobId, await rateCardUnits(db, customerId, need.filter((l) => l.jobId === jobId).map((l) => l.chargeCodeId), groups, await jobRateCityById(db, jobId)));
+  }
+  const noJob = need.some((l) => !l.jobId) ? await rateCardUnits(db, customerId, need.filter((l) => !l.jobId).map((l) => l.chargeCodeId), []) : new Map<string, string>();
+  return lines.map((l) => l.unitLabel ?? (l.jobId ? maps.get(l.jobId) : noJob)?.get(l.chargeCodeId) ?? null);
 }

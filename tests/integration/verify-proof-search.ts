@@ -6,14 +6,13 @@
  */
 import { PrismaClient, Prisma } from "@prisma/client";
 import { PRISMA_CLIENT_OPTIONS } from "../../src/lib/prisma-options";
-import { DEFAULT_ROLES, permissionsOfRole } from "../../src/lib/permissions";
-import type { SessionUser } from "../../src/lib/auth-helpers";
-import { invoiceScope } from "../../src/lib/data-scope";
 import { createBillCore, recordVendorPaymentCore } from "../../src/lib/payables";
 import { createInvoiceCore } from "../../src/lib/receivables";
 import { recalcJobTotals } from "../../src/lib/job-charges";
-import { setLockKey } from "../../src/lib/period-lock";
-import { parseProofQuery, proofKindsFor, searchProofs, type ProofKind, type ProofResult } from "../../src/lib/proof-search";
+import { lockSnapshot, restoreLock, lockMonth } from "./period-lock-helper";
+import { parseProofQuery, proofJournals, proofKindsFor, searchProofs, type ProofKind, type ProofResult } from "../../src/lib/proof-search";
+import { proofScopes } from "../../src/lib/data-scope";
+import { sessionFromUser, type SessionUser } from "../../src/lib/auth-helpers";
 
 const db = new PrismaClient(PRISMA_CLIENT_OPTIONS);
 let failures = 0;
@@ -30,18 +29,18 @@ async function line(jobId: string, side: "SELLING" | "BUYING", chargeCodeId: str
   return l;
 }
 
-// Branch MariaDB: role bawaan dari katalog Role Management.
-const roleUser = (key: string, id = key): SessionUser => {
-  // role sistem (ADMIN/SUPER_ADMIN) dihitung dari kode, role bawaan dari katalog — sama dengan getCurrentUser
-  const role = DEFAULT_ROLES.find((r) => r.key === key);
-  const perms = permissionsOfRole({ key, isSystem: !role, permissions: role?.permissions ?? [] });
-  return { id, name: key, email: key, roleId: key, roleKey: key, roleName: key, isAdmin: !role, isSuperAdmin: key === "SUPER_ADMIN", permissions: new Set(perms) };
-};
-const FINANCE = proofKindsFor(roleUser("FINANCE"));
-async function find(text: string, kinds: readonly ProofKind[] = FINANCE): Promise<ProofResult[]> {
+/** User seed sebagai SessionUser (izin dari role di DB, sama seperti getCurrentUser). */
+async function sessionOf(email: string): Promise<SessionUser> {
+  const u = await db.user.findUniqueOrThrow({ where: { email }, include: { appRole: true } });
+  return sessionFromUser(u);
+}
+
+let FINANCE: SessionUser;
+/** Cari seperti halaman /proofs: jenis menurut izin user, setiap jenis dibatasi data miliknya. */
+async function find(text: string, user: SessionUser = FINANCE): Promise<ProofResult[]> {
   const q = parseProofQuery(text);
   if (!q) throw new Error(`kata kunci tidak sah: ${text}`);
-  return searchProofs(db, q, kinds, { limit: 20 });
+  return searchProofs(db, q, proofKindsFor(user), { limit: 20, scopes: proofScopes(user) });
 }
 const ids = (r: ProofResult[], kind: ProofKind) => r.find((x) => x.kind === kind)?.hits.map((h) => h.id) ?? [];
 
@@ -49,7 +48,8 @@ async function main() {
   const dbName = (await db.$queryRaw<{ d: string }[]>`SELECT DATABASE() AS d`)[0].d;
   if (dbName === "ffms" || dbName === "ffms_pgcheck") throw new Error(`Jangan jalankan uji ini di database ${dbName}.`);
   console.log(`   database: ${dbName}`);
-  await setLockKey(db, null);
+  await lockMonth(db, null);
+  FINANCE = await sessionOf("finance@demo.com");
 
   const ts = Date.now();
   const customer = await db.customer.findFirstOrThrow({ orderBy: { code: "asc" } });
@@ -108,19 +108,40 @@ async function main() {
   r = await find(inv.number);
   ok(ids(r, "invoice").includes(invId), "no. invoice → invoice");
 
-  const sales = proofKindsFor(roleUser("SALES"));
+  // Batas data: Sales hanya jenis invoice, dan hanya invoice job miliknya (Sales PIC / pembuat).
+  const sales = await sessionOf("sales@demo.com");
   r = await find(jA.number, sales);
-  ok(r.every((x) => x.kind === "invoice") && ids(r, "invoice").includes(invId), "role SALES: hanya invoice yang dicari");
-  // batas data (MariaDB/Role Management): Sales hanya menemukan invoice job miliknya
-  const [owner, stranger] = await db.user.findMany({ where: { appRole: { key: "SALES" } }, take: 2, orderBy: { email: "asc" } });
-  await db.job.update({ where: { id: jA.id }, data: { salesPicId: owner.id } });
-  const qA = parseProofQuery(jA.number)!;
-  const asOwner = await searchProofs(db, qA, sales, { limit: 20, scopes: { invoice: invoiceScope(roleUser("SALES", owner.id)) } });
-  const asStranger = await searchProofs(db, qA, sales, { limit: 20, scopes: { invoice: invoiceScope(roleUser("SALES", stranger.id)) } });
-  ok(ids(asOwner, "invoice").includes(invId), "batas data: Sales PIC job menemukan invoice-nya");
-  ok(!ids(asStranger, "invoice").includes(invId), "batas data: Sales lain tidak menemukan invoice itu");
+  ok(r.every((x) => x.kind === "invoice"), "role SALES: hanya jenis invoice yang dicari");
+  ok(!ids(r, "invoice").includes(invId), "batas data: SALES tidak melihat invoice job yang bukan miliknya");
+  r = await find(inv.number, sales);
+  ok(!ids(r, "invoice").includes(invId), "batas data: no. invoice orang lain pun tidak ditemukan SALES");
+  await db.job.update({ where: { id: jA.id }, data: { salesPicId: sales.id } });
+  r = await find(jA.number, sales);
+  ok(ids(r, "invoice").includes(invId), "batas data: setelah SALES jadi Sales PIC job A, invoice-nya terlihat");
+  const ops = await sessionOf("ops@demo.com");
+  r = await find(bill.number, ops);
+  ok(r.length === 0, "role OPERATION: tidak ada jenis bukti yang dicari");
   r = await find("zz-tidak-ada-xx");
   ok(r.every((x) => x.hits.length === 0), "kata acak → kosong");
+
+  // Periode tanggal tanpa kata kunci (zona Jakarta), dan gabungan kata kunci + periode.
+  const day = new Date(bill.date.getTime() + 7 * 3600 * 1000).toISOString().slice(0, 10);
+  const nextDay = new Date(bill.date.getTime() + 31 * 3600 * 1000).toISOString().slice(0, 10);
+  r = await searchProofs(db, null, ["bill"], { limit: 1000, from: day, to: day });
+  ok(ids(r, "bill").includes(billId), `periode ${day} saja → bill hari itu`);
+  ok((r[0]?.hits ?? []).every((h) => new Date(new Date(h.date).getTime() + 7 * 3600 * 1000).toISOString().slice(0, 10) === day), "periode saja → semua hasil di tanggal itu");
+  r = await searchProofs(db, parseProofQuery(vendorRef), proofKindsFor(FINANCE), { limit: 20, scopes: proofScopes(FINANCE), from: nextDay, to: nextDay });
+  ok(!ids(r, "bill").includes(billId), "ref vendor + periode hari berikutnya → bill tidak ikut");
+  r = await searchProofs(db, parseProofQuery(vendorRef), proofKindsFor(FINANCE), { limit: 20, scopes: proofScopes(FINANCE), from: day });
+  ok(ids(r, "bill").includes(billId), "ref vendor + periode mulai hari itu → bill ikut");
+
+  // Alur jurnal: baris Debit/Kredit seimbang.
+  const trail = await proofJournals(db, [bill.journalEntryId!, pay.journalEntryId!]);
+  const balanced = (id: string) => {
+    const j = trail[id]?.[0];
+    return !!j && j.lines.length >= 2 && Math.abs(j.lines.reduce((s, l) => s + l.debit - l.credit, 0)) < 0.005;
+  };
+  ok(balanced(bill.journalEntryId!) && balanced(pay.journalEntryId!), "jurnal bill & pembayaran: baris Debit = Kredit");
 
   const t0 = Date.now();
   await find("2026");

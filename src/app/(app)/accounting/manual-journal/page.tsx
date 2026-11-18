@@ -2,7 +2,7 @@ import { requirePerm, hasPerm } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
 import { listManualJournals, manualAccountInfo } from "@/lib/manual-journal";
 import { formatIDR } from "@/lib/format";
-import { getLockKey } from "@/lib/period-lock";
+import { getClosedMonths } from "@/lib/period-lock";
 import { PageHeader } from "@/components/page-header";
 import { StatStrip } from "@/components/stat-strip";
 import { ManualJournalPanel } from "./manual-journal-panel";
@@ -33,7 +33,7 @@ export default async function ManualJournalPage({ searchParams }: { searchParams
         { label: "Dibatalkan", value: entries.length - active.length, tone: entries.length - active.length ? "warning" : undefined },
       ]} />
       <ManualJournalPanel
-        accounts={accounts} entries={entries} today={today} lockKey={await getLockKey(prisma)}
+        accounts={accounts} entries={entries} today={today} closedMonths={await getClosedMonths(prisma)}
         canCreate={hasPerm(user, "manualJournal.create")} canCancel={hasPerm(user, "manualJournal.cancel")} canEdit={hasPerm(user, "manualJournal.edit")}
         editId={hasPerm(user, "manualJournal.edit") && entries.some((e) => e.id === sp.edit) ? sp.edit : undefined}
       />

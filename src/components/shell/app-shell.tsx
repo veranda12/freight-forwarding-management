@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Ship, Menu, PanelLeftClose, PanelLeft, LogOut, ChevronDown } from "lucide-react";
-import { NAV } from "@/config/nav";
+import { NAV, groupItems, type NavItem } from "@/config/nav";
 import { PRODUCT } from "@/config/product";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -15,7 +15,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { GlobalSearch } from "./global-search";
 import { ThemeToggle } from "./theme-toggle";
-import { TabsProvider, TabBar } from "./tabs-context";
+import { TabsProvider, TabBar, TabPanels } from "./tabs-context";
+import { IdleGuard } from "./idle-guard";
 import { logoutAction } from "@/app/(app)/actions";
 
 type ShellUser = { name: string; email: string; roleName: string };
@@ -76,16 +77,49 @@ export function AppShell({
   const groups = NAV.map((g) => ({
     ...g,
     items: g.items.filter((i) => allow.has(i.perm)),
-  })).filter((g) => g.items.length > 0);
+    subgroups: (g.subgroups ?? [])
+      .map((s) => ({ ...s, items: s.items.filter((i) => allow.has(i.perm)) }))
+      .filter((s) => s.items.length > 0),
+  })).filter((g) => g.items.length + g.subgroups.length > 0);
   // menu aktif = href terpanjang yang cocok (/domestic vs /domestic/check)
   const activeHref = groups
-    .flatMap((g) => g.items.map((i) => i.href))
+    .flatMap((g) => groupItems(g).map((i) => i.href))
     .filter((h) => pathname === h || pathname.startsWith(h + "/"))
     .sort((a, b) => b.length - a.length)[0];
 
-  const activeGroup = groups.find((g) => g.items.some((i) => i.href === activeHref))?.label;
-  // grup yang terbuka: pilihan pengguna, atau grup aktif bila belum pernah diatur
-  const isGroupOpen = (label: string) => groupState[label] ?? label === activeGroup;
+  const activeGroup = groups.find((g) => groupItems(g).some((i) => i.href === activeHref))?.label;
+  const activeSub = groups
+    .flatMap((g) => g.subgroups.map((s) => ({ key: `${g.label}/${s.label}`, s })))
+    .find(({ s }) => s.items.some((i) => i.href === activeHref))?.key;
+  // grup atau sub-grup yang terbuka: pilihan pengguna, atau yang berisi menu aktif bila belum pernah diatur
+  const isGroupOpen = (label: string) => groupState[label] ?? (label === activeGroup || label === activeSub);
+
+  const renderItems = (items: NavItem[]) => (
+    <ul className="mt-0.5 space-y-0.5">
+      {items.map((item) => {
+        const active = item.href === activeHref;
+        const Icon = item.icon;
+        return (
+          <li key={item.href}>
+            <Link
+              href={item.href}
+              title={collapsed ? item.label : undefined}
+              className={cn(
+                "flex items-center gap-3 rounded-md px-2 py-2 text-sm font-medium transition-colors",
+                active
+                  ? "bg-primary text-primary-foreground"
+                  : "text-foreground/70 hover:bg-accent hover:text-accent-foreground",
+                collapsed && "justify-center"
+              )}
+            >
+              <Icon className="h-4 w-4 shrink-0" />
+              {!collapsed && <span className="truncate">{item.label}</span>}
+            </Link>
+          </li>
+        );
+      })}
+    </ul>
+  );
 
   const SidebarNav = (
     <nav className="flex-1 space-y-2 overflow-y-auto scrollbar-thin px-3 py-4">
@@ -104,31 +138,30 @@ export function AppShell({
                 <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", !open && "-rotate-90")} />
               </button>
             )}
-            {(collapsed || open) && (
-              <ul className="mt-0.5 space-y-0.5">
-                {group.items.map((item) => {
-                  const active = item.href === activeHref;
-                  const Icon = item.icon;
+            {/* Sidebar diciutkan: semua ikon tampil berurutan tanpa judul sub-grup. */}
+            {collapsed && renderItems(groupItems(group))}
+            {!collapsed && open && (
+              <>
+                {group.items.length > 0 && renderItems(group.items)}
+                {group.subgroups.map((sub) => {
+                  const key = `${group.label}/${sub.label}`;
+                  const subOpen = isGroupOpen(key);
                   return (
-                    <li key={item.href}>
-                      <Link
-                        href={item.href}
-                        title={collapsed ? item.label : undefined}
-                        className={cn(
-                          "flex items-center gap-3 rounded-md px-2 py-2 text-sm font-medium transition-colors",
-                          active
-                            ? "bg-primary text-primary-foreground"
-                            : "text-foreground/70 hover:bg-accent hover:text-accent-foreground",
-                          collapsed && "justify-center"
-                        )}
+                    <div key={key} className="mt-1">
+                      <button
+                        type="button"
+                        onClick={() => toggleGroup(key, subOpen)}
+                        aria-expanded={subOpen}
+                        className="flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-xs font-medium text-foreground/80 hover:bg-accent hover:text-foreground"
                       >
-                        <Icon className="h-4 w-4 shrink-0" />
-                        {!collapsed && <span className="truncate">{item.label}</span>}
-                      </Link>
-                    </li>
+                        <ChevronDown className={cn("h-3.5 w-3.5 shrink-0 transition-transform", !subOpen && "-rotate-90")} />
+                        <span>{sub.label}</span>
+                      </button>
+                      {subOpen && <div className="ml-3 border-l pl-2">{renderItems(sub.items)}</div>}
+                    </div>
                   );
                 })}
-              </ul>
+              </>
             )}
           </div>
         );
@@ -145,6 +178,7 @@ export function AppShell({
 
   return (
     <TabsProvider allowed={allowed} owner={user.email}>
+      <IdleGuard />
     <div className="flex min-h-screen bg-background">
       {/* Sidebar desktop */}
       <aside
@@ -220,7 +254,7 @@ export function AppShell({
         <main className="flex-1 p-4 sm:p-6">
           <div className="mx-auto w-full max-w-[1400px] space-y-6">
             <TabBar />
-            {children}
+            <TabPanels>{children}</TabPanels>
           </div>
         </main>
       </div>

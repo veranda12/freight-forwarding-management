@@ -186,6 +186,20 @@ enum VoucherStatus {
   CANCELLED
 }
 
+/// Sumber voucher: biaya job (terbit lalu dibayar), atau invoice / vendor bill (langsung mencatat pembayaran).
+enum VoucherKind {
+  JOB
+  INVOICE
+  BILL
+}
+
+/// Jenis baris pajak yang diketik Finance: PPN masukan (Debet), PPh 23/26 dipotong (Kredit).
+enum TaxRowKind {
+  PPN_IN
+  PPH23
+  PPH26
+}
+
 enum CashAccountKind {
   BANK
   CASH
@@ -222,6 +236,9 @@ enum TariffBasis {
   PER_BL
   /// Per container, dikali kelebihan km di atas batas jarak.
   PER_KM_OVER
+  /// Per container, tarif flat bila berat kotor container melebihi batas berat.
+  /// Tidak ditagih bersamaan dengan PER_KM_OVER: per container diambil yang lebih besar.
+  OVERWEIGHT
 }
 
 enum TariffCondition {
@@ -229,6 +246,8 @@ enum TariffCondition {
   ALWAYS
   /// Dibuat otomatis hanya jika job jalur merah.
   RED_LANE
+  /// Dibuat otomatis kecuali job jalur merah (mis. Green Light Fee: jalur merah sudah termasuk di Red Line).
+  NON_RED_LANE
   /// Tidak dibuat otomatis (jika ada), ditambahkan saat dibutuhkan.
   OPTIONAL
 }
@@ -236,6 +255,20 @@ enum TariffCondition {
 // ============================================================
 // AUTH (Auth.js v5 + credentials)
 // ============================================================
+
+/// Role kustom. Role sistem (isSystem) izinnya dihitung dari kode (src/lib/permissions.ts), bukan dari kolom permissions.
+model AppRole {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  name        String
+  description String?  @db.Text
+  isSystem    Boolean  @default(false)
+  permissions Json
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users User[]
+}
 
 model User {
   id            String    @id @default(cuid())
@@ -251,15 +284,16 @@ model User {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
-  accounts       Account[]
-  sessions       Session[]
-  salesCustomers Customer[]     @relation("CustomerSalesPic")
-  salesJobs      Job[]          @relation("JobSalesPic")
-  quotations     Quotation[]    @relation("QuotationOwner")
-  milestones     Milestone[]
-  auditLogs      AuditLog[]
-  journalEntries JournalEntry[]
-  vouchers       Voucher[]      @relation("VoucherCreatedBy")
+  accounts          Account[]
+  sessions          Session[]
+  salesCustomers    Customer[]     @relation("CustomerSalesPic")
+  salesJobs         Job[]          @relation("JobSalesPic")
+  quotations        Quotation[]    @relation("QuotationOwner")
+  milestones        Milestone[]
+  auditLogs         AuditLog[]
+  journalEntries    JournalEntry[]
+  vouchers          Voucher[]      @relation("VoucherCreatedBy")
+  paymentsCancelled Payment[]      @relation("PaymentCancelledBy")
 }
 
 model Account {
@@ -317,9 +351,18 @@ model CompanySetting {
   bankBranch     String?
   signatoryName  String?
   signatoryTitle String?
-  /// Kode perusahaan pada nomor bukti, misalnya SLG/BM/26/11/001.
+  /// Kode perusahaan pada nomor bukti, misalnya SLG/BK/26/11/06/0001.
   docCode        String   @default("SLG")
   updatedAt      DateTime @updatedAt
+}
+
+/// Kotak dokumen SOP pada cetakan bukti, per jenis formulir: BBM, BBK, BKM, BKK, JU, VC, VM.
+model ProofForm {
+  code          String    @id
+  docNo         String?
+  revision      String?
+  effectiveDate DateTime? @db.Date
+  updatedAt     DateTime  @updatedAt
 }
 
 model Sequence {
@@ -369,7 +412,6 @@ model Customer {
   salesPicId    String?
   salesPic      User?    @relation("CustomerSalesPic", fields: [salesPicId], references: [id])
   isActive      Boolean  @default(true)
-  createdById   String? // pembuat (untuk batas data & maker-checker); data lama null
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -380,6 +422,8 @@ model Customer {
   invoices          Invoice[]
   payments          Payment[]
   warehouses        Warehouse[]
+  createdById       String? // pembuat (untuk batas data & maker-checker); data lama null
+  rateCardItems     RateCardItem[]
 
   @@index([name])
   @@index([createdById])
@@ -667,19 +711,19 @@ model Quotation {
   needsApproval Boolean         @default(false)
   approvedById  String?
   approvedAt    DateTime?
-  submittedById String?
-  submittedAt   DateTime?
-  sentById      String?
   sentAt        DateTime?
-  decidedById   String?
   decidedAt     DateTime?
-  returnNote    String?         @db.Text
-  createdById   String? // pembuat (untuk batas data & maker-checker); data lama null
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
 
-  lines QuotationLine[]
-  job   Job?
+  lines         QuotationLine[]
+  job           Job?
+  submittedById String?
+  submittedAt   DateTime?
+  sentById      String?
+  decidedById   String?
+  returnNote    String?         @db.Text
+  createdById   String? // pembuat (untuk batas data & maker-checker); data lama null
 
   @@index([status])
   @@index([createdById])
@@ -725,6 +769,8 @@ model Job {
   quotation   Quotation?     @relation(fields: [quotationId], references: [id])
 
   // parties (snapshot text + optional refs)
+  /// Pihak yang ditagih: SHIPPER atau CONSIGNEE. customerId = perusahaan pihak tersebut.
+  billTo           String?
   shipperName      String?
   shipperAddress   String? @db.Text
   consigneeName    String?
@@ -782,22 +828,22 @@ model Job {
   profitIdr  Decimal @default(0) @db.Decimal(18, 2)
   marginPct  Decimal @default(0) @db.Decimal(6, 2)
 
-  openedAt    DateTime  @default(now())
-  closedAt    DateTime?
-  createdById String? // pembuat (untuk batas data & maker-checker); data lama null
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  openedAt  DateTime  @default(now())
+  closedAt  DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 
-  containers JobContainer[]
-  milestones Milestone[]
-  documents  JobDocument[]
-  costings   CostingLine[]
-  booking    Booking?
-  invoices   Invoice[]
+  containers   JobContainer[]
+  milestones   Milestone[]
+  documents    JobDocument[]
+  costings     CostingLine[]
+  booking      Booking?
+  invoices     Invoice[]
   invoiceLines InvoiceLine[]
-  bills      VendorBill[]
-  billLines  BillLine[]
-  vouchers   Voucher[]
+  bills        VendorBill[]
+  billLines    BillLine[]
+  vouchers     Voucher[]
+  createdById  String? // pembuat (untuk batas data & maker-checker); data lama null
 
   @@index([status])
   @@index([mode])
@@ -881,52 +927,74 @@ model Booking {
 
 model CostingLine {
   vehicleId         String?
-  vehicle           Vehicle?   @relation(fields: [vehicleId], references: [id])
-  id                String     @id @default(cuid())
+  vehicle           Vehicle?    @relation(fields: [vehicleId], references: [id])
+  id                String      @id @default(cuid())
   jobId             String
-  job               Job        @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  job               Job         @relation(fields: [jobId], references: [id], onDelete: Cascade)
   side              ChargeSide
   chargeCodeId      String
-  chargeCode        ChargeCode @relation(fields: [chargeCodeId], references: [id])
-  description       String?    @db.Text
+  chargeCode        ChargeCode  @relation(fields: [chargeCodeId], references: [id])
+  description       String?     @db.Text
   vendorId          String?
-  vendor            Vendor?    @relation(fields: [vendorId], references: [id])
-  currency          String     @default("IDR")
-  exchangeRate      Decimal    @default(1) @db.Decimal(18, 6)
-  qty               Decimal    @default(1) @db.Decimal(18, 2)
-  unitPrice         Decimal    @default(0) @db.Decimal(18, 2) // foreign per unit
-  amountForeign     Decimal    @default(0) @db.Decimal(18, 2)
-  estimatedIdr      Decimal    @default(0) @db.Decimal(18, 2)
-  actualIdr         Decimal    @default(0) @db.Decimal(18, 2)
-  taxable           Boolean    @default(true)
-  asReceipt         Boolean    @default(false)
+  vendor            Vendor?     @relation(fields: [vendorId], references: [id])
+  currency          String      @default("IDR")
+  exchangeRate      Decimal     @default(1) @db.Decimal(18, 6)
+  qty               Decimal     @default(1) @db.Decimal(18, 2)
+  unitPrice         Decimal     @default(0) @db.Decimal(18, 2) // foreign per unit
+  amountForeign     Decimal     @default(0) @db.Decimal(18, 2)
+  estimatedIdr      Decimal     @default(0) @db.Decimal(18, 2)
+  actualIdr         Decimal     @default(0) @db.Decimal(18, 2)
+  /// PPN masukan baris buying (IDR), diketik sesuai faktur/invoice vendor yang ditujukan ke perusahaan.
+  /// Tidak dihitung dari tarif. Terisi sebagai PPN Masukan (1400) saat baris ini masuk voucher atau vendor bill.
+  /// Baris reimburse tidak punya PPN: nilainya diisi termasuk PPN dan ditagihkan ke customer.
+  ppnIdr            Decimal     @default(0) @db.Decimal(18, 2)
+  taxable           Boolean     @default(true)
+  asReceipt         Boolean     @default(false)
   /// Satuan untuk cetakan, misalnya 40HC, B/L, km.
   unitLabel         String?
   /// Dibuat dari rate card; dihitung ulang selama belum ditagih.
-  fromRateCard      Boolean    @default(false)
-  invoiced          Boolean    @default(false)
+  fromRateCard      Boolean     @default(false)
+  invoiced          Boolean     @default(false)
   /// Invoice yang menagih baris selling ini. Pembatalan invoice hanya membuka kembali baris miliknya.
-  invoiceId     String?
-  invoice       Invoice?   @relation("InvoiceCostings", fields: [invoiceId], references: [id], onDelete: SetNull)
-  billed        Boolean    @default(false)
+  invoiceId         String?
+  invoice           Invoice?    @relation("InvoiceCostings", fields: [invoiceId], references: [id], onDelete: SetNull)
+  billed            Boolean     @default(false)
+  /// Vendor bill yang menagih baris buying ini. Edit/batal bill hanya membuka kembali baris miliknya.
+  billId            String?
+  bill              VendorBill? @relation("BillCostings", fields: [billId], references: [id], onDelete: SetNull)
+  /// Selling: baris buying reimburse asalnya (dibuat otomatis, nominal sama). Lihat src/lib/selling-sync.ts.
+  buyingLineId      String?     @unique
   /// Voucher pengeluaran yang memuat baris buying ini. Baris terkunci sejak voucher dibuat.
-  voucherId     String?
-  voucher       Voucher?   @relation(fields: [voucherId], references: [id], onDelete: SetNull)
-  sortOrder     Int        @default(0)
+  voucherId         String?
+  voucher           Voucher?    @relation(fields: [voucherId], references: [id], onDelete: SetNull)
+  sortOrder         Int         @default(0)
   recordedAt        DateTime?
   recordedJournalId String?
 
   @@index([jobId, side])
   @@index([invoiceId])
   @@index([voucherId])
+  @@index([billId])
 }
 
 /// Voucher pengeluaran biaya harian job. Dibuat Finance, nomor bukti BK atau KK terbentuk saat dibayar.
 model Voucher {
   id             String        @id @default(cuid())
   number         String        @unique
-  jobId          String
-  job            Job           @relation(fields: [jobId], references: [id])
+  kind           VoucherKind   @default(JOB)
+  jobId          String?
+  job            Job?          @relation(fields: [jobId], references: [id], onDelete: Restrict)
+  invoiceId      String?
+  invoice        Invoice?      @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  billId         String?
+  bill           VendorBill?   @relation(fields: [billId], references: [id], onDelete: Restrict)
+  /// Pembayaran yang dicatat voucher invoice/bill.
+  paymentId      String?       @unique
+  payment        Payment?      @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  /// Voucher ini membawa PPN/PPh dokumen (memuat baris pertama dokumen).
+  carriesTax     Boolean       @default(false)
+  /// Potongan saat terima invoice (PPh 23 pelanggan, admin bank, lain).
+  deductions     Decimal       @default(0) @db.Decimal(18, 2)
   date           DateTime
   payee          String
   vendorId       String?
@@ -946,11 +1014,42 @@ model Voucher {
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
 
-  lines CostingLine[]
+  lines    CostingLine[]
+  taxLines VoucherTaxLine[]
+  docLines VoucherDocLine[]
 
   @@index([jobId])
+  @@index([invoiceId])
+  @@index([billId])
   @@index([status])
   @@index([createdById])
+}
+
+/// Baris pajak voucher (diketik Finance). Total voucher = biaya + PPN - PPh = nilai yang dibayar.
+model VoucherTaxLine {
+  id          String     @id @default(cuid())
+  voucherId   String
+  voucher     Voucher    @relation(fields: [voucherId], references: [id], onDelete: Cascade)
+  kind        TaxRowKind
+  description String     @db.Text
+  amount      Decimal    @db.Decimal(18, 2)
+  sortOrder   Int        @default(0)
+
+  @@index([voucherId])
+}
+
+/// Baris invoice/bill yang dimuat voucher. Satu baris hanya boleh di satu voucher (unique).
+model VoucherDocLine {
+  id            String       @id @default(cuid())
+  voucherId     String
+  voucher       Voucher      @relation(fields: [voucherId], references: [id], onDelete: Cascade)
+  invoiceLineId String?      @unique
+  invoiceLine   InvoiceLine? @relation(fields: [invoiceLineId], references: [id], onDelete: Restrict)
+  billLineId    String?      @unique
+  billLine      BillLine?    @relation(fields: [billLineId], references: [id], onDelete: Restrict)
+  amount        Decimal      @db.Decimal(18, 2)
+
+  @@index([voucherId])
 }
 
 // ============================================================
@@ -982,13 +1081,14 @@ model Invoice {
   notes              String?           @db.Text
   journalEntryId     String?
   postedAt           DateTime?
-  createdById        String? // pembuat (untuk batas data & maker-checker); data lama null
   createdAt          DateTime          @default(now())
   updatedAt          DateTime          @updatedAt
 
   lines        InvoiceLine[]
   allocations  PaymentAllocation[]
   costingLines CostingLine[]       @relation("InvoiceCostings")
+  createdById  String? // pembuat (untuk batas data & maker-checker); data lama null
+  vouchers     Voucher[]
 
   @@index([status])
   @@index([customerId])
@@ -1015,6 +1115,8 @@ model InvoiceLine {
   /// Job asal baris. Satu invoice bisa berisi beberapa job atau B/L.
   jobId        String?
   job          Job?            @relation(fields: [jobId], references: [id])
+
+  voucherLine VoucherDocLine?
 
   @@index([jobId])
 }
@@ -1045,12 +1147,16 @@ model VendorBill {
   notes             String?    @db.Text
   journalEntryId    String?
   postedAt          DateTime?
-  createdById       String? // pembuat (untuk batas data & maker-checker); data lama null
+  cancelReason      String?    @db.Text
+  cancelledAt       DateTime?
   createdAt         DateTime   @default(now())
   updatedAt         DateTime   @updatedAt
 
-  lines       BillLine[]
-  allocations PaymentAllocation[]
+  lines        BillLine[]
+  allocations  PaymentAllocation[]
+  vouchers     Voucher[]
+  costingLines CostingLine[]       @relation("BillCostings")
+  createdById  String? // pembuat (untuk batas data & maker-checker); data lama null
 
   @@index([status])
   @@index([vendorId])
@@ -1073,6 +1179,8 @@ model BillLine {
   jobId        String?
   job          Job?       @relation(fields: [jobId], references: [id])
 
+  voucherLine VoucherDocLine?
+
   @@index([jobId])
 }
 
@@ -1090,8 +1198,8 @@ model Note {
   description    String?        @db.Text
   status         NoteStatus     @default(ISSUED)
   journalEntryId String?
-  createdById    String? // pembuat (untuk batas data & maker-checker); data lama null
   createdAt      DateTime       @default(now())
+  createdById    String? // pembuat (untuk batas data & maker-checker); data lama null
 
   @@index([createdById])
 }
@@ -1112,13 +1220,20 @@ model Payment {
   amount         Decimal          @default(0) @db.Decimal(18, 2) // IDR total
   notes          String?          @db.Text
   journalEntryId String?
-  createdById    String? // pembuat (untuk batas data & maker-checker); data lama null
   createdAt      DateTime         @default(now())
 
   bankAccountId String?
   bankAccount   BankAccount? @relation(fields: [bankAccountId], references: [id])
 
+  // Pelunasan yang dibatalkan Admin: jurnal dibalik, data tetap disimpan sebagai riwayat.
+  cancelledAt   DateTime?
+  cancelReason  String?   @db.Text
+  cancelledById String?
+  cancelledBy   User?     @relation("PaymentCancelledBy", fields: [cancelledById], references: [id])
+
   allocations PaymentAllocation[]
+  createdById String? // pembuat (untuk batas data & maker-checker); data lama null
+  voucher     Voucher?
 
   @@index([direction])
   @@index([date])
@@ -1277,11 +1392,10 @@ model DomesticEvent {
 // ============================================================
 
 model AccountingSetting {
-  id          String    @id @default("default")
-  lockedUntil DateTime?
+  id        String   @id @default("default")
   /// Tarif PPN keluaran untuk invoice baru. Invoice menyimpan tarifnya sendiri.
-  ppnRate     Decimal   @default(0.011) @db.Decimal(6, 4)
-  updatedAt   DateTime  @updatedAt
+  ppnRate   Decimal  @default(0.011) @db.Decimal(6, 4)
+  updatedAt DateTime @updatedAt
 }
 
 /// Master kas dan rekening bank. Setiap rekening punya satu akun COA sendiri,
@@ -1348,6 +1462,19 @@ model TaxRemittance {
   createdAt       DateTime       @default(now())
 
   @@index([kind, period])
+}
+
+/// Closing bulanan. Bulan CLOSED menolak semua jurnal bertanggal di bulan itu.
+/// REOPENED = dibuka sementara untuk koreksi (hanya satu bulan sekaligus), lalu ditutup lagi.
+model PeriodClosing {
+  period       String    @id // "YYYY-MM", zona Asia/Jakarta
+  status       String // CLOSED | REOPENED
+  closedAt     DateTime  @default(now())
+  closedById   String?
+  reopenedAt   DateTime?
+  reopenedById String?
+  reopenReason String?   @db.Text
+  updatedAt    DateTime  @updatedAt
 }
 
 model FiscalClosing {
@@ -1464,11 +1591,19 @@ model RateCardItem {
   /// Kosong = berlaku untuk semua ukuran container.
   containerTypeId String?
   containerType   ContainerType?  @relation(fields: [containerTypeId], references: [id])
+  /// Kosong = tarif standar semua customer. Diisi = tarif khusus customer itu, menggantikan tarif standar yang setara.
+  customerId      String?
+  customer        Customer?       @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  /// Kosong = berlaku di semua kota. Diisi (mis. "Surabaya") = hanya untuk job yang pelabuhannya di kota itu
+  /// (impor: Port of Discharge, ekspor: Port of Loading), menggantikan tarif tanpa kota yang setara.
+  city            String?
   basis           TariffBasis
   condition       TariffCondition @default(ALWAYS)
   price           Decimal         @default(0) @db.Decimal(18, 2)
   /// PER_KM_OVER: jarak yang sudah termasuk tarif dasar.
   thresholdKm     Int?
+  /// OVERWEIGHT: berat maksimal per container (kg) yang sudah termasuk tarif dasar.
+  thresholdKg     Int?
   taxable         Boolean         @default(false)
   note            String?         @db.Text
   sortOrder       Int             @default(0)
@@ -1476,22 +1611,5 @@ model RateCardItem {
   createdAt       DateTime        @default(now())
 
   @@index([chargeCodeId])
-}
-
-// ============================================================
-// ROLE MANAGEMENT
-// ============================================================
-
-/// Role kustom. `permissions` = daftar kunci izin dari src/lib/permissions.ts. Role sistem (Admin) selalu semua izin.
-model AppRole {
-  id          String   @id @default(cuid())
-  key         String   @unique
-  name        String
-  description String?  @db.Text
-  isSystem    Boolean  @default(false)
-  permissions Json
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  users User[]
+  @@index([customerId])
 }

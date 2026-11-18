@@ -1,49 +1,37 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { assertPerm } from "@/lib/auth-helpers";
 import { jobScope } from "@/lib/data-scope";
 import { assertJobInScope } from "../job-scope";
 import { writeAudit } from "@/lib/audit";
-import { applyRateCard } from "@/lib/rate-card";
+import { applyRateCard, reapplyRateCardAfterLaneChange } from "@/lib/rate-card";
 import { getJobLock } from "@/lib/job-lock";
 import { errorMessage } from "@/lib/action-error";
 
-type Result = { ok: true; message?: string } | { ok: false; error: string };
+type Result = { ok: true; message?: string; warning?: string } | { ok: false; error: string };
 
-export type ClearanceInput = {
-  customsLane: "GREEN" | "YELLOW" | "RED" | null;
-  warehouseId: string | null;
-  deliveryAddress: string;
-  distanceKm: string;
-};
+export type ClearanceInput = { customsLane: "GREEN" | "YELLOW" | "RED" | null };
 
-/** Simpan jalur bea cukai, gudang tujuan, alamat kirim, dan jarak job. */
+/** Simpan jalur bea cukai job. Tujuan dan jarak diisi per container di tab Containers. */
 export async function updateJobClearanceAction(jobId: string, input: ClearanceInput): Promise<Result> {
   const user = await assertPerm("jobs.clearance");
-  const job = await prisma.job.findFirst({ where: { id: jobId, ...jobScope(user) }, select: { customerId: true, number: true } });
+  const job = await prisma.job.findFirst({ where: { id: jobId, ...jobScope(user) }, select: { number: true, customsLane: true } });
   if (!job) return { ok: false, error: "Job tidak ditemukan." };
   const lock = await getJobLock(prisma, jobId);
   if (lock) return { ok: false, error: lock };
-  const wh = input.warehouseId ? await prisma.warehouse.findUnique({ where: { id: input.warehouseId } }) : null;
-  if (input.warehouseId && (!wh || wh.customerId !== job.customerId)) return { ok: false, error: "Gudang bukan milik customer job ini." };
-  const km = input.distanceKm.trim() === "" ? null : Number(input.distanceKm);
-  if (km != null && !(km >= 0)) return { ok: false, error: "Jarak harus angka 0 atau lebih." };
-  // Alamat dan jarak kosong diisi dari master gudang.
-  const address = input.deliveryAddress.trim() || (wh ? [wh.address, wh.city].filter(Boolean).join(", ") : "");
-  const distance = km ?? (wh?.distanceKm != null ? Number(wh.distanceKm) : null);
-  await prisma.job.update({
-    where: { id: jobId },
-    data: {
-      customsLane: input.customsLane, warehouseId: wh?.id ?? null, deliveryAddress: address || null,
-      distanceKm: distance == null ? null : new Prisma.Decimal(distance),
-    },
-  });
-  await writeAudit({ entity: "Job", entityId: jobId, action: "UPDATE_CLEARANCE", summary: `${job.number}: jalur ${input.customsLane ?? "-"}, ${distance ?? "-"} km`, userId: user.id });
+  const lane = input.customsLane && ["GREEN", "YELLOW", "RED"].includes(input.customsLane) ? input.customsLane : null;
+  await prisma.job.update({ where: { id: jobId }, data: { customsLane: lane } });
+  await writeAudit({ entity: "Job", entityId: jobId, action: "UPDATE_CLEARANCE", summary: `${job.number}: jalur ${lane ?? "-"}`, userId: user.id });
   revalidatePath(`/jobs/${jobId}`);
-  return { ok: true };
+  // Ganti jalur langsung mengganti tarifnya (merah: Red Line, hijau: Green Light) bila rate card sudah dihitung.
+  if (!lane || lane === job.customsLane) return { ok: true };
+  const re = await reapplyRateCardAfterLaneChange(prisma, jobId);
+  if (!re.recalculated) return re.error ? { ok: true, warning: `Jalur disimpan, tapi charge rate card belum dihitung ulang: ${re.error}` } : { ok: true };
+  await writeAudit({ entity: "Job", entityId: jobId, action: "APPLY_RATE_CARD", summary: `${job.number}: dihitung ulang karena jalur ${lane}`, userId: user.id });
+  revalidatePath(`/costing/${jobId}`);
+  return { ok: true, message: "Jalur disimpan. Charge rate card dihitung ulang sesuai jalur baru." };
 }
 
 /** Buat ulang selling charge dari rate card berdasarkan container, jalur, dan jarak job. */

@@ -4,19 +4,47 @@ import { requirePerm, hasPerm } from "@/lib/auth-helpers";
 import { invoiceScope } from "@/lib/data-scope";
 import { Button } from "@/components/ui/button";
 import { prisma } from "@/lib/prisma";
-import { formatIDR } from "@/lib/format";
+import { formatIDR, formatDate } from "@/lib/format";
 import { PageHeader } from "@/components/page-header";
 import { StatStrip } from "@/components/stat-strip";
+import { jktKey } from "@/lib/accounting-core";
+import { monthRange } from "@/lib/doc-export-filter";
+import { dateRange, isTextFilter, parseListFilter, searchInitial, type ListFilter } from "@/lib/list-filter";
+import { ListSearchBar } from "@/components/list-search-bar";
 import { InvoicesTable, type InvoiceRow } from "./invoices-table";
+import { ExportInvoicesButton } from "./export-invoices-button";
+import type { Prisma } from "@prisma/client";
 
 export const dynamic = "force-dynamic";
 
 const JOB_REF = { number: true, hblNo: true, mblNo: true, hawbNo: true, mawbNo: true } as const;
 
-export default async function InvoicesPage() {
+const KEYS = ["invoice", "job", "bl"] as const;
+type Key = (typeof KEYS)[number];
+const LABEL: Record<Key, string> = { invoice: "No. Invoice", job: "No. Job", bl: "No. B/L" };
+
+function invoiceWhere(f: ListFilter<Key>): Prisma.InvoiceWhereInput {
+  if (!isTextFilter(f)) return { date: dateRange(f) };
+  // Tanpa `mode: "insensitive"`: collation MariaDB (utf8mb4_unicode_ci) sudah tidak membedakan huruf besar/kecil.
+  const has = { contains: f.q };
+  if (f.by === "invoice") return { number: has };
+  const job: Prisma.JobWhereInput = f.by === "job"
+    ? { number: has }
+    : { OR: [{ hblNo: has }, { mblNo: has }, { hawbNo: has }, { mawbNo: has }] };
+  return {
+    OR: [
+      { job }, { lines: { some: { job } } },
+      ...(f.by === "job" ? [{ domesticShipment: { number: has } }] : []),
+    ],
+  };
+}
+
+/** Tanpa pencarian hanya invoice bertanggal hari ini. Cari lewat No. Invoice, No. Job, No. B/L, atau periode tanggal invoice. */
+export default async function InvoicesPage({ searchParams }: { searchParams: Promise<{ by?: string; q?: string; from?: string; to?: string }> }) {
   const user = await requirePerm("invoices.view");
+  const filter = parseListFilter(await searchParams, KEYS);
   const invoices = await prisma.invoice.findMany({
-    where: invoiceScope(user),
+    where: { AND: [invoiceWhere(filter), invoiceScope(user)] },
     orderBy: { date: "desc" },
     include: {
       customer: { select: { name: true } }, domesticShipment: { select: { number: true } },
@@ -39,10 +67,17 @@ export default async function InvoicesPage() {
   const outstanding = rows.filter((r) => r.status !== "PAID" && r.status !== "CANCELLED").reduce((s, r) => s + (r.total - r.paid), 0);
   const overdue = rows.filter((r) => r.status === "OVERDUE").reduce((s, r) => s + (r.total - r.paid), 0);
   const paid = rows.filter((r) => r.status === "PAID").reduce((s, r) => s + r.total, 0);
+  const month = monthRange(jktKey(new Date()));
+  const description = filter.by === "today"
+    ? `${rows.length} invoice tanggal hari ini, ${formatDate(new Date())}`
+    : filter.by === "period"
+      ? `${rows.length} invoice tanggal ${filter.from === filter.to ? formatDate(filter.from) : `${formatDate(filter.from)} s/d ${formatDate(filter.to)}`}`
+      : `${rows.length} invoice dengan ${LABEL[filter.by]} "${filter.q}"`;
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Invoice (AR)" description={`${rows.length} invoice`}>
+      <PageHeader title="Invoice (AR)" description={description}>
+        <ExportInvoicesButton defaultFrom={month.from} defaultTo={month.to} />
         {hasPerm(user, "invoices.create") && <Button asChild><Link href="/invoices/new"><Plus /> Buat Invoice</Link></Button>}
       </PageHeader>
       <StatStrip items={[
@@ -51,7 +86,16 @@ export default async function InvoicesPage() {
         { label: "Overdue", value: formatIDR(overdue), tone: "destructive" },
         { label: "Lunas", value: formatIDR(paid), tone: "success" },
       ]} />
-      <InvoicesTable data={rows} canReceipt={hasPerm(user, "invoices.receipt")} />
+      <ListSearchBar
+        keys={[
+          { value: "invoice", label: "No. Invoice", placeholder: "mis. INV/26/11/001" },
+          { value: "job", label: "No. Job", placeholder: "mis. JOB/SEA-IMP/2026/11" },
+          { value: "bl", label: "No. B/L", placeholder: "No. Master B/L atau AWB" },
+        ]}
+        periodLabel="Periode tanggal invoice"
+        initial={searchInitial(filter)}
+      />
+      <InvoicesTable data={rows} canReceipt={hasPerm(user, "invoices.receipt")} emptyTitle={filter.by === "today" ? "Belum ada invoice bertanggal hari ini" : "Tidak ada invoice yang cocok"} />
     </div>
   );
 }

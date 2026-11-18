@@ -7,6 +7,8 @@ import { db, login, pickOption, userId, captureAction, replayAction, expectRejec
  * voucher (buat → bayar BK/KK → batal + maker-checker), edit bukti kas dengan nomor tetap, kunci/tutup/buka job
  * (hanya pemegang jobs.close/jobs.reopen = Admin), dan builder invoice yang dibatasi batas data (baris job orang lain
  * ditolak walau dikirim paksa). Setiap langkah dicek di database.
+ * Sejak sinkron client 2026-11-19: form Buat Voucher bertab (biaya job di tab "Biaya job"), nomor bukti bertanggal,
+ * voucher biaya job yang dibayar memakai nomor bukti BK/KK, dan batal voucher khusus Admin (izin vouchers.cancel).
  */
 
 const S: Record<string, string> = {};
@@ -25,7 +27,7 @@ async function freeBuyingLine(exclude: string[] = []) {
 }
 
 async function createVoucherUi(page: Page, jobNumber: string) {
-  await page.goto("/vouchers/new");
+  await page.goto("/vouchers/new?tab=job");
   // halaman streaming: tunggu tenang dan ambil elemen yang terlihat (template tersembunyi sempat ganda)
   await page.waitForLoadState("networkidle");
   await page.getByPlaceholder("Cari no. job, no. B/L, atau customer…").filter({ visible: true }).fill(jobNumber);
@@ -33,7 +35,7 @@ async function createVoucherUi(page: Page, jobNumber: string) {
   await block.locator('input[type="checkbox"]').first().check();
   await page.locator("main").getByRole("button", { name: "Buat Voucher", exact: true }).last().click();
   await expect(page.getByText("Voucher dibuat.")).toBeVisible();
-  await page.waitForURL("**/vouchers");
+  await page.waitForURL(/\/vouchers(\?|$)/);
 }
 
 test.describe.serial("QA-07 Fitur client SLG", () => {
@@ -44,7 +46,7 @@ test.describe.serial("QA-07 Fitur client SLG", () => {
     await createVoucherUi(page, l.job.number);
     const v = await db.voucher.findFirstOrThrow({ where: { jobId: l.jobId }, orderBy: { createdAt: "desc" }, include: { lines: true } });
     S.voucherId = v.id;
-    expect(v.number).toMatch(/^SLG\/VC\/\d{2}\/\d{2}\/\d{3,}$/);
+    expect(v.number).toMatch(/^SLG\/VC\/\d{2}\/\d{2}\/\d{2}\/\d{4}$/);
     expect(v.status).toBe("ISSUED");
     expect(v.createdById).toBe(await userId("finance@demo.com"));
     expect(v.lines.length).toBeGreaterThan(0);
@@ -59,19 +61,21 @@ test.describe.serial("QA-07 Fitur client SLG", () => {
     const paid = await db.voucher.findUniqueOrThrow({ where: { id: v.id } });
     expect(paid.status).toBe("PAID");
     expect(paid.proofNumber).toMatch(/^SLG\/BK\//);
+    // satu transaksi satu nomor: VC hanya nomor sementara, sesudah dibayar nomornya = nomor bukti BK
+    expect(paid.number).toBe(paid.proofNumber);
     const je = await db.journalEntry.findUniqueOrThrow({ where: { id: paid.journalEntryId! }, include: { lines: true } });
     expect(je.source).toBe("VOUCHER");
     expect(je.lines.reduce((s, x) => s + Number(x.debit), 0)).toBeCloseTo(Number(paid.total), 2);
     // voucher yang sudah dibayar tidak bisa dibatalkan (tombol hilang)
     await page.reload();
-    await expect(page.locator("tr", { hasText: v.number }).getByRole("button", { name: /Batalkan/ })).toHaveCount(0);
+    await expect(page.locator("tr", { hasText: paid.number }).getByRole("button", { name: /Batalkan/ })).toHaveCount(0);
     const pdf = await page.request.get(`/api/vouchers/${v.id}/pdf`);
     expect(pdf.status()).toBe(200);
     expect((await pdf.body()).subarray(0, 4).toString()).toBe("%PDF");
     await expectLedgerBalanced();
   });
 
-  test("02 Voucher: batal sebelum dibayar membuka biaya; maker-checker vouchers.cancelOwn diatur admin", async ({ page }) => {
+  test("02 Voucher: batal khusus Admin membuka biaya; maker-checker bila Finance diberi izin batal tanpa 'buatan sendiri'", async ({ page }) => {
     const l = await freeBuyingLine([S.vJob]);
     await login(page, "finance@demo.com");
     await createVoucherUi(page, l.job.number);
@@ -81,7 +85,11 @@ test.describe.serial("QA-07 Fitur client SLG", () => {
     const fin = await db.appRole.findUniqueOrThrow({ where: { key: "FINANCE" } });
     const original = fin.permissions as string[];
     try {
-      await db.appRole.update({ where: { id: fin.id }, data: { permissions: original.filter((k) => k !== "vouchers.cancelOwn") } });
+      // bawaan Finance tanpa izin batal: tombol tidak ada
+      await page.reload();
+      await expect(page.locator("tr", { hasText: v.number }).getByRole("button", { name: /Batalkan/ })).toHaveCount(0);
+      // diberi vouchers.cancel tanpa vouchers.cancelOwn → voucher buatannya sendiri tetap ditolak
+      await db.appRole.update({ where: { id: fin.id }, data: { permissions: [...original.filter((k) => k !== "vouchers.cancelOwn"), "vouchers.cancel"] } });
       await page.reload();
       await page.locator("tr", { hasText: v.number }).getByRole("button", { name: /Batalkan/ }).click();
       await page.getByRole("dialog").locator("input").first().fill("uji maker-checker");
@@ -91,11 +99,12 @@ test.describe.serial("QA-07 Fitur client SLG", () => {
     } finally {
       await db.appRole.update({ where: { id: fin.id }, data: { permissions: original } });
     }
-    await page.reload();
+    await login(page, "admin@demo.com");
+    await page.goto("/vouchers");
     await page.locator("tr", { hasText: v.number }).getByRole("button", { name: /Batalkan/ }).click();
     await page.getByRole("dialog").locator("input").first().fill("salah pilih biaya (uji QA)");
     await page.getByRole("dialog").getByRole("button", { name: /Ya, batalkan/ }).click();
-    await expect(page.getByText("Voucher dibatalkan, biaya terbuka lagi.")).toBeVisible();
+    await expect(page.getByText("Voucher dibatalkan, barisnya terbuka lagi.")).toBeVisible();
     const after = await db.voucher.findUniqueOrThrow({ where: { id: v.id } });
     expect(after.status).toBe("CANCELLED");
     expect(after.journalEntryId).toBeNull();
@@ -122,7 +131,7 @@ test.describe.serial("QA-07 Fitur client SLG", () => {
     await expect(edit.getByText(`Edit ${je.number}`)).toBeVisible();
     await edit.getByRole("textbox", { name: /^Nominal/ }).first().fill("150000");
     await edit.getByRole("button", { name: "Simpan", exact: true }).click();
-    await expect(page.getByText("Transaksi diperbarui, nomor bukti tetap.")).toBeVisible();
+    await expect(page.getByText("Transaksi diperbarui. Nomor urut bukti tetap.")).toBeVisible();
 
     const after = await db.journalEntry.findUniqueOrThrow({ where: { id: je.id }, include: { lines: true } });
     expect(after.number).toBe(je.number);

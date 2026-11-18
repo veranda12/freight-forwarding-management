@@ -4,14 +4,16 @@ import { revalidatePath } from "next/cache";
 import { Prisma, type JobStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { assertPerm, hasPerm } from "@/lib/auth-helpers";
-import { jobScope } from "@/lib/data-scope";
+import { customerScope, jobScope } from "@/lib/data-scope";
 import { assertJobInScope } from "./job-scope";
 import { writeAudit } from "@/lib/audit";
-import { JOB_STATUS_LABELS, modeDirKey } from "@/lib/enums";
+import { JOB_STATUS_LABELS, isBackwardStatus, modeDirKey } from "@/lib/enums";
 import { genJobNumber } from "@/lib/sequence";
 import { computeChargeable } from "@/lib/chargeable";
 import { getWeightRules } from "@/lib/weight-rules";
 import { assertJobEditable, closeJobIfSettled, getJobLock } from "@/lib/job-lock";
+import { assertBlUnique } from "@/lib/job-bl";
+import { errorMessage } from "@/lib/action-error";
 
 type JobInput = Record<string, unknown>;
 const s = (v: unknown) => { const x = typeof v === "string" ? v.trim() : v == null ? "" : String(v); return x !== "" ? x : null; };
@@ -20,12 +22,29 @@ const num = (v: unknown) => { const n = parseFloat(String(v ?? "")); return Numb
 
 export async function createJob(input: JobInput): Promise<{ ok: boolean; error?: string; id?: string }> {
   const user = await assertPerm("jobs.create");
-  const mode = s(input.mode); const direction = s(input.direction); const customerId = s(input.customerId);
-  if (!mode || !direction || !customerId) return { ok: false, error: "Mode, arah, dan customer wajib diisi." };
+  const mode = s(input.mode); const direction = s(input.direction);
+  if (!mode || !direction) return { ok: false, error: "Mode dan arah wajib diisi." };
+  // Shipper/Consignee dipilih dari master Customer; yang tidak ditagih boleh nama manual.
+  // Customer job = perusahaan pihak yang ditagih.
+  const billTo = s(input.billTo) === "CONSIGNEE" ? "CONSIGNEE" : s(input.billTo) === "SHIPPER" ? "SHIPPER" : null;
+  if (!billTo) return { ok: false, error: "Pilih tagihan ditujukan ke Shipper atau Consignee." };
+  const partyIds = [s(input.shipperId), s(input.consigneeId)].filter((x): x is string => !!x);
+  const companies = new Map((await prisma.customer.findMany({
+    where: { id: { in: partyIds }, isActive: true, ...customerScope(user) }, select: { id: true, name: true, address: true, city: true },
+  })).map((c) => [c.id, c]));
+  const shipper = companies.get(s(input.shipperId) ?? "");
+  const consignee = companies.get(s(input.consigneeId) ?? "");
+  const billed = billTo === "SHIPPER" ? shipper : consignee;
+  if (!billed) return { ok: false, error: `Pilih perusahaan ${billTo === "SHIPPER" ? "Shipper" : "Consignee"} dari daftar Customer, karena tagihan dikirim ke pihak ini.` };
+  const customerId = billed.id;
+  const addr = (c?: { address: string | null; city: string | null }) => (c ? [c.address, c.city].filter(Boolean).join(", ") || null : null);
   if (direction !== "EXPORT" && direction !== "IMPORT") return { ok: false, error: "Arah Ekspor-Impor hanya Export/Import. Kargo antar kota dibuat di menu Domestik." };
   const isAir = mode === "AIR";
   const isFcl = mode === "SEA_FCL";
   if (mode === "SEA_LCL" && !(num(input.packages)! > 0 && num(input.volumeCbm)! > 0)) return { ok: false, error: "Sea LCL wajib mengisi jumlah koli dan volume." };
+  try {
+    await assertBlUnique(prisma, { air: isAir, master: s(input.mblNo), house: isAir ? s(input.hblNo) : null });
+  } catch (e) { return { ok: false, error: errorMessage(e, "No. B/L tidak valid.") }; }
   const rules = await getWeightRules("INTERNATIONAL");
 
   const id = await prisma.$transaction(async (tx) => {
@@ -37,9 +56,11 @@ export async function createJob(input: JobInput): Promise<{ ok: boolean; error?:
     const job = await tx.job.create({
       data: {
         number, mode: mode as any, direction: direction as any, status: "DRAFT",
-        customerId, salesPicId: s(input.salesPicId) ?? user.id, createdById: user.id,
+        // salesPicId = user yang menginput job (tampil sebagai "Diinput oleh").
+        customerId, billTo, salesPicId: user.id, createdById: user.id,
+        customsLane: ["GREEN", "YELLOW", "RED"].includes(String(input.customsLane)) ? (input.customsLane as "GREEN" | "YELLOW" | "RED") : null,
         incoterm: s(input.incoterm),
-        mblNo: !isAir ? s(input.mblNo) : null, hblNo: !isAir ? s(input.hblNo) : null,
+        mblNo: !isAir ? s(input.mblNo) : null, hblNo: null,
         mawbNo: isAir ? s(input.mblNo) : null, hawbNo: isAir ? s(input.hblNo) : null,
         polId: !isAir ? s(input.polId) : null, podId: !isAir ? s(input.podId) : null,
         originAirportId: isAir ? s(input.originAirportId) : null, destAirportId: isAir ? s(input.destAirportId) : null,
@@ -50,7 +71,9 @@ export async function createJob(input: JobInput): Promise<{ ok: boolean; error?:
         volumeCbm: vol != null ? new Prisma.Decimal(vol) : null,
         chargeableWeight: cw != null ? new Prisma.Decimal(cw) : null,
         packages: pkg != null ? Math.round(pkg) : null, packageType: s(input.packageType),
-        shipperName: s(input.shipperName), consigneeName: s(input.consigneeName), notifyName: s(input.notifyName),
+        shipperName: shipper?.name ?? s(input.shipperName), shipperAddress: addr(shipper),
+        consigneeName: consignee?.name ?? s(input.consigneeName), consigneeAddress: addr(consignee),
+        notifyName: s(input.notifyName),
         milestones: { create: [{ code: "CREATED", title: "Job dibuat", isDone: true, actualAt: new Date(), sortOrder: 0, userId: user.id }] },
       },
     });
@@ -69,6 +92,12 @@ export async function updateJobStatus(jobId: string, status: JobStatus) {
   const closer = hasPerm(user, "jobs.close");
   if (status === "CLOSED" && !closer) throw new Error("Status Closed terisi otomatis setelah invoice lunas.");
   if (!closer) await assertJobEditable(prisma, jobId);
+  const before = await prisma.job.findUniqueOrThrow({ where: { id: jobId }, select: { status: true } });
+  // Status hanya maju, kecuali pemegang izin jobs.statusBack (bawaan: Admin) yang memperbaiki salah pilih.
+  if (!hasPerm(user, "jobs.statusBack") && isBackwardStatus(before.status, status)) {
+    // Dikembalikan, bukan dilempar: pesan error server action disamarkan Next di production.
+    return { ok: false as const, error: `Status tidak bisa mundur dari ${JOB_STATUS_LABELS[before.status]} ke ${JOB_STATUS_LABELS[status]}. Minta user yang berwenang (bawaan: Admin) kalau salah pilih.` };
+  }
   const job = await prisma.job.update({
     where: { id: jobId },
     data: {
@@ -80,13 +109,13 @@ export async function updateJobStatus(jobId: string, status: JobStatus) {
   });
   await writeAudit({
     entity: "Job", entityId: jobId, action: "STATUS_CHANGE",
-    summary: `Status → ${JOB_STATUS_LABELS[status]}`, userId: user.id,
+    summary: `Status ${JOB_STATUS_LABELS[before.status]} → ${JOB_STATUS_LABELS[status]}`, userId: user.id,
   });
   // Pelunasan bisa datang lebih dulu, jadi Close juga diperiksa saat status menjadi Delivered.
   if (status === "DELIVERED") await closeJobIfSettled(prisma, jobId);
   revalidatePath(`/jobs/${jobId}`);
   revalidatePath("/jobs");
-  return { ok: true, status: job.status };
+  return { ok: true as const, status: job.status };
 }
 
 /** Simpan nomor B/L atau AWB. Nomornya biasanya baru ada setelah job dibuat. */
@@ -96,6 +125,9 @@ export async function updateJobBlAction(jobId: string, input: { master: string; 
   if (!job) return { ok: false, error: "Job tidak ditemukan." };
   const lock = await getJobLock(prisma, jobId);
   if (lock) return { ok: false, error: lock };
+  try {
+    await assertBlUnique(prisma, { air: job.mode === "AIR", master: s(input.master), house: s(input.house) }, jobId);
+  } catch (e) { return { ok: false, error: errorMessage(e, "No. B/L tidak valid.") }; }
   const data = job.mode === "AIR" ? { mawbNo: s(input.master), hawbNo: s(input.house) } : { mblNo: s(input.master), hblNo: s(input.house) };
   await prisma.job.update({ where: { id: jobId }, data });
   await writeAudit({ entity: "Job", entityId: jobId, action: "UPDATE_BL", summary: `${job.number}: ${s(input.master) ?? "-"} / ${s(input.house) ?? "-"}`, userId: user.id });

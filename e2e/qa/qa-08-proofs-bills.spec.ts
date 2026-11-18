@@ -10,23 +10,26 @@ import { db, login, userId } from "./qa-helpers";
 const idr = (n: number) => n.toLocaleString("id-ID", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 test.describe.serial("QA-08 Cari Bukti & Vendor Bill per job", () => {
-  test("01 Finance: cari nomor invoice dan nominal format Indonesia; Buka & Cetak berfungsi", async ({ page }) => {
-    const inv = await db.invoice.findFirstOrThrow({ where: { status: { not: "CANCELLED" }, currency: "IDR" }, orderBy: { number: "desc" } });
+  test("01 Finance: cari nomor invoice dan nominal format Indonesia; baris jurnal, Buka & Cetak berfungsi", async ({ page }) => {
+    // Sejak sinkron client 2026-11-19, pemegang izin akuntansi melihat hasil sebagai baris jurnal (nomor JE/...),
+    // dengan tombol cetak PDF dokumen asalnya (invoice).
+    const inv = await db.invoice.findFirstOrThrow({ where: { status: { not: "CANCELLED" }, currency: "IDR", journalEntryId: { not: null } }, orderBy: { number: "desc" } });
+    const je = await db.journalEntry.findUniqueOrThrow({ where: { id: inv.journalEntryId! } });
     await login(page, "finance@demo.com");
     await page.goto(`/proofs?q=${encodeURIComponent(inv.number)}`);
-    await expect(page.getByRole("link", { name: inv.number, exact: true }).first()).toBeVisible();
+    await expect(page.getByRole("link", { name: je.number, exact: true }).first()).toBeVisible();
     const print = page.locator(`a[href="/api/invoices/${inv.id}/pdf"]`).first();
     await expect(print).toBeVisible();
     const pdf = await page.request.get(`/api/invoices/${inv.id}/pdf`);
     expect(pdf.status()).toBe(200);
     expect((await pdf.body()).subarray(0, 4).toString()).toBe("%PDF");
 
-    // nominal persis dengan pemisah ribuan & desimal Indonesia → invoice yang sama ikut ditemukan
+    // nominal persis dengan pemisah ribuan & desimal Indonesia → jurnal invoice yang sama ikut ditemukan
     await page.goto(`/proofs?q=${encodeURIComponent(idr(Number(inv.total)))}`);
-    await expect(page.getByRole("link", { name: inv.number, exact: true }).first()).toBeVisible();
+    await expect(page.getByRole("link", { name: je.number, exact: true }).first()).toBeVisible();
 
-    await page.getByRole("link", { name: inv.number, exact: true }).first().click();
-    await page.waitForURL(`**/invoices/${inv.id}`);
+    await page.getByRole("link", { name: je.number, exact: true }).first().click();
+    await page.waitForURL(`**/accounting/journal/${je.id}`);
   });
 
   test("02 Sales: hanya invoice, dan hanya milik sendiri (Sales PIC); tanpa jurnal", async ({ page }) => {

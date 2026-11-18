@@ -22,6 +22,7 @@ const CHARGES: [string, string, string, string, InvoiceSection, boolean][] = [
   ["BEHANDLE", "Behandle Fee (Inspection Handling)", "4400", "5400", "LOCAL", true],
   ["TRUCK", "Trucking / Delivery", "4300", "5300", "LOCAL", false],
   ["XDIST", "Extra Distance Surcharge", "4300", "5300", "LOCAL", false],
+  ["OVWT", "Overweight Surcharge", "4300", "5300", "LOCAL", false],
   ["LOLO", "LOLO Fee", "4400", "5400", "LOCAL", true],
   ["STORAGE", "Storage / Demurrage", "4400", "5400", "LOCAL", true],
   ["PIB", "Document Fee (PIB)", "4400", "5400", "DOCUMENTATION", false],
@@ -32,18 +33,22 @@ const CHARGES: [string, string, string, string, InvoiceSection, boolean][] = [
   ["EXTTRUCK", "Extended Trucking", "4300", "5300", "ADDITIONAL", true],
 ];
 
-// code, containerType (null = semua), basis, condition, price, thresholdKm, note
+// code, containerType (null = semua), basis, condition, price, batas (km; kg untuk OVERWEIGHT), note
 const RATES: [string, string | null, TariffBasis, TariffCondition, number, number | null, string | null][] = [
   ["CC", null, "PER_CONTAINER", "ALWAYS", 2_000_000, null, null],
   ["CC", "20GP", "PER_CONTAINER", "ALWAYS", 1_800_000, null, null],
-  ["GREEN", null, "PER_CONTAINER", "ALWAYS", 1_650_000, null, null],
-  ["GREEN", "20GP", "PER_CONTAINER", "ALWAYS", 1_500_000, null, null],
-  ["REDLINE", null, "PER_CONTAINER", "RED_LANE", 3_000_000, null, "Jalur merah"],
+  // Jalur merah: Red Line saja (40ft 4,5 jt, 20ft 4,3 jt), tanpa Green Light Fee (permintaan client 11 Nov).
+  ["GREEN", null, "PER_CONTAINER", "NON_RED_LANE", 1_650_000, null, null],
+  ["GREEN", "20GP", "PER_CONTAINER", "NON_RED_LANE", 1_500_000, null, null],
+  ["REDLINE", null, "PER_CONTAINER", "RED_LANE", 4_500_000, null, "Jalur merah"],
+  ["REDLINE", "20GP", "PER_CONTAINER", "RED_LANE", 4_300_000, null, "Jalur merah"],
   ["BEHANDLE", null, "PER_CONTAINER", "RED_LANE", 2_700_000, null, "Jalur merah, estimasi. Ditagih sesuai kuitansi"],
   ["TRUCK", null, "PER_CONTAINER", "ALWAYS", 3_100_000, null, "Tarif dasar sampai 30 km"],
   ["TRUCK", "20GP", "PER_CONTAINER", "ALWAYS", 2_900_000, null, "Tarif dasar sampai 30 km"],
   ["XDIST", null, "PER_KM_OVER", "ALWAYS", 100_000, 30, "Per km kelebihan di atas 30 km"],
   ["XDIST", "20GP", "PER_KM_OVER", "ALWAYS", 90_000, 30, "Per km kelebihan di atas 30 km"],
+  // Batas berat dalam kg. Tidak ditagih bersamaan dengan XDIST: per container diambil yang lebih besar.
+  ["OVWT", "20GP", "OVERWEIGHT", "ALWAYS", 600_000, 23_000, "Berat di atas 23 ton. Dibanding surcharge jarak, ambil yang lebih besar"],
   ["LOLO", null, "PER_CONTAINER", "ALWAYS", 800_000, null, "Estimasi. Ditagih sesuai kuitansi"],
   ["STORAGE", null, "PER_CONTAINER", "OPTIONAL", 1_200_000, null, "Per container per hari, sesuai kuitansi"],
   ["PIB", null, "PER_BL", "ALWAYS", 1_000_000, null, null],
@@ -69,11 +74,12 @@ export async function seedClearance(prisma: PrismaClient, opts: { demo?: boolean
 
   if ((await prisma.rateCardItem.count()) === 0) {
     const types = Object.fromEntries((await prisma.containerType.findMany()).map((t) => [t.code, t.id]));
-    for (const [i, [code, type, basis, condition, price, thresholdKm, note]] of RATES.entries()) {
+    for (const [i, [code, type, basis, condition, price, threshold, note]] of RATES.entries()) {
       await prisma.rateCardItem.create({
         data: {
-          chargeCodeId: charge[code], containerTypeId: type ? types[type] : null, basis, condition,
-          price: new Prisma.Decimal(price), thresholdKm, taxable: false, note, sortOrder: (i + 1) * 10,
+          chargeCodeId: charge[code], containerTypeId: type ? types[type] : null, basis, condition, price: new Prisma.Decimal(price),
+          thresholdKm: basis === "OVERWEIGHT" ? null : threshold, thresholdKg: basis === "OVERWEIGHT" ? threshold : null,
+          taxable: false, note, sortOrder: (i + 1) * 10,
         },
       });
     }
@@ -93,9 +99,9 @@ const WAREHOUSES = [
   { name: "Gudang Cikarang", address: "Kawasan Industri Jababeka, Blok F2", city: "Cikarang, Bekasi", distanceKm: 52 },
 ];
 
-/** containers: nomor, tipe, dan gudang tujuan bila berbeda dari tujuan utama job. */
+/** containers: nomor, tipe, dan gudang tujuan bila berbeda dari tujuan utama job. weights: berat kotor per container (kg). */
 type DemoSpec = {
-  mbl: string; vessel: string; voyage: string; containers: [string, string, string?][];
+  mbl: string; vessel: string; voyage: string; containers: [string, string, string?][]; weights: Record<string, number>;
   receipts: { lolo: Record<string, number>; doFee: number; storage: number; lsRep: number; parking: number; extTruck?: [string, number, string?] };
 };
 
@@ -105,11 +111,14 @@ const DEMOS: DemoSpec[] = [
   {
     mbl: "MEDUY1234567", vessel: "MSC BEATRICE", voyage: "612S",
     containers: [["MSCU1234566", "40HC"], ["CAIU1234561", "40HC"], ["TGHU7654320", "40HC"]],
+    weights: { MSCU1234566: 21_500, CAIU1234561: 22_100, TGHU7654320: 20_800 },
     receipts: { lolo: { "40HC": 1_704_750 }, doFee: 10_579_247, storage: 3_021_773, lsRep: 5_750_100, parking: 182_000, extTruck: ["CAIU1234561", 750_000] },
   },
   {
     mbl: "MEDUY7654321", vessel: "MSC AURORA", voyage: "618S",
     containers: [["MSCU2034562", "20GP"], ["TGBU2087659", "20GP", "Gudang Cikarang"], ["MEDU4412879", "40HC"]],
+    // MSCU2034562 overweight (25,4 ton) tapi 38 km: surcharge jarak 720.000 > overweight 600.000, jadi jarak yang ditagih.
+    weights: { MSCU2034562: 25_400, TGBU2087659: 21_800, MEDU4412879: 24_000 },
     receipts: { lolo: { "20GP": 1_136_500, "40HC": 1_704_750 }, doFee: 7_052_831, storage: 1_847_390, lsRep: 4_312_575, parking: 121_000, extTruck: ["TGBU2087659", 650_000, "20GP"] },
   },
 ];
@@ -150,7 +159,7 @@ async function seedDemoShipment(prisma: PrismaClient, spec: DemoSpec): Promise<v
       customerId: customer.id, polId: pol?.id, podId: pod?.id, vesselName: spec.vessel, voyageNo: spec.voyage, mblNo: spec.mbl,
       consigneeName: customer.name, goodsDescription: "General cargo", incoterm: "CIF",
       customsLane: "GREEN", warehouseId: warehouse.id, deliveryAddress: `${warehouse.address}, ${warehouse.city}`, distanceKm: warehouse.distanceKm,
-      containers: { create: spec.containers.map(([containerNo, type, wh]) => ({ containerNo, containerTypeId: typeId(type), ...dest(wh) })) },
+      containers: { create: spec.containers.map(([containerNo, type, wh]) => ({ containerNo, containerTypeId: typeId(type), grossWeightKg: new Prisma.Decimal(spec.weights[containerNo] ?? 0), ...dest(wh) })) },
     },
   }));
 

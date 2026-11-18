@@ -1,5 +1,6 @@
 "use client";
 
+import { isClosedKey } from "@/lib/period-lock";
 import { Fragment, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -33,8 +34,8 @@ const dateKeyOf = (iso: string) => new Date(new Date(iso).getTime() + 7 * 3600 *
 const headOf = (e: Entry) => ({ dateKey: dateKeyOf(e.date), description: e.description.replace(/^Jurnal (manual|umum): /i, ""), reference: "" });
 const linesOf = (e: Entry): Line[] => e.lines.map((l) => ({ key: ++seq, accountId: l.accountId, description: l.description ?? "", debit: l.debit ? String(l.debit) : "", credit: l.credit ? String(l.credit) : "" }));
 
-export function ManualJournalPanel({ accounts, entries, today, canCreate, canCancel, canEdit, lockKey, editId }: {
-  accounts: Opt[]; entries: Entry[]; today: string; canCreate: boolean; canCancel: boolean; canEdit: boolean; lockKey: string | null; editId?: string;
+export function ManualJournalPanel({ accounts, entries, today, canCreate, canCancel, canEdit, closedMonths, editId }: {
+  accounts: Opt[]; entries: Entry[]; today: string; canCreate: boolean; canCancel: boolean; canEdit: boolean; closedMonths: string[]; editId?: string;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -66,7 +67,7 @@ export function ManualJournalPanel({ accounts, entries, today, canCreate, canCan
         lines: filled.map((l) => ({ accountId: l.accountId, description: l.description, debit: l.debit || null, credit: l.credit || null })),
       };
       const res = editing ? await updateManualJournalAction(editing.id, input) : await createManualJournalAction(input);
-      if (res.ok) { toast.success(editing ? "Jurnal diperbarui, nomor bukti tetap." : "Jurnal Umum diposting."); setOpen(false); reset(); router.replace("/accounting/manual-journal"); router.refresh(); }
+      if (res.ok) { toast.success(editing ? "Jurnal diperbarui. Nomor urut bukti tetap." : "Jurnal Umum diposting."); setOpen(false); reset(); router.replace("/accounting/manual-journal"); router.refresh(); }
       else toast.error(res.error);
     });
   }
@@ -176,7 +177,7 @@ export function ManualJournalPanel({ accounts, entries, today, canCreate, canCan
                         <TableCell className="text-right">
                           <span className="inline-flex gap-0.5">
                             <Button asChild size="icon" variant="ghost" className="h-8 w-8"><a href={`/api/accounting/journals/${e.id}/pdf`} target="_blank" rel="noopener" aria-label="Print"><Printer /></a></Button>
-                            {canEdit && !e.reversed && !e.reconciled && !(lockKey && dateKeyOf(e.date) <= lockKey) && <Button size="icon" variant="ghost" className="h-8 w-8" aria-label="Edit" onClick={() => startEdit(e)}><Pencil /></Button>}
+                            {canEdit && !e.reversed && !e.reconciled && !isClosedKey(closedMonths, dateKeyOf(e.date)) && <Button size="icon" variant="ghost" className="h-8 w-8" aria-label="Edit" onClick={() => startEdit(e)}><Pencil /></Button>}
                             {canCancel && !e.reversed && <Button size="sm" variant="ghost" className="text-destructive" onClick={() => { setCancel(e); setReason(""); setCancelDate(today); }}><Ban /> Batalkan</Button>}
                           </span>
                         </TableCell>

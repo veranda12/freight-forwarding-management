@@ -70,7 +70,7 @@ Password semua akun: **`demo123`**
 | Sales | sales@demo.com | Buat & **ajukan** quotation, customer, rate — hanya data miliknya sendiri |
 | Operation | ops@demo.com, ops2@demo.com | Review/kirim/kembalikan, terima/tolak, convert quotation; job, booking, container, tracking, dokumen, domestik |
 | Documentation | docs@demo.com | Dokumen B/L/AWB/SI/DO, tracking |
-| Finance | finance@demo.com | Costing, invoice, bill, payment, accounting, laporan |
+| Finance | finance@demo.com | Costing, invoice, bill, payment, accounting, laporan (tanpa batal transaksi: khusus Admin) |
 | Management | manager@demo.com | Read-only semua modul + dashboard & laporan |
 
 Hak akses diatur di menu **Sistem → Role Management** (khusus **Super Admin**): Super Admin membuat/mengubah role dengan daftar centang izin per
@@ -93,8 +93,10 @@ kirimannya sendiri.
    - **Invoice (AR)**: **Buat Invoice** (pilih job) → subtotal, reimburse tanpa PPN, **PPN 1,1%** (tarif diatur di menu Pajak), nomor `INV/yy/mm/nnn`, jurnal otomatis; invoice belum dibayar bisa **Edit** (nomor tetap).
    - **Vendor Bill (AP)**: daftar **per job** (klik baris untuk detail bill, filter job/B/L/no. bill/tanggal/vendor/status/jatuh tempo; bawaan yang belum lunas) → **Buat Bill** (pilih vendor, centang biaya dari satu atau beberapa job), PPN/PPh 23/PPh 26 diisi sesuai tagihan vendor.
    - **Cari Bukti**: satu kotak cari untuk nomor bukti, invoice, job/B/L, customer/vendor, keterangan, atau nominal (`1.250.000,50`) → Buka/Cetak.
-   - **Voucher**: biaya harian job → **Bayar** (nomor bukti `SLG/BK/…` atau `SLG/KK/…`) → **Print**.
+   - **Voucher**: dari invoice / vendor bill (detail dokumen atau tombol **Buat Voucher**) centang baris (mis. per job) → tabel Kode COA / Debit / Kredit terisi otomatis → simpan **langsung mencatat pelunasan/pembayaran** dengan nomor `SLG/BM|KM|BK|KK/…`; voucher biaya job → **Bayar**. Batal voucher (khusus Admin) ikut membatalkan pelunasannya.
    - **Jurnal Penerimaan & Pengeluaran / Jurnal Umum / Kasir All**: bukti bernomor `SLG/BM|BK|KM|KK|JU/…`, bisa diedit dengan nomor tetap dan dicetak.
+   - **Voucher biaya job**, **Jurnal Pengeluaran**, dan **Jurnal Penerimaan**: tambah **baris pajak**. Pengeluaran: PPN Masukan di Debet, PPh 23/26 di Kredit. Penerimaan: PPN Keluaran di Kredit, PPh 23 dipotong customer di Debet. Biaya reimburse tidak dikenai pajak.
+   - **Cetak**: bukti kas/bank dan voucher memakai template Receipt / Payment Voucher (nomor `SLG/BK/26/11/06/0001`); Jurnal Umum memakai formulir SOP.
    - **Receipt & Payment**: penerimaan/pembayaran dengan alokasi.
    - **Accounting**: **Trial Balance (balance ✓)**, **Laba Rugi**, **Neraca**, **Jurnal**. _(±4 mnt)_
 8. **Reporting**: profitability per mode, shipment per status, sales performance, **AR/AP Aging** + **Export Excel**. _(±1 mnt)_
@@ -103,14 +105,22 @@ kirimannya sendiri.
 
 Master Data (Customer, Vendor, Overseas Agent, Port & Airport, Currency & Kurs, Charge Code, Aturan Berat, Container Type, Commodity, Pajak, COA) · **Ekspor-Impor** (Rate, Quotation, Job, Booking, Dokumentasi PDF, Tracking publik) · **Domestik** (STT antar kota, Cek Tarif, Tarif Domestik) · Finance (Cari Bukti lintas modul, Costing per job, AR Invoice, AP Bill per job, Voucher, Debit/Credit Note, Payment, Jurnal Penerimaan & Pengeluaran, Jurnal Umum, Kasir All, Accounting, Pajak & tarif PPN, Laporan) · Dashboard · Sistem (User, Audit Log, Setting).
 
+**Import Excel** di daftar Customer, Vendor, dan Commodity: tombol *Import Excel* → *Unduh template* → isi sheet Data → *Periksa* (pratinjau per baris) → *Simpan*. Kolom Kode kosong = data baru, terisi = memperbarui data itu (sel kosong tidak mengubah apa pun). Maks. 1.000 baris / 2 MB per file (.xlsx).
+
+**Export Excel** di daftar Invoice dan Vendor Bill: file berisi sheet *Ringkasan* (satu baris per dokumen, baris TOTAL tanpa dokumen Cancelled) dan *Rincian* (satu baris per item). Nilai dalam IDR seperti pembukuan; dokumen valas punya kolom Mata Uang, Kurs, dan Nilai Valas.
+- Invoice: tombol *Export Excel* → pilih periode tanggal invoice (bawaan bulan berjalan) dan status → *Unduh*. Boleh untuk yang bisa membuka daftar Invoice (Finance, Sales).
+- Vendor Bill: tombol *Export Excel* memakai filter yang sedang aktif di halaman (termasuk bawaan "Belum lunas"), semua halaman. Bill lintas job diekspor utuh beserta semua barisnya. Hanya Finance.
+- Maks. 5.000 dokumen per file; lebih dari itu diminta mempersempit filter.
+
 ## 6. Prinsip Teknis
 
 - Uang = `Decimal(18,2)`, kurs = `Decimal(18,6)` — tidak pernah float.
 - Timezone `Asia/Jakarta`; format Rupiah & tanggal locale Indonesia.
-- Penomoran dokumen via tabel `Sequence` (aman dari race), di dalam transaksi DB.
+- Penomoran dokumen via tabel `Sequence` (aman dari race), di dalam transaksi DB. Bukti kas/bank, Jurnal Umum, dan voucher: `SLG/BK/26/11/06/0001`, nomor urut tahunan per jenis bukti.
 - Semua transaksi DB memakai isolasi **READ COMMITTED** (`src/lib/prisma-options.ts`), bukan bawaan MariaDB
   (REPEATABLE READ).
 - Pencarian & unique tidak membedakan huruf besar/kecil (collation `utf8mb4_unicode_ci`).
+- Kotak Doc. No / Revision / Effective Date pada cetakan bukti diisi di **Setting → Formulir bukti (SOP)**.
 - Jurnal selalu seimbang; pembatalan via **reversal** (jurnal tidak dihapus).
 - Seed deterministik (`faker.seed`), nomor kontainer ISO 6346 valid, Trial Balance balance.
 

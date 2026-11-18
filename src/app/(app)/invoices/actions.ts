@@ -44,12 +44,13 @@ export async function editInvoiceAction(invoiceId: string, edit: InvoiceEdit): P
 }
 
 /** Catat penerimaan. IDR: nominal IDR. Valas: nominal valas + kurs pembayaran. */
-export async function recordReceipt(invoiceId: string, input: ReceiptInput): Promise<{ ok: boolean; error?: string }> {
+export async function recordReceipt(invoiceId: string, input: ReceiptInput): Promise<{ ok: boolean; error?: string; journalEntryId?: string }> {
   const user = await assertPerm("invoices.receipt");
+  let journalEntryId: string;
   try {
     const own = await prisma.invoice.findFirst({ where: { id: invoiceId, ...invoiceScope(user) }, select: { id: true } });
     if (!own) throw new Error("Data tidak ditemukan.");
-    await recordReceiptCore(prisma, invoiceId, input, user.id);
+    ({ journalEntryId } = await recordReceiptCore(prisma, invoiceId, input, user.id));
   } catch (e) {
     return { ok: false, error: errorMessage(e, "Gagal mencatat pembayaran.") };
   }
@@ -62,7 +63,7 @@ export async function recordReceipt(invoiceId: string, input: ReceiptInput): Pro
   revalidatePath("/invoices");
   revalidatePath("/payments");
   revalidatePath("/accounting");
-  return { ok: true };
+  return { ok: true, journalEntryId };
 }
 
 export async function cancelInvoice(invoiceId: string): Promise<{ ok: boolean; error?: string }> {

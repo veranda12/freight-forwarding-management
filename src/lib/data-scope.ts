@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { hasPerm, type SessionUser } from "./auth-helpers";
+import type { ProofScopes } from "./proof-search";
 
 /**
  * Batas data per modul. User dengan izin `<modul>.viewAll` melihat semua data; selain itu hanya data "miliknya":
@@ -74,4 +75,9 @@ export function and<T extends object>(...parts: (T | undefined)[]): T {
   if (xs.length === 0) return {} as T;
   if (xs.length === 1) return xs[0];
   return { AND: xs } as unknown as T;
+}
+
+/** Batas data tiap jenis bukti di menu Cari Bukti (src/lib/proof-search.ts). */
+export function proofScopes(u: U): ProofScopes {
+  return { invoice: invoiceScope(u), bill: billScope(u), payment: paymentScope(u), voucher: voucherScope(u), note: noteScope(u) };
 }

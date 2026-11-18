@@ -26,7 +26,8 @@ export async function postJournal(
     number?: string;
   }
 ): Promise<string> {
-  await assertNotLocked(tx, opts.date);
+  // Jurnal penutup tahun bertanggal 31 Desember tetap boleh walau Desember sudah closing.
+  if (opts.source !== "CLOSING") await assertNotLocked(tx, opts.date);
   const number = opts.number ?? (await genDocNumber(tx, SEQ.JOURNAL, opts.date));
   const totalDebit = r2(opts.lines.reduce((s, l) => s + (l.debit ?? 0), 0));
   const totalCredit = r2(opts.lines.reduce((s, l) => s + (l.credit ?? 0), 0));
@@ -66,7 +67,7 @@ export function journalEditBlock(e: { isReversed: boolean; isReversal: boolean; 
 export async function replaceJournal(
   tx: Tx,
   entryId: string,
-  next: { date: Date; description: string; lines: JournalLineInput[]; sourceId?: string }
+  next: { date: Date; description: string; lines: JournalLineInput[]; sourceId?: string; number?: string }
 ) {
   const old = await tx.journalEntry.findUnique({
     where: { id: entryId },
@@ -85,6 +86,7 @@ export async function replaceJournal(
     where: { id: entryId },
     data: {
       date: next.date, description: next.description, ...(next.sourceId ? { sourceId: next.sourceId } : {}),
+      ...(next.number ? { number: next.number } : {}),
       lines: {
         create: next.lines.map((l) => ({
           accountId: l.accountId, debit: new Prisma.Decimal(r2(l.debit ?? 0)), credit: new Prisma.Decimal(r2(l.credit ?? 0)),
@@ -95,10 +97,10 @@ export async function replaceJournal(
   });
   return {
     before: {
-      date: old.date.toISOString(), description: old.description,
+      number: old.number, date: old.date.toISOString(), description: old.description,
       lines: old.lines.map((l) => ({ account: l.account.code, debit: Number(l.debit), credit: Number(l.credit), description: l.description })),
     },
-    after: { date: next.date.toISOString(), description: next.description, lines: next.lines },
+    after: { number: next.number ?? old.number, date: next.date.toISOString(), description: next.description, lines: next.lines },
   };
 }
 

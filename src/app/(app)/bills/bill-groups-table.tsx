@@ -12,7 +12,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/empty-state";
 import { BillStatusBadge } from "@/components/status-badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { PayBillButton } from "./pay-bill-button";
+import { PayBillButton, type OpenBill } from "./pay-bill-button";
 
 const GROUP_STATUS: Record<GroupStatus, { label: string; variant: "secondary" | "warning" | "success" | "muted" }> = {
   UNPAID: { label: "Belum dibayar", variant: "secondary" },
@@ -24,17 +24,18 @@ const GROUP_STATUS: Record<GroupStatus, { label: string; variant: "secondary" | 
 const money = (n: number) => <span className="tabular-nums">{formatIDR(n)}</span>;
 
 export function BillGroupsTable({
-  groups, today, rates, canPay, cashAccounts, defaultCashId,
+  groups, today, rates, canPay, cashAccounts, defaultCashId, openBills = {},
 }: {
   groups: BillGroup[]; today: string; rates: Record<string, number | null>;
   canPay: boolean; cashAccounts: { id: string; label: string }[]; defaultCashId: string | null;
+  openBills?: Record<string, OpenBill[]>;
 }) {
   const [open, setOpen] = useState<Set<string>>(new Set());
   const toggle = (k: string) => setOpen((s) => { const n = new Set(s); if (n.has(k)) n.delete(k); else n.add(k); return n; });
   const allOpen = groups.length > 0 && groups.every((g) => open.has(g.key));
 
   if (groups.length === 0) {
-    return <EmptyState title="Tidak ada bill" description="Tidak ada tagihan vendor yang cocok dengan filter. Bawaan halaman ini hanya bill yang belum lunas." />;
+    return <EmptyState title="Tidak ada bill" description="Tidak ada tagihan vendor yang cocok dengan filter. Tanpa filter, halaman ini hanya menampilkan bill bertanggal hari ini." />;
   }
 
   return (
@@ -120,11 +121,12 @@ export function BillGroupsTable({
                                         outstandingForeign={Math.round((b.amountForeign - b.amountPaidForeign) * 100) / 100}
                                         bookedRate={b.exchangeRate} defaultPaymentRate={rates[b.currency] ?? null}
                                         cashAccounts={cashAccounts} defaultCashId={defaultCashId}
+                                        otherBills={(b.vendorId ? openBills[b.vendorId] ?? [] : []).filter((o) => o.id !== b.id)}
                                       />
                                     )}
                                   </span>
                                 </div>
-                                {p.lines.length > 0 && (
+                                {(p.lines.length > 0 || p.tax) && (
                                   <ul className="mt-2 space-y-0.5 text-xs text-muted-foreground">
                                     {p.lines.map((l) => (
                                       <li key={l.id} className="flex justify-between gap-4">
@@ -132,6 +134,9 @@ export function BillGroupsTable({
                                         <span className="tabular-nums">{formatIDR(l.amount)}</span>
                                       </li>
                                     ))}
+                                    {p.tax && p.tax.ppn > 0 && <li className="flex justify-between gap-4"><span>PPN masukan (bill)</span><span className="tabular-nums">{formatIDR(p.tax.ppn)}</span></li>}
+                                    {p.tax && p.tax.pph23 > 0 && <li className="flex justify-between gap-4"><span>PPh 23 dipotong (bill)</span><span className="tabular-nums">-{formatIDR(p.tax.pph23)}</span></li>}
+                                    {p.tax && p.tax.pph26 > 0 && <li className="flex justify-between gap-4"><span>PPh 26 dipotong (bill)</span><span className="tabular-nums">-{formatIDR(p.tax.pph26)}</span></li>}
                                   </ul>
                                 )}
                               </div>

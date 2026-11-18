@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { modeDirKey, JOB_STATUS_FLOW, MODE_SHORT } from "@/lib/enums";
+import { modeDirKey, JOB_STATUS_FLOW, MODE_SHORT, isBackwardStatus } from "@/lib/enums";
 
 describe("enums", () => {
   it("modeDirKey membentuk key sequence yang benar", () => {
@@ -19,5 +19,16 @@ describe("enums", () => {
   it("MODE_SHORT lengkap", () => {
     expect(MODE_SHORT.SEA_FCL).toBe("FCL");
     expect(MODE_SHORT.AIR).toBe("AIR");
+  });
+});
+
+describe("isBackwardStatus", () => {
+  it("menolak mundur, mengizinkan maju dan lompat", () => {
+    expect(isBackwardStatus("DEPARTED", "STUFFING")).toBe(true);
+    expect(isBackwardStatus("DELIVERED", "DRAFT")).toBe(true);
+    expect(isBackwardStatus("DEPARTED", "IN_TRANSIT")).toBe(false);
+    expect(isBackwardStatus("BOOKED", "DELIVERED")).toBe(false);
+    expect(isBackwardStatus("ARRIVED", "ARRIVED")).toBe(false);
+    expect(isBackwardStatus("ARRIVED", "CANCELLED")).toBe(false);
   });
 });

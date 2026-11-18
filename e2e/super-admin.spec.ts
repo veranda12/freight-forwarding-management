@@ -26,7 +26,8 @@ async function sidebar(page: Page, groups: string[]) {
 
 test("Admin: tanpa menu Role Management, /roles dialihkan, menu lain tetap ada", async ({ page }) => {
   await login(page, "admin@demo.com");
-  const nav = await sidebar(page, ["Finance", "Sistem"]);
+  // Finance dibagi sub-grup (part2): Accounting dan Cari Bukti ada di sub-grup "Akuntansi".
+  const nav = await sidebar(page, ["Finance", "Akuntansi", "Sistem"]);
   await expect(nav.getByRole("link", { name: "Role Management" })).toHaveCount(0);
   await expect(nav.getByRole("link", { name: "User Management" })).toHaveCount(1);
   await expect(nav.getByRole("link", { name: "Accounting", exact: true })).toHaveCount(1);

@@ -15,38 +15,53 @@ import { EmptyState } from "@/components/empty-state";
 import { MoneyInput } from "@/components/money-input";
 import { SearchableSelect } from "@/components/searchable-select";
 import { formatIDR } from "@/lib/format";
-import { createBillAction } from "../actions";
+import { createBillAction, updateBillAction } from "../actions";
 
 export type BillLineOpt = {
   id: string; vendorId: string; vendor: string; isForeign: boolean; job: string; bl: string;
-  charge: string; note: string | null; asReceipt: boolean; amount: number;
+  charge: string; note: string | null; asReceipt: boolean; amount: number; ppnIdr: number;
 };
 
-/** Satu bill untuk satu vendor. Biayanya boleh dari beberapa job, dipilih dengan ceklis. */
-export function BillBuilder({ lines, currencies, today }: { lines: BillLineOpt[]; currencies: { code: string; name: string }[]; today: string }) {
+/** Isian bill yang sedang diedit. Vendor tidak bisa diganti; biaya, tanggal, kurs, PPN, dan PPh bisa. */
+export type BillEditInit = {
+  billId: string; number: string; vendorId: string; selected: string[];
+  vendorRef: string; date: string; dueDate: string; currency: string; rate: string; ppn: string; pph23: string; pph26: string;
+};
+
+/** Satu bill untuk satu vendor. Biayanya boleh dari beberapa job, dipilih dengan ceklis. Dipakai juga untuk edit bill. */
+export function BillBuilder({ lines, currencies, today, edit, focusJob }: {
+  lines: BillLineOpt[]; currencies: { code: string; name: string }[]; today: string; edit?: BillEditInit;
+  /** Jalan pintas dari Costing: hanya vendor yang punya biaya di job ini, filter job terpasang, biayanya tercentang. */
+  focusJob?: string;
+}) {
   const router = useRouter();
   const [pending, start] = useTransition();
-  const [vendorId, setVendorId] = useState("");
-  const [jobFilter, setJobFilter] = useState<string[]>([]);
-  const [selected, setSelected] = useState<string[]>([]);
-  const [vendorRef, setVendorRef] = useState("");
-  const [date, setDate] = useState(today);
-  const [dueDate, setDueDate] = useState("");
-  const [currency, setCurrency] = useState("IDR");
-  const [rate, setRate] = useState("");
-  const [ppn, setPpn] = useState("");
-  const [pph23, setPph23] = useState("");
-  const [pph26, setPph26] = useState("");
+  const focusVendors = focusJob && !edit ? [...new Set(lines.filter((l) => l.job === focusJob).map((l) => l.vendorId))] : [];
+  const autoVendor = focusVendors.length === 1 ? focusVendors[0] : "";
+  const jobLines = (v: string) => lines.filter((l) => l.vendorId === v && l.job === focusJob).map((l) => l.id);
+  const [vendorId, setVendorId] = useState(edit?.vendorId ?? autoVendor);
+  const [jobFilter, setJobFilter] = useState<string[]>(focusJob && !edit ? [focusJob] : []);
+  const [selected, setSelected] = useState<string[]>(edit?.selected ?? (autoVendor ? jobLines(autoVendor) : []));
+  const [vendorRef, setVendorRef] = useState(edit?.vendorRef ?? "");
+  const [date, setDate] = useState(edit?.date ?? today);
+  const [dueDate, setDueDate] = useState(edit?.dueDate ?? "");
+  const [currency, setCurrency] = useState(edit?.currency ?? "IDR");
+  const [rate, setRate] = useState(edit?.rate ?? "");
+  // PPN masukan: bawaan = jumlah PPN baris buying yang dipilih, sampai Finance mengetik sendiri.
+  const [ppnTyped, setPpnTyped] = useState<string | null>(edit ? edit.ppn : null);
+  const [pph23, setPph23] = useState(edit?.pph23 ?? "");
+  const [pph26, setPph26] = useState(edit?.pph26 ?? "");
 
   const vendors = useMemo(() => {
     const m = new Map<string, { id: string; label: string; count: number }>();
     for (const l of lines) {
+      if (focusVendors.length && !focusVendors.includes(l.vendorId)) continue;
       const v = m.get(l.vendorId) ?? { id: l.vendorId, label: l.vendor, count: 0 };
       v.count++;
       m.set(l.vendorId, v);
     }
     return [...m.values()].sort((a, b) => a.label.localeCompare(b.label)).map((v) => ({ id: v.id, label: `${v.label} (${v.count} biaya)` }));
-  }, [lines]);
+  }, [lines, focusVendors.join()]);
   const own = lines.filter((l) => l.vendorId === vendorId);
   // Pilihan filter: job milik vendor ini, bisa dicari dengan nomor job atau nomor B/L.
   const jobOptions = useMemo(() => {
@@ -57,12 +72,19 @@ export function BillBuilder({ lines, currencies, today }: { lines: BillLineOpt[]
   const shown = jobFilter.length ? own.filter((l) => jobFilter.includes(l.job)) : own;
   const picked = own.filter((l) => selected.includes(l.id));
   const subtotal = picked.reduce((s, l) => s + l.amount, 0);
+  const linePpn = Math.round(picked.filter((l) => !l.asReceipt).reduce((s, l) => s + l.ppnIdr, 0));
+  const ppn = ppnTyped ?? (linePpn > 0 ? String(linePpn) : "");
+  const setPpn = (v: string) => setPpnTyped(v);
   const net = subtotal + (Number(ppn) || 0) - (Number(pph23) || 0) - (Number(pph26) || 0);
   const isForeign = own[0]?.isForeign ?? false;
   const jobs = new Set(picked.map((l) => l.job)).size;
   const allShown = shown.length > 0 && shown.every((l) => selected.includes(l.id));
 
-  function pickVendor(v: string) { setVendorId(v); setSelected([]); setJobFilter([]); }
+  function pickVendor(v: string) {
+    setVendorId(v);
+    setSelected(focusJob && !edit ? jobLines(v) : []);
+    setJobFilter(focusJob && !edit ? [focusJob] : []);
+  }
   const toggle = (id: string) => setSelected((x) => (x.includes(id) ? x.filter((v) => v !== id) : [...x, id]));
   function toggleShown() {
     const ids = shown.map((l) => l.id);
@@ -70,11 +92,18 @@ export function BillBuilder({ lines, currencies, today }: { lines: BillLineOpt[]
   }
 
   function save() {
+    const opts = {
+      currency, rate: rate.trim() ? Number(rate) : undefined, date, dueDate: dueDate || undefined, vendorRef,
+      ppn: Number(ppn) || 0, pph23: Number(pph23) || 0, pph26: Number(pph26) || 0,
+    };
     start(async () => {
-      const res = await createBillAction(vendorId, selected, {
-        currency, rate: rate.trim() ? Number(rate) : undefined, date, dueDate: dueDate || undefined, vendorRef,
-        ppn: Number(ppn) || 0, pph23: Number(pph23) || 0, pph26: Number(pph26) || 0,
-      });
+      if (edit) {
+        const res = await updateBillAction(edit.billId, selected, opts);
+        if (res.ok) { toast.success(`${edit.number} diperbarui, nomornya tetap.`); router.push(`/bills/${edit.billId}`); router.refresh(); }
+        else toast.error(res.error);
+        return;
+      }
+      const res = await createBillAction(vendorId, selected, opts);
       if (res.ok) { toast.success("Vendor bill dibuat."); router.push(`/bills/${res.id}`); router.refresh(); }
       else toast.error(res.error);
     });
@@ -86,11 +115,22 @@ export function BillBuilder({ lines, currencies, today }: { lines: BillLineOpt[]
         <CardHeader className="space-y-3">
           <CardTitle className="text-base">Pilih biaya</CardTitle>
           <div className="grid gap-3 sm:grid-cols-2">
-            <SearchableSelect value={vendorId} onChange={pickVendor} options={vendors} placeholder="Pilih vendor…" ariaLabel="Vendor" />
+            {edit
+              ? <Input value={own[0]?.vendor ?? ""} disabled aria-label="Vendor (tidak bisa diganti)" title="Vendor bill tidak bisa diganti. Batalkan bill lalu buat ulang untuk vendor lain." />
+              : <SearchableSelect value={vendorId} onChange={pickVendor} options={vendors} placeholder="Pilih vendor…" ariaLabel="Vendor" />}
             {vendorId
               ? <SearchableSelect value="" onChange={(job) => setJobFilter((x) => [...x, job])} options={jobOptions} placeholder="Filter job / B/L…" ariaLabel="Filter job atau B/L" />
               : <Input disabled placeholder="Filter job / B/L…" />}
           </div>
+          {focusVendors.length > 0 && (
+            <p className="text-xs text-muted-foreground">
+              Dari Costing {focusJob}: hanya vendor yang punya biaya belum di-bill di job ini{focusVendors.length > 1 ? ", pilih salah satu" : ""}.
+              {" "}
+              {/* Muat ulang penuh (bukan <Link>) supaya pilihan vendor/biaya di builder ikut kosong. */}
+              {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+              <a href="/bills/new" className="text-primary hover:underline">Tampilkan semua vendor</a>
+            </p>
+          )}
           {jobFilter.length > 0 && (
             <div className="flex flex-wrap items-center gap-2 text-sm">
               <span className="text-muted-foreground">Filter:</span>
@@ -131,7 +171,7 @@ export function BillBuilder({ lines, currencies, today }: { lines: BillLineOpt[]
       </Card>
 
       <Card className="h-fit">
-        <CardHeader><CardTitle className="text-base">Bill baru</CardTitle></CardHeader>
+        <CardHeader><CardTitle className="text-base">{edit ? `Edit ${edit.number}` : "Bill baru"}</CardTitle></CardHeader>
         <CardContent className="space-y-3 text-sm">
           <div className="space-y-1.5"><Label>No. tagihan vendor</Label><Input value={vendorRef} onChange={(e) => setVendorRef(e.target.value)} /></div>
           <div className="grid grid-cols-2 gap-3">
@@ -150,14 +190,24 @@ export function BillBuilder({ lines, currencies, today }: { lines: BillLineOpt[]
             </div>
             {currency !== "IDR" && <div className="space-y-1.5"><Label>Kurs</Label><Input type="number" value={rate} onChange={(e) => setRate(e.target.value)} placeholder="otomatis" /></div>}
           </div>
-          <div className="space-y-1.5"><Label>PPN masukan (IDR)</Label><MoneyInput value={ppn} onChange={setPpn} placeholder="0" /></div>
+          <div className="space-y-1.5">
+            <Label>PPN masukan (IDR)</Label>
+            <MoneyInput value={ppn} onChange={setPpn} placeholder="0" />
+            {linePpn > 0 && (
+              <p className="text-xs text-muted-foreground">
+                Dari PPN baris biaya: {formatIDR(linePpn)}
+                {ppnTyped !== null && Number(ppnTyped) !== linePpn && <> · <button type="button" className="text-primary hover:underline" onClick={() => setPpnTyped(null)}>pakai nilai ini</button></>}
+              </p>
+            )}
+          </div>
           <div className="space-y-1.5"><Label>PPh 23 dipotong (IDR)</Label><MoneyInput value={pph23} onChange={setPph23} placeholder="0" /></div>
           {isForeign && <div className="space-y-1.5"><Label>PPh 26 dipotong (IDR)</Label><MoneyInput value={pph26} onChange={setPph26} placeholder="0" /></div>}
           <div className="space-y-1 rounded-md bg-muted/40 px-3 py-2">
             <div className="flex justify-between"><span>{picked.length} biaya dari {jobs} job</span><span className="tabular-nums">{formatIDR(subtotal)}</span></div>
             <div className="flex justify-between font-semibold"><span>Yang dibayar ke vendor</span><span className="tabular-nums">{formatIDR(net)}</span></div>
           </div>
-          <Button className="w-full" onClick={save} disabled={pending || picked.length === 0 || !(net > 0)}>{pending ? <Loader2 className="animate-spin" /> : <Save />} Buat Bill</Button>
+          <Button className="w-full" onClick={save} disabled={pending || picked.length === 0 || !(net > 0)}>{pending ? <Loader2 className="animate-spin" /> : <Save />} {edit ? "Simpan Perubahan" : "Buat Bill"}</Button>
+          {edit && <p className="text-xs text-muted-foreground">Biaya yang tidak dicentang dilepas dari bill dan bisa di-bill lagi. Tanggal hanya bisa diubah di bulan yang sama.</p>}
         </CardContent>
       </Card>
     </div>

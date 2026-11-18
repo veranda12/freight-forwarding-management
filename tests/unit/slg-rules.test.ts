@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { cashProofCode, formatInvoiceNumber, formatProofNumber } from "../../src/lib/sequence";
-import { invoiceEditBlock, invoiceTotals } from "../../src/lib/receivables";
+import { cashProofCode, formatInvoiceNumber, formatProofNumber, withProofDay } from "../../src/lib/sequence";
+import { invoiceEditBlock, invoiceTotals, receiptCancelBlock } from "../../src/lib/receivables";
 import { jobLockReason, shouldCloseJob } from "../../src/lib/job-lock";
 import { journalEditBlock } from "../../src/lib/journal";
 import { chargeLockReason } from "../../src/lib/job-charges";
@@ -11,8 +11,23 @@ import { terbilang } from "../../src/lib/pdf/proof-company";
 import { DEFAULT_ROLES, normalizePermissions } from "../../src/lib/permissions";
 
 describe("nomor bukti", () => {
-  it("format bukti SLG/BM/26/11/001", () => {
-    expect(formatProofNumber("SLG", "BM", 2026, 11, 1)).toBe("SLG/BM/26/11/001");
+  it("format bukti mengikuti contoh client: SLG/BK/26/11/06/0258", () => {
+    expect(formatProofNumber("SLG", "BK", 2026, 11, 6, 258)).toBe("SLG/BK/26/11/06/0258");
+    expect(formatProofNumber("SLG", "BM", 2026, 1, 1, 1)).toBe("SLG/BM/26/01/01/0001");
+    expect(formatProofNumber("SLG", "JU", 2026, 12, 31, 12345)).toBe("SLG/JU/26/12/31/12345");
+  });
+  it("edit tanggal di bulan yang sama: segmen tanggal ikut, nomor urut tetap", () => {
+    const d = new Date("2026-11-09T12:00:00+07:00");
+    expect(withProofDay("SLG/BK/26/11/06/0258", d)).toBe("SLG/BK/26/11/09/0258");
+    expect(withProofDay("SLG/VC/26/11/06/12345", d)).toBe("SLG/VC/26/11/09/12345");
+    // tengah malam WIB tetap dihitung tanggal Jakarta
+    expect(withProofDay("SLG/KK/26/11/06/0001", new Date("2026-11-09T17:30:00Z"))).toBe("SLG/KK/26/11/10/0001");
+  });
+  it("nomor format lama dan nomor lain tidak diubah", () => {
+    const d = new Date("2026-11-09T12:00:00+07:00");
+    expect(withProofDay("SLG/BM/26/11/001", d)).toBe("SLG/BM/26/11/001");
+    expect(withProofDay("JE/2026/11/0001", d)).toBe("JE/2026/11/0001");
+    expect(withProofDay("INV/26/11/021", d)).toBe("INV/26/11/021");
   });
   it("format invoice 3 angka, otomatis 4 angka mulai 1000", () => {
     expect(formatInvoiceNumber(2026, 11, 21)).toBe("INV/26/11/021");
@@ -37,6 +52,17 @@ describe("nilai invoice", () => {
     expect(invoiceEditBlock({ status: "UNPAID", amountPaid: 0 })).toBeNull();
     expect(invoiceEditBlock({ status: "PARTIAL", amountPaid: 10 })).toMatch(/pembayaran/);
     expect(invoiceEditBlock({ status: "CANCELLED", amountPaid: 0 })).toMatch(/dibatalkan/);
+    expect(invoiceEditBlock({ status: "OVERDUE", amountPaid: 0 })).toBeNull();
+  });
+  it("batal pelunasan: pesan untuk setiap batasan", () => {
+    const base = { direction: "RECEIPT", cancelledAt: null, date: new Date("2026-11-05T05:00:00Z"), closedMonths: [], reconciled: false, reconciledAt: null, fxRevalAfter: false };
+    expect(receiptCancelBlock(base)).toBeNull();
+    expect(receiptCancelBlock({ ...base, direction: "PAYMENT" })).toMatch(/pelunasan invoice/);
+    expect(receiptCancelBlock({ ...base, cancelledAt: new Date() })).toMatch(/sudah dibatalkan/);
+    expect(receiptCancelBlock({ ...base, reconciled: true, reconciledAt: new Date("2026-11-07T05:00:00Z") })).toBe("Pembayaran ini sudah direkonsiliasi pada 07 Nov 2026. Buka dulu rekonsiliasinya di menu Rekonsiliasi Bank.");
+    expect(receiptCancelBlock({ ...base, closedMonths: ["2026-11"] })).toBe("Periode November 2026 sudah closing. Buka bulan itu untuk koreksi di menu Tutup Buku.");
+    expect(receiptCancelBlock({ ...base, closedMonths: ["2026-10", "2026-12"] })).toBeNull();
+    expect(receiptCancelBlock({ ...base, fxRevalAfter: true })).toMatch(/revaluasi/);
   });
 });
 
@@ -116,10 +142,12 @@ describe("hak akses (role bawaan)", () => {
   });
   it("Finance mengelola costing, voucher, dan edit bukti; Sales tetap melihat tagihan dan margin", () => {
     const fin = perms("FINANCE");
-    for (const k of ["jobs.charges", "vouchers.create", "vouchers.pay", "vouchers.cancel", "invoices.edit", "cashEntry.edit", "manualJournal.edit", "kasir.view", "taxes.ppnRate", "coa.create"]) expect(fin.has(k), k).toBe(true);
+    for (const k of ["jobs.charges", "vouchers.create", "vouchers.pay", "invoices.edit", "bills.edit", "cashEntry.edit", "manualJournal.edit", "kasir.view", "taxes.ppnRate", "coa.create"]) expect(fin.has(k), k).toBe(true);
     const sales = perms("SALES");
     for (const k of ["costing.view", "invoices.view", "jobs.viewFinancials"]) expect(sales.has(k), k).toBe(true);
     for (const k of ["jobs.charges", "vouchers.view", "invoices.edit"]) expect(sales.has(k), k).toBe(false);
+    // Batal voucher khusus Admin sejak 18 Nov (client 17 Nov).
+    expect(fin.has("vouchers.cancel"), "vouchers.cancel").toBe(false);
   });
   it("buka/tutup job manual hanya Admin (tidak ada di role bawaan lain)", () => {
     for (const r of DEFAULT_ROLES) {

@@ -1,10 +1,9 @@
 /**
- * Uji PPh 26 end-to-end terhadap database uji (JANGAN dijalankan di database demo).
- * Sejak penyesuaian client SLG (3330c48) PPN/PPh bill diisi MANUAL sesuai tagihan vendor (tidak lagi dihitung otomatis
- * dari charge code), jadi uji ini mengisi PPh 26 = 20% x dasar biaya non-reimburse lalu memeriksa jurnal & setoran.
- *   node tests/integration/with-verify-db ... (lihat catatan di README uji) atau set DATABASE_URL ke ffms_verify.
+ * Uji PPh 26 end-to-end terhadap database uji (JANGAN dijalankan di database demo; menolak ffms dan ffms_pgcheck):
+ * bill dari biaya vendor luar negeri dengan PPh 26 yang diketik Finance, jurnal, rekap, dan setor per masa.
+ * Data uji (job + biaya) dibuat sendiri. Jalankan: DATABASE_URL=.../ffms_role_int npx tsx tests/integration/verify-pph26.ts
  */
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 import { PRISMA_CLIENT_OPTIONS } from "../../src/lib/prisma-options";
 import { createBillFromJobCore } from "../../src/lib/payables";
 import { getTaxRecap, getTaxPeriods, remitTaxPeriod } from "../../src/lib/tax";
@@ -22,26 +21,34 @@ async function balanced(entryId: string | null) {
 }
 
 async function main() {
-  // Vendor asing (carrier/maskapai) dan baris biaya beli yang sudah ada di job-nya.
-  const line = await db.costingLine.findFirst({
-    where: { side: "BUYING", vendor: { isForeign: true } },
-    include: { chargeCode: true, vendor: true },
+  const dbName = (await db.$queryRaw<{ d: string }[]>`SELECT DATABASE() AS d`)[0].d;
+  if (dbName === "ffms" || dbName === "ffms_pgcheck") throw new Error(`Jangan jalankan uji ini di database ${dbName}.`);
+
+  // Data uji sendiri: job + biaya beli jasa dari vendor luar negeri (tidak bergantung isi seed).
+  const ts = Date.now();
+  const vendor = (await db.vendor.findFirst({ where: { isForeign: true, isActive: true } }))
+    ?? await db.vendor.create({ data: { code: `VUJ${String(ts).slice(-6)}`, name: `Uji Vendor LN ${ts}`, type: "SHIPPING_LINE", isForeign: true } });
+  const customer = await db.customer.findFirstOrThrow({ orderBy: { code: "asc" } });
+  const charge = await db.chargeCode.findFirstOrThrow({ where: { code: "HANDLING" } });
+  const AMOUNT = 5_000_000;
+  const job = await db.job.create({ data: { number: `JOB/UJI-PPH26/${ts}`, mode: "SEA_FCL", direction: "IMPORT", status: "ARRIVED", customerId: customer.id } });
+  const line = await db.costingLine.create({
+    data: {
+      jobId: job.id, side: "BUYING", chargeCodeId: charge.id, description: "Uji PPh 26", vendorId: vendor.id,
+      qty: new Prisma.Decimal(1), unitPrice: new Prisma.Decimal(AMOUNT), amountForeign: new Prisma.Decimal(AMOUNT),
+      estimatedIdr: new Prisma.Decimal(AMOUNT), actualIdr: new Prisma.Decimal(AMOUNT),
+    },
   });
-  if (!line || !line.vendorId) throw new Error("Tidak ada biaya beli dari vendor luar negeri.");
 
-  // Pastikan baris vendor ini belum di-bill pada database uji.
-  await db.costingLine.updateMany({ where: { jobId: line.jobId, vendorId: line.vendorId, side: "BUYING" }, data: { billed: false } });
-  const toBill = await db.costingLine.findMany({ where: { jobId: line.jobId, vendorId: line.vendorId, side: "BUYING", billed: false, voucherId: null, recordedAt: null } });
-  const base = toBill.filter((l) => !l.asReceipt).reduce((s, l) => s + Number(l.actualIdr), 0);
-  const pph26Expected = pph26Of(base, 20);
-
-  const before = await getTaxRecap(db, "2026-01-01", "2026-12-31");
-  const billId = await createBillFromJobCore(db, line.jobId, line.vendorId, undefined, { pph26: pph26Expected });
+  // PPh 26 diketik Finance sesuai tagihan vendor (keputusan 2026-11-08: pajak baris sendiri, tidak dihitung otomatis).
+  const year = new Date(ts + 7 * 3600 * 1000).getUTCFullYear();
+  const before = await getTaxRecap(db, `${year}-01-01`, `${year}-12-31`);
+  const pph26Expected = pph26Of(Number(line.actualIdr), 20);
+  const billId = await createBillFromJobCore(db, job.id, vendor.id, undefined, { pph26: pph26Expected });
   const bill = await db.vendorBill.findUniqueOrThrow({ where: { id: billId }, include: { lines: true } });
 
-  ok(Number(bill.pph26Amount) > 0, `PPh 26 (diisi manual) tercatat pada bill: ${Math.round(Number(bill.pph26Amount)).toLocaleString("id-ID")}`);
-  ok(Math.abs(Number(bill.pph26Amount) - pph26Expected) < 1, "PPh 26 = dasar biaya non-reimburse x 20%");
-  ok(Math.abs(Number(bill.pph26Base) - base) < 0.01, "dasar PPh 26 = biaya non-reimburse");
+  ok(Number(bill.pph26Amount) > 0, `PPh 26 tercatat pada bill: ${Math.round(Number(bill.pph26Amount)).toLocaleString("id-ID")}`);
+  ok(Math.abs(Number(bill.pph26Amount) - pph26Expected) < 1, "PPh 26 = nominal yang diketik (biaya x 20%)");
   ok(Number(bill.pph23Amount) === 0, "vendor luar negeri tidak dikenai PPh 23");
   ok(Math.abs(Number(bill.total) - (Number(bill.subtotal) + Number(bill.ppnAmount) - Number(bill.pph23Amount) - Number(bill.pph26Amount))) < 0.01,
     "net payable = subtotal + PPN - PPh 23 - PPh 26");
@@ -50,12 +57,12 @@ async function main() {
   const jl = await db.journalLine.findFirst({ where: { entryId: bill.journalEntryId!, account: { code: "2250" } } });
   ok(!!jl && Math.abs(Number(jl.credit) - Number(bill.pph26Amount)) < 0.01, "akun 2250 Hutang PPh 26 dikredit sebesar PPh 26");
 
-  const after = await getTaxRecap(db, "2026-01-01", "2026-12-31");
+  const after = await getTaxRecap(db, `${year}-01-01`, `${year}-12-31`);
   ok(after.totals.pph26 >= before.totals.pph26 + Number(bill.pph26Amount) - 0.01, "rekap PPh 26 bertambah");
   ok(after.balances.pph26Outstanding >= Number(bill.pph26Amount) - 0.01, "saldo PPh 26 belum disetor bertambah");
 
   const masa = new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 7);
-  const r = await remitTaxPeriod(db, { kind: "PPH26", period: masa, dateKey: new Date().toISOString().slice(0, 10), ntpn: "uji-pph26" });
+  const r = await remitTaxPeriod(db, { kind: "PPH26", period: masa, dateKey: new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10), ntpn: "uji-pph26" });
   const remit = await db.taxRemittance.findUniqueOrThrow({ where: { id: r.id } });
   ok(r.amount >= Number(bill.pph26Amount) - 0.01 && await balanced(remit.journalEntryId), `setor PPh 26 masa ${masa} ${Math.round(r.amount).toLocaleString("id-ID")} seimbang`);
   const status = await getTaxPeriods(db, Number(masa.slice(0, 4)), masa);

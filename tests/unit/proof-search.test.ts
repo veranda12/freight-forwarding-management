@@ -1,15 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { parseIdAmount, parseProofQuery, proofKindsFor } from "@/lib/proof-search";
+import { parseIdAmount, parseProofFilter, parseProofQuery, proofKindsFor } from "@/lib/proof-search";
 import { DEFAULT_ROLES, permissionsOfRole } from "@/lib/permissions";
-import type { SessionUser } from "@/lib/auth-helpers";
-
-// Branch MariaDB: role bawaan dari katalog Role Management (pengganti rbac.ts client).
-const roleUser = (key: string): SessionUser => {
-  // role sistem (ADMIN/SUPER_ADMIN) dihitung dari kode, role bawaan dari katalog — sama dengan getCurrentUser
-  const role = DEFAULT_ROLES.find((r) => r.key === key);
-  const perms = permissionsOfRole({ key, isSystem: !role, permissions: role?.permissions ?? [] });
-  return { id: key, name: key, email: key, roleId: key, roleKey: key, roleName: key, isAdmin: !role, isSuperAdmin: key === "SUPER_ADMIN", permissions: new Set(perms) };
-};
 
 describe("parseIdAmount — nominal format Indonesia", () => {
   it.each([
@@ -27,7 +18,7 @@ describe("parseIdAmount — nominal format Indonesia", () => {
   ])("%s → %d", (s, n) => expect(parseIdAmount(s)).toBe(n));
 
   it.each([
-    "JOB/SEA-IMP/2026", "2026/11", "SLG/BM/26/11/001", "abc", "1.25.000", "1.2345", "1.250.000,505",
+    "JOB/SEA-IMP/2026", "2026/11", "SLG/BM/26/11/001", "SLG/BK/26/11/06/0258", "abc", "1.25.000", "1.2345", "1.250.000,505",
     "1.250.", "0", "001", "1,250.000,50", "",
   ])("%s → bukan nominal", (s) => expect(parseIdAmount(s)).toBeNull());
 });
@@ -46,15 +37,43 @@ describe("parseProofQuery", () => {
   });
 });
 
-describe("proofKindsFor — jenis bukti mengikuti izin modul", () => {
+describe("parseProofFilter", () => {
+  it("tanpa kata kunci dan tanpa periode → null", () => {
+    expect(parseProofFilter({})).toBeNull();
+    expect(parseProofFilter({ q: "a", kind: "bill" })).toBeNull();
+  });
+  it("periode saja sudah cukup", () => {
+    expect(parseProofFilter({ from: "2026-11-01", to: "2026-11-30" })).toEqual({ query: null, from: "2026-11-01", to: "2026-11-30", kind: null });
+    expect(parseProofFilter({ to: "2026-11-30" })?.from).toBeNull();
+  });
+  it("tanggal terbalik ditukar, tanggal & jenis tidak sah diabaikan", () => {
+    expect(parseProofFilter({ from: "2026-11-30", to: "2026-11-01" })).toMatchObject({ from: "2026-11-01", to: "2026-11-30" });
+    expect(parseProofFilter({ q: "BK/26", from: "30/11/2026", kind: "xx" })).toMatchObject({ from: null, kind: null });
+  });
+  it("kata kunci + periode + jenis", () => {
+    const f = parseProofFilter({ q: "BK/26/11", from: "2026-11-01", kind: "payment" });
+    expect(f?.query?.text).toBe("BK/26/11");
+    expect(f).toMatchObject({ from: "2026-11-01", to: null, kind: "payment" });
+  });
+});
+
+describe("proofKindsFor — jenis bukti mengikuti izin modul (role bawaan katalog)", () => {
+  const userOf = (key: string) => {
+    if (key === "ADMIN") return { permissions: new Set(permissionsOfRole({ key, isSystem: true, permissions: [] })) };
+    const role = DEFAULT_ROLES.find((r) => r.key === key)!;
+    return { permissions: new Set(permissionsOfRole({ key, isSystem: false, permissions: role.permissions })) };
+  };
   it("FINANCE, ADMIN, MANAGEMENT melihat semua jenis", () => {
-    for (const r of ["FINANCE", "ADMIN", "MANAGEMENT"] as const) expect(proofKindsFor(roleUser(r))).toHaveLength(7);
+    for (const r of ["FINANCE", "ADMIN", "MANAGEMENT"]) expect(proofKindsFor(userOf(r))).toHaveLength(7);
   });
   it("SALES hanya invoice", () => {
-    expect(proofKindsFor(roleUser("SALES"))).toEqual(["invoice"]);
+    expect(proofKindsFor(userOf("SALES"))).toEqual(["invoice"]);
   });
-  it("OPERATION tidak mendapat apa pun", () => {
-    expect(proofKindsFor(roleUser("OPERATION"))).toEqual([]);
+  it("OPERATION dan DOCUMENTATION tidak mendapat apa pun", () => {
+    expect(proofKindsFor(userOf("OPERATION"))).toEqual([]);
+    expect(proofKindsFor(userOf("DOCUMENTATION"))).toEqual([]);
+  });
+  it("tanpa login tidak mendapat apa pun", () => {
     expect(proofKindsFor(null)).toEqual([]);
   });
   it("jurnal cukup dengan Kasir All, tanpa accounting.view", () => {

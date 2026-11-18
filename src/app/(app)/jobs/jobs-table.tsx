@@ -3,65 +3,48 @@
 import { useRouter } from "next/navigation";
 import { type ColumnDef } from "@tanstack/react-table";
 import { MoreHorizontal, FileText, MapPin, SquareArrowOutUpRight } from "lucide-react";
-import type { JobStatus, TransportMode, TradeDirection } from "@prisma/client";
-import { DataTable, type Facet } from "@/components/data-table";
-import { Badge } from "@/components/ui/badge";
+import type { JobStatus, TransportMode } from "@prisma/client";
+import { DataTable } from "@/components/data-table";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { JobStatusBadge } from "@/components/status-badge";
-import { MODE_SHORT, MODE_LABELS, DIRECTION_LABELS, JOB_STATUS_LABELS, JOB_STATUS_FLOW } from "@/lib/enums";
-import { formatIDR, formatDate, formatPercent } from "@/lib/format";
-import { cn } from "@/lib/utils";
+import { formatDate } from "@/lib/format";
 
 export type JobRow = {
   id: string;
   number: string;
   mode: TransportMode;
-  direction: TradeDirection;
-  customer: string;
-  route: string;
   status: JobStatus;
+  bl: string;
+  openedAt: string;
+  shipper: string;
+  consignee: string;
+  vessel: string;
   etd: string | null;
   eta: string | null;
-  vessel: string;
-  revenue: number;
-  profit: number;
-  margin: number;
+  /** No. invoice yang berlaku, dipisah koma; kosong bila belum ditagih. */
+  invoice: string;
 };
 
-const FACETS: Facet[] = [
-  { columnId: "status", label: "Status", options: JOB_STATUS_FLOW.concat("CANCELLED" as JobStatus).map((s) => ({ value: s, label: JOB_STATUS_LABELS[s] })) },
-  { columnId: "mode", label: "Mode", options: (Object.keys(MODE_LABELS) as TransportMode[]).map((m) => ({ value: m, label: MODE_SHORT[m] })) },
-  { columnId: "direction", label: "Arah", options: (Object.keys(DIRECTION_LABELS) as TradeDirection[]).map((d) => ({ value: d, label: DIRECTION_LABELS[d] })) },
-];
+const dash = (v: string) => v || "-";
 
-export function JobsTable({ data, showFinancials }: { data: JobRow[]; showFinancials?: boolean }) {
+export function JobsTable({ data, emptyTitle }: { data: JobRow[]; emptyTitle?: string }) {
   const router = useRouter();
 
+  // Urutan kolom sesuai permintaan client. Revenue dan margin tidak ditampilkan di daftar job.
   const columns: ColumnDef<JobRow>[] = [
     { accessorKey: "number", header: "No. Job", cell: ({ row }) => <span className="whitespace-nowrap font-medium">{row.original.number}</span> },
-    { accessorKey: "mode", header: "Mode", filterFn: "equalsString", cell: ({ row }) => <Badge variant="outline">{MODE_SHORT[row.original.mode]}</Badge> },
-    { accessorKey: "direction", header: "Arah", filterFn: "equalsString", cell: ({ row }) => <span className="text-muted-foreground">{DIRECTION_LABELS[row.original.direction]}</span> },
-    { accessorKey: "customer", header: "Customer" },
-    { accessorKey: "route", header: "Rute", cell: ({ row }) => <span className="whitespace-nowrap text-muted-foreground">{row.original.route}</span> },
-    { accessorKey: "vessel", header: "Vessel/Flight", cell: ({ row }) => <span className="whitespace-nowrap text-muted-foreground">{row.original.vessel || "-"}</span> },
-    { accessorKey: "status", header: "Status", filterFn: "equalsString", cell: ({ row }) => <JobStatusBadge status={row.original.status} /> },
+    { accessorKey: "bl", header: "B/L", cell: ({ row }) => <span className="whitespace-nowrap">{dash(row.original.bl)}</span> },
+    { accessorKey: "openedAt", header: "Tgl", cell: ({ row }) => <span className="whitespace-nowrap">{formatDate(row.original.openedAt)}</span> },
+    { accessorKey: "shipper", header: "Shipper", cell: ({ row }) => <span className="block max-w-[14rem] truncate" title={row.original.shipper}>{dash(row.original.shipper)}</span> },
+    { accessorKey: "consignee", header: "Consignee", cell: ({ row }) => <span className="block max-w-[14rem] truncate" title={row.original.consignee}>{dash(row.original.consignee)}</span> },
+    { accessorKey: "vessel", header: "Vessel", cell: ({ row }) => <span className="whitespace-nowrap text-muted-foreground">{dash(row.original.vessel)}</span> },
     { accessorKey: "etd", header: "ETD", cell: ({ row }) => <span className="whitespace-nowrap">{formatDate(row.original.etd)}</span> },
     { accessorKey: "eta", header: "ETA", cell: ({ row }) => <span className="whitespace-nowrap">{formatDate(row.original.eta)}</span> },
-    ...(showFinancials
-      ? ([
-          { accessorKey: "revenue", header: "Revenue", cell: ({ row }) => <span className="tabular-nums">{formatIDR(row.original.revenue)}</span> },
-          {
-            accessorKey: "margin", header: "Margin",
-            cell: ({ row }) => {
-              const m = row.original.margin;
-              return <span className={cn("tabular-nums font-medium", m < 10 ? "text-destructive" : m < 15 ? "text-warning" : "text-success")}>{formatPercent(m)}</span>;
-            },
-          },
-        ] as ColumnDef<JobRow>[])
-      : []),
+    { accessorKey: "invoice", header: "Invoice", cell: ({ row }) => <span className="whitespace-nowrap">{dash(row.original.invoice)}</span> },
+    { accessorKey: "status", header: "Status", cell: ({ row }) => <JobStatusBadge status={row.original.status} /> },
     {
       id: "actions",
       header: "",
@@ -98,11 +81,9 @@ export function JobsTable({ data, showFinancials }: { data: JobRow[]; showFinanc
     <DataTable
       columns={columns}
       data={data}
-      facets={FACETS}
-      searchPlaceholder="Cari no. job / customer / rute…"
-      searchKeys={["number", "customer", "route"]}
+      hideSearch
       onRowClick={(r) => router.push(`/jobs/${r.id}`)}
-      emptyTitle="Belum ada job"
+      emptyTitle={emptyTitle ?? "Belum ada job"}
     />
   );
 }

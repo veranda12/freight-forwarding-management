@@ -1,5 +1,4 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
-// Modul ini murni (tanpa next-auth) supaya bisa di-unit-test: izin dibaca dari objek user, batas data dikirim pemanggil.
 import { holderHasAnyPerm, type PermHolder, type PermissionKey } from "./permissions";
 import { BILL_STATUS_LABELS, INV_STATUS_LABELS, NOTE_STATUS_LABELS } from "./enums";
 import { SOURCE_LABEL } from "./journal-filter";
@@ -21,7 +20,10 @@ export const PROOF_KIND_LABEL: Record<ProofKind, string> = {
   tax: "Setoran Pajak",
 };
 
-/** Izin modul pemilik tiap jenis bukti (salah satu cukup). Jenis hanya dicari bila user boleh melihat modulnya. */
+/**
+ * Izin lihat tiap jenis bukti (salah satu cukup). Jurnal mengikuti halaman/PDF jurnal: hanya pemegang laporan
+ * akuntansi atau Kasir All yang melihat SEMUA jurnal (lihat journal-access.ts).
+ */
 export const PROOF_KIND_PERMS: Record<ProofKind, PermissionKey[]> = {
   journal: ["accounting.view", "kasir.view"],
   invoice: ["invoices.view"],
@@ -36,8 +38,14 @@ export function proofKindsFor(user: PermHolder | null | undefined): ProofKind[] 
   return PROOF_KINDS.filter((k) => holderHasAnyPerm(user, PROOF_KIND_PERMS[k]));
 }
 
-/** Batas data per jenis bukti (filter Prisma dari data-scope.ts). Jenis yang tidak disebut = tanpa batas. */
-export type ProofScopes = Partial<Record<ProofKind, object>>;
+/**
+ * Batas data per jenis, diisi `proofScopes()` di data-scope.ts. Jurnal dan setoran pajak adalah data akuntansi tanpa
+ * batas per orang (cukup izin lihatnya).
+ */
+export type ProofScopes = {
+  invoice?: Prisma.InvoiceWhereInput; bill?: Prisma.VendorBillWhereInput; payment?: Prisma.PaymentWhereInput;
+  voucher?: Prisma.VoucherWhereInput; note?: Prisma.NoteWhereInput;
+};
 
 const GROUPED = /^\d{1,3}(?:[.,]\d{3})+$/;
 
@@ -89,6 +97,25 @@ export function parseProofQuery(raw: string | null | undefined): ProofQuery | nu
   return { text, terms: text.split(" ").slice(0, 6), amount: parseIdAmount(text) };
 }
 
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Kata kunci, periode tanggal (YYYY-MM-DD, zona Jakarta), dan jenis bukti. Semuanya opsional. */
+export type ProofFilter = { query: ProofQuery | null; from: string | null; to: string | null; kind: ProofKind | null };
+
+/**
+ * Filter dari query string. Bisa kata kunci saja, periode saja, atau keduanya.
+ * Tanpa kata kunci dan tanpa periode → null (belum ada yang dicari). Tanggal terbalik ditukar.
+ */
+export function parseProofFilter(sp: { q?: string; from?: string; to?: string; kind?: string }): ProofFilter | null {
+  const query = parseProofQuery(sp.q);
+  let from = sp.from && ISO_DATE.test(sp.from) ? sp.from : null;
+  let to = sp.to && ISO_DATE.test(sp.to) ? sp.to : null;
+  if (from && to && from > to) [from, to] = [to, from];
+  const kind = (PROOF_KINDS as readonly string[]).includes(sp.kind ?? "") ? (sp.kind as ProofKind) : null;
+  if (!query && !from && !to) return null;
+  return { query, from, to, kind };
+}
+
 // ---------------------------------------------------------------- pencarian
 
 export type ProofHit = {
@@ -122,11 +149,26 @@ const jobWhere = (t: string): Prisma.JobWhereInput => ({
   OR: [{ number: ci(t) }, { hblNo: ci(t) }, { mblNo: ci(t) }, { hawbNo: ci(t) }, { mawbNo: ci(t) }, { customer: { name: ci(t) } }],
 });
 
-/** Setiap kata harus cocok di salah satu kolom; atau nominalnya sama persis. */
-function build<W>(q: ProofQuery, fields: (t: string) => W[], amount: (n: number) => W[]): { OR: W[] } | { AND: { OR: W[] }[] } {
-  const text = { AND: q.terms.map((t) => ({ OR: fields(t) })) };
-  if (q.amount === null) return text;
-  return { OR: [text as W, ...amount(q.amount)] };
+export type DateRange = { from?: string | null; to?: string | null };
+
+const startOf = (d: string) => new Date(`${d}T00:00:00+07:00`);
+const endOf = (d: string) => new Date(`${d}T23:59:59.999+07:00`);
+
+/**
+ * Setiap kata harus cocok di salah satu kolom; atau nominalnya sama persis.
+ * Ditambah batas tanggal bila periode diisi (tanpa kata kunci, hanya periode yang membatasi) dan batas data user (`scope`).
+ */
+function build<W>(q: ProofQuery | null, range: DateRange, scope: W | undefined, fields: (t: string) => W[], amount: (n: number) => W[]): { AND: W[] } {
+  const and: W[] = [];
+  if (q) {
+    const text = { AND: q.terms.map((t) => ({ OR: fields(t) })) } as W;
+    and.push(q.amount === null ? text : ({ OR: [text, ...amount(q.amount)] } as W));
+  }
+  if (range.from || range.to) {
+    and.push({ date: { ...(range.from ? { gte: startOf(range.from) } : {}), ...(range.to ? { lte: endOf(range.to) } : {}) } } as W);
+  }
+  if (scope) and.push(scope);
+  return { AND: and };
 }
 
 function jobsText(refs: JobRef[]) {
@@ -142,17 +184,12 @@ function jobsText(refs: JobRef[]) {
 const VOUCHER_STATUS: Record<string, string> = { ISSUED: "Diterbitkan", PAID: "Dibayar", CANCELLED: "Dibatalkan" };
 const n = (v: unknown) => Number(v ?? 0);
 
-async function searchKind(db: Db, kind: ProofKind, q: ProofQuery, take: number, scope: object = {}): Promise<ProofHit[]> {
-  // kata kunci/nominal DAN batas data user
-  const scoped = <W>(qq: ProofQuery, fields: (t: string) => W[], amount: (n: number) => W[]): W => {
-    const w = build<W>(qq, fields, amount) as W;
-    return (Object.keys(scope).length ? { AND: [w, scope] } : w) as W;
-  };
+async function searchKind(db: Db, kind: ProofKind, q: ProofQuery | null, range: DateRange, take: number, scopes: ProofScopes): Promise<ProofHit[]> {
   switch (kind) {
     case "journal": {
       const rows = await db.journalEntry.findMany({
-        where: scoped<Prisma.JournalEntryWhereInput>(
-          q,
+        where: build<Prisma.JournalEntryWhereInput>(
+          q, range, undefined,
           (t) => [{ number: ci(t) }, { description: ci(t) }, { lines: { some: { description: ci(t) } } }],
           (a) => [{ lines: { some: { OR: [{ debit: a }, { credit: a }] } } }],
         ),
@@ -169,8 +206,8 @@ async function searchKind(db: Db, kind: ProofKind, q: ProofQuery, take: number, 
     }
     case "invoice": {
       const rows = await db.invoice.findMany({
-        where: scoped<Prisma.InvoiceWhereInput>(
-          q,
+        where: build<Prisma.InvoiceWhereInput>(
+          q, range, scopes.invoice,
           (t) => [{ number: ci(t) }, { notes: ci(t) }, { customer: { name: ci(t) } }, { job: jobWhere(t) }, { lines: { some: { job: jobWhere(t) } } }],
           (a) => [{ total: a }, { subtotal: a }, { amountForeign: a }],
         ),
@@ -190,8 +227,8 @@ async function searchKind(db: Db, kind: ProofKind, q: ProofQuery, take: number, 
     }
     case "bill": {
       const rows = await db.vendorBill.findMany({
-        where: scoped<Prisma.VendorBillWhereInput>(
-          q,
+        where: build<Prisma.VendorBillWhereInput>(
+          q, range, scopes.bill,
           (t) => [
             { number: ci(t) }, { vendorRef: ci(t) }, { notes: ci(t) }, { vendor: { name: ci(t) } },
             { job: jobWhere(t) }, { lines: { some: { OR: [{ description: ci(t) }, { job: jobWhere(t) }] } } },
@@ -214,8 +251,8 @@ async function searchKind(db: Db, kind: ProofKind, q: ProofQuery, take: number, 
     }
     case "payment": {
       const rows = await db.payment.findMany({
-        where: scoped<Prisma.PaymentWhereInput>(
-          q,
+        where: build<Prisma.PaymentWhereInput>(
+          q, range, scopes.payment,
           (t) => [
             { number: ci(t) }, { reference: ci(t) }, { notes: ci(t) }, { customer: { name: ci(t) } }, { vendor: { name: ci(t) } },
             { allocations: { some: { OR: [
@@ -246,28 +283,32 @@ async function searchKind(db: Db, kind: ProofKind, q: ProofQuery, take: number, 
     }
     case "voucher": {
       const rows = await db.voucher.findMany({
-        where: scoped<Prisma.VoucherWhereInput>(
-          q,
+        where: build<Prisma.VoucherWhereInput>(
+          q, range, scopes.voucher,
           (t) => [
             { number: ci(t) }, { proofNumber: ci(t) }, { payee: ci(t) }, { notes: ci(t) }, { reference: ci(t) },
-            { vendor: { name: ci(t) } }, { job: jobWhere(t) },
+            { vendor: { name: ci(t) } }, { job: jobWhere(t) }, { invoice: { number: ci(t) } }, { bill: { number: ci(t) } },
           ],
           (a) => [{ total: a }],
         ),
         orderBy: [{ date: "desc" }, { number: "desc" }],
         take,
-        select: { id: true, number: true, proofNumber: true, date: true, payee: true, total: true, status: true, notes: true, journalEntryId: true, jobId: true, job: { select: JOB_SELECT } },
+        select: {
+          id: true, number: true, proofNumber: true, date: true, payee: true, total: true, status: true, notes: true, journalEntryId: true, jobId: true,
+          job: { select: JOB_SELECT }, invoice: { select: { number: true } }, bill: { select: { number: true } },
+        },
       });
       return rows.map((v) => ({
         kind, id: v.id, number: v.number, proofNumber: v.proofNumber, date: v.date.toISOString(), party: v.payee,
         ...jobsText([v.job]), amount: n(v.total), currency: "IDR", status: VOUCHER_STATUS[v.status] ?? v.status,
-        description: v.notes ?? "", journalEntryId: v.journalEntryId, parentId: v.jobId,
+        description: [v.invoice ? `Invoice ${v.invoice.number}` : v.bill ? `Bill ${v.bill.number}` : "", v.notes].filter(Boolean).join(" · "),
+        journalEntryId: v.journalEntryId, parentId: v.jobId,
       }));
     }
     case "note": {
       const rows = await db.note.findMany({
-        where: scoped<Prisma.NoteWhereInput>(
-          q,
+        where: build<Prisma.NoteWhereInput>(
+          q, range, scopes.note,
           (t) => [{ number: ci(t) }, { description: ci(t) }, { agent: { name: ci(t) } }],
           (a) => [{ amountIdr: a }, { amountForeign: a }],
         ),
@@ -284,7 +325,7 @@ async function searchKind(db: Db, kind: ProofKind, q: ProofQuery, take: number, 
     }
     case "tax": {
       const rows = await db.taxRemittance.findMany({
-        where: scoped<Prisma.TaxRemittanceWhereInput>(q, (t) => [{ ntpn: ci(t) }, { period: ci(t) }], (a) => [{ amount: a }]),
+        where: build<Prisma.TaxRemittanceWhereInput>(q, range, undefined, (t) => [{ ntpn: ci(t) }, { period: ci(t) }], (a) => [{ amount: a }]),
         orderBy: [{ date: "desc" }],
         take,
         select: { id: true, kind: true, period: true, date: true, amount: true, ntpn: true, status: true, journalEntryId: true },
@@ -299,14 +340,83 @@ async function searchKind(db: Db, kind: ProofKind, q: ProofQuery, take: number, 
   }
 }
 
-/** Cari bukti di semua jenis yang diizinkan. Tiap jenis maksimal `limit` hasil, `truncated` bila lebih. */
-/** `scopes` = batas data per jenis (filter yang sama dengan daftar & detail modulnya); kosong = tanpa batas. */
-export async function searchProofs(db: Db, q: ProofQuery, kinds: readonly ProofKind[], opts: { limit?: number; scopes?: ProofScopes } = {}): Promise<ProofResult[]> {
+/**
+ * Cari bukti di semua jenis yang diizinkan. Tiap jenis maksimal `limit` hasil, `truncated` bila lebih.
+ * `q` boleh null bila periode diisi: semua bukti di periode itu, terbaru dulu. `scopes` = batas data per jenis.
+ */
+export async function searchProofs(
+  db: Db, q: ProofQuery | null, kinds: readonly ProofKind[], opts: { limit?: number; scopes?: ProofScopes } & DateRange = {},
+): Promise<ProofResult[]> {
   const limit = opts.limit ?? 20;
+  const range = { from: opts.from, to: opts.to };
   return Promise.all(
     kinds.map(async (kind) => {
-      const hits = await searchKind(db, kind, q, limit + 1, opts.scopes?.[kind] ?? {});
+      const hits = await searchKind(db, kind, q, range, limit + 1, opts.scopes ?? {});
       return { kind, hits: hits.slice(0, limit), truncated: hits.length > limit };
     }),
   );
+}
+
+// ---------------------------------------------------------------- alur jurnal
+
+export type ProofJournalLine = { code: string; name: string; description: string | null; debit: number; credit: number };
+export type ProofJournal = { id: string; number: string; date: string; description: string; isReversal: boolean; lines: ProofJournalLine[] };
+
+const LINE_SELECT = {
+  select: { description: true, debit: true, credit: true, account: { select: { code: true, name: true } } },
+  orderBy: [{ debit: "desc" }, { id: "asc" }],
+} satisfies Prisma.JournalEntry$linesArgs;
+const ENTRY_SELECT = { id: true, number: true, date: true, description: true, isReversal: true, lines: LINE_SELECT } satisfies Prisma.JournalEntrySelect;
+type EntryRow = Prisma.JournalEntryGetPayload<{ select: typeof ENTRY_SELECT }>;
+
+const toJournal = (e: EntryRow): ProofJournal => ({
+  id: e.id, number: e.number, date: e.date.toISOString(), description: e.description, isReversal: e.isReversal,
+  lines: e.lines.map((l) => ({ code: l.account.code, name: l.account.name, description: l.description, debit: n(l.debit), credit: n(l.credit) })),
+});
+
+/**
+ * Jurnal di balik tiap bukti, ditambah jurnal pembaliknya bila bukti itu dibatalkan.
+ * Dikelompokkan per id jurnal asal; satu query untuk semua hasil pencarian.
+ */
+export async function proofJournals(db: Db, ids: readonly string[]): Promise<Record<string, ProofJournal[]>> {
+  const unique = [...new Set(ids)];
+  if (!unique.length) return {};
+  const rows = await db.journalEntry.findMany({
+    where: { id: { in: unique } },
+    select: { ...ENTRY_SELECT, reversedBy: { select: ENTRY_SELECT } },
+  });
+  return Object.fromEntries(rows.map((e) => [e.id, [toJournal(e), ...(e.reversedBy ? [toJournal(e.reversedBy)] : [])]]));
+}
+
+// ---------------------------------------------------------------- baris jurnal (tampilan Cari Bukti)
+
+export type ProofLineEntry = {
+  id: string; number: string; date: string; description: string;
+  source: Prisma.JournalEntryGetPayload<{ select: { source: true } }>["source"];
+  sourceId: string | null; isReversal: boolean; isReversed: boolean; user: string;
+  lines: ProofJournalLine[];
+};
+
+const LINE_ENTRY_SELECT = {
+  id: true, number: true, date: true, description: true, source: true, sourceId: true, isReversal: true, isReversed: true,
+  createdBy: { select: { name: true } }, lines: LINE_SELECT,
+} satisfies Prisma.JournalEntrySelect;
+
+/**
+ * Jurnal dari bukti yang ditemukan, ditambah jurnal pembaliknya, lengkap dengan user penginput.
+ * Urut tanggal lalu nomor; jurnal yang sama dari dua jenis bukti hanya muncul sekali.
+ */
+export async function proofLineEntries(db: Db, ids: readonly string[]): Promise<ProofLineEntry[]> {
+  const unique = [...new Set(ids)];
+  if (!unique.length) return [];
+  const rows = await db.journalEntry.findMany({
+    where: { OR: [{ id: { in: unique } }, { reversalOfId: { in: unique } }] },
+    select: LINE_ENTRY_SELECT,
+    orderBy: [{ date: "desc" }, { number: "desc" }],
+  });
+  return rows.map((e) => ({
+    id: e.id, number: e.number, date: e.date.toISOString(), description: e.description, source: e.source, sourceId: e.sourceId,
+    isReversal: e.isReversal, isReversed: e.isReversed, user: e.createdBy?.name ?? "-",
+    lines: e.lines.map((l) => ({ code: l.account.code, name: l.account.name, description: l.description, debit: n(l.debit), credit: n(l.credit) })),
+  }));
 }

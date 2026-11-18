@@ -22,7 +22,7 @@ const FACETS: Facet[] = [
   { columnId: "status", label: "Status", options: (Object.keys(INV_STATUS_LABELS) as InvoiceStatus[]).map((s) => ({ value: s, label: INV_STATUS_LABELS[s] })) },
 ];
 
-export function InvoicesTable({ data, canReceipt }: { data: InvoiceRow[]; canReceipt: boolean }) {
+export function InvoicesTable({ data, canReceipt, emptyTitle }: { data: InvoiceRow[]; canReceipt: boolean; emptyTitle?: string }) {
   const router = useRouter();
   const columns: ColumnDef<InvoiceRow>[] = [
     { accessorKey: "number", header: "No. Invoice", cell: ({ row }) => <span className="font-medium">{row.original.number}</span> },
@@ -53,6 +53,6 @@ export function InvoicesTable({ data, canReceipt }: { data: InvoiceRow[]; canRec
   ];
   return (
     <DataTable columns={columns} data={data} facets={FACETS} searchPlaceholder="Cari no. invoice, no. job, no. B/L, atau customer…"
-      searchKeys={["number", "customer", "job", "bl"]} onRowClick={(r) => router.push(`/invoices/${r.id}`)} emptyTitle="Belum ada invoice" />
+      searchKeys={["number", "customer", "job", "bl"]} onRowClick={(r) => router.push(`/invoices/${r.id}`)} emptyTitle={emptyTitle ?? "Belum ada invoice"} hideSearch />
   );
 }

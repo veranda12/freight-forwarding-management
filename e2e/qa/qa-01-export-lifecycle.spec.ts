@@ -114,7 +114,7 @@ test.describe.serial("QA-01 Alur Ekspor-Impor lintas role", () => {
     expect(await db.job.count({ where: { quotationId: S.quoId } })).toBe(1);
   });
 
-  test("05 Operation melengkapi job: container (valid & tidak valid), milestone, status", async ({ page }) => {
+  test("05 Operation melengkapi job: container (valid & tidak valid), status", async ({ page }) => {
     await login(page, "ops@demo.com");
     await page.goto(`/jobs/${S.jobId}`);
     await page.getByRole("tab", { name: /Containers/ }).click();
@@ -138,13 +138,7 @@ test.describe.serial("QA-01 Alur Ekspor-Impor lintas role", () => {
     await expect(page.getByText(`Container ${S.containerNo} tersimpan.`)).toBeVisible();
     expect(await db.jobContainer.count({ where: { jobId: S.jobId, containerNo: S.containerNo } })).toBe(1);
 
-    // milestone: centang yang pertama belum selesai → langsung tampil & tersimpan
-    await page.getByRole("tab", { name: "Milestones" }).click();
-    const first = page.getByRole("tabpanel").locator('ol button[aria-pressed="false"]').first();
-    if (await first.count()) {
-      await first.click();
-      await expect(page.getByRole("tabpanel").locator('ol button[aria-pressed="true"]').first()).toBeVisible();
-    }
+    // Tab Milestones dihapus atas permintaan client (095b30f), jadi tidak diuji lagi.
     // status Booked → Departed (ATD terisi)
     await page.getByRole("button", { name: /Ubah Status/ }).click();
     await page.getByRole("menuitem", { name: "Booked" }).click();
