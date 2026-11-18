@@ -142,10 +142,12 @@ describe("hak akses (role bawaan)", () => {
   });
   it("Finance mengelola costing, voucher, dan edit bukti; Sales tetap melihat tagihan dan margin", () => {
     const fin = perms("FINANCE");
-    for (const k of ["jobs.charges", "vouchers.create", "vouchers.pay", "vouchers.cancel", "invoices.edit", "cashEntry.edit", "manualJournal.edit", "kasir.view", "taxes.ppnRate", "coa.create"]) expect(fin.has(k), k).toBe(true);
+    for (const k of ["jobs.charges", "vouchers.create", "vouchers.pay", "invoices.edit", "bills.edit", "cashEntry.edit", "manualJournal.edit", "kasir.view", "taxes.ppnRate", "coa.create"]) expect(fin.has(k), k).toBe(true);
     const sales = perms("SALES");
     for (const k of ["costing.view", "invoices.view", "jobs.viewFinancials"]) expect(sales.has(k), k).toBe(true);
     for (const k of ["jobs.charges", "vouchers.view", "invoices.edit"]) expect(sales.has(k), k).toBe(false);
+    // Batal voucher khusus Admin sejak 18 Nov (client 17 Nov).
+    expect(fin.has("vouchers.cancel"), "vouchers.cancel").toBe(false);
   });
   it("buka/tutup job manual hanya Admin (tidak ada di role bawaan lain)", () => {
     for (const r of DEFAULT_ROLES) {

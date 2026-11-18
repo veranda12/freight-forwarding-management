@@ -70,9 +70,43 @@ describe("role awal", () => {
     }
     // Maker-checker quotation (aturan bisnis yang diminta) aktif bawaan: tidak ada role awal yang memegang decideOwn.
     for (const r of DEFAULT_ROLES) expect(normalizePermissions(r.permissions)).not.toContain("quotations.decideOwn");
-    // Pembatalan dokumen keuangan/STT buatan sendiri tetap boleh seperti sebelumnya (bisa dicabut admin).
-    expect(role("FINANCE").has("invoices.cancelOwn" as never)).toBe(true);
+    // Pembatalan dokumen keuangan khusus Admin sejak 18 Nov (client 17 Nov); STT tidak termasuk keputusan itu.
+    expect(role("FINANCE").has("invoices.cancelOwn" as never)).toBe(false);
     expect(role("OPERATION").has("domestic.cancelOwn" as never)).toBe(true);
+  });
+});
+
+describe("batal/hapus transaksi khusus Admin (client 17 Nov)", () => {
+  const ADMIN_ONLY = [
+    "invoices.cancel", "invoices.cancelOwn", "bills.cancel", "bills.cancelOwn", "vouchers.cancel", "vouchers.cancelOwn",
+    "payments.cancel", "payments.cancelOwn", "cashEntry.cancel", "cashEntry.cancelOwn", "cashEntry.transferCancel",
+    "cashEntry.transferCancelOwn", "manualJournal.cancel", "manualJournal.cancelOwn", "tax.cancel", "tax.cancelOwn",
+    "jobs.cancel", "jobs.statusBack", "closing.reopenMonth",
+  ] as const;
+
+  it("semua izin khusus Admin ada di katalog", () => {
+    for (const k of ADMIN_ONLY) expect(isPermissionKey(k), k).toBe(true);
+  });
+
+  it("tidak ada role bawaan non-sistem yang memegangnya", () => {
+    for (const r of DEFAULT_ROLES) {
+      const held = new Set(normalizePermissions(r.permissions));
+      for (const k of ADMIN_ONLY) expect(held.has(k), `${r.key}: ${k}`).toBe(false);
+    }
+  });
+
+  it("Admin dan Super Admin memegang semuanya", () => {
+    for (const key of ["ADMIN", "SUPER_ADMIN"]) {
+      const held = new Set(permissionsOfRole({ key, isSystem: true, permissions: [] }));
+      for (const k of ADMIN_ONLY) expect(held.has(k), `${key}: ${k}`).toBe(true);
+    }
+  });
+
+  it("Finance tetap bisa mencatat dan mengedit (bukan membatalkan)", () => {
+    const fin = new Set(normalizePermissions(DEFAULT_ROLES.find((r) => r.key === "FINANCE")!.permissions));
+    for (const k of ["invoices.edit", "invoices.receipt", "bills.edit", "bills.pay", "vouchers.create", "vouchers.pay", "cashEntry.edit", "manualJournal.edit", "closing.lockPeriod"] as const) {
+      expect(fin.has(k), k).toBe(true);
+    }
   });
 });
 
