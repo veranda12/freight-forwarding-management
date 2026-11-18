@@ -312,8 +312,8 @@ export async function recordReceiptTx(tx: Tx, invoiceId: string, input: ReceiptI
 }
 
 /** Penerimaan pembayaran invoice dalam transaksinya sendiri. */
-export async function recordReceiptCore(db: PrismaClient, invoiceId: string, input: ReceiptInput, userId?: string): Promise<void> {
-  await db.$transaction((tx) => recordReceiptTx(tx, invoiceId, input, userId));
+export async function recordReceiptCore(db: PrismaClient, invoiceId: string, input: ReceiptInput, userId?: string): Promise<PaymentRecorded> {
+  return db.$transaction((tx) => recordReceiptTx(tx, invoiceId, input, userId));
 }
 
 /**

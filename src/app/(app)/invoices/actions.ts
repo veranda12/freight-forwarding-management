@@ -39,10 +39,11 @@ export async function editInvoiceAction(invoiceId: string, edit: InvoiceEdit): P
 }
 
 /** Catat penerimaan. IDR: nominal IDR. Valas: nominal valas + kurs pembayaran. */
-export async function recordReceipt(invoiceId: string, input: ReceiptInput): Promise<{ ok: boolean; error?: string }> {
+export async function recordReceipt(invoiceId: string, input: ReceiptInput): Promise<{ ok: boolean; error?: string; journalEntryId?: string }> {
   const user = await assertCan("payments", "write");
+  let journalEntryId: string;
   try {
-    await recordReceiptCore(prisma, invoiceId, input, user.id);
+    ({ journalEntryId } = await recordReceiptCore(prisma, invoiceId, input, user.id));
   } catch (e) {
     return { ok: false, error: errorMessage(e, "Gagal mencatat pembayaran.") };
   }
@@ -55,11 +56,13 @@ export async function recordReceipt(invoiceId: string, input: ReceiptInput): Pro
   revalidatePath("/invoices");
   revalidatePath("/payments");
   revalidatePath("/accounting");
-  return { ok: true };
+  return { ok: true, journalEntryId };
 }
 
 export async function cancelInvoice(invoiceId: string): Promise<{ ok: boolean; error?: string }> {
   const user = await assertCan("invoices", "write");
+  // Hapus/batal transaksi khusus Admin (permintaan client 17 Nov).
+  if (user.role !== "ADMIN") return { ok: false, error: "Hanya Admin yang bisa membatalkan invoice." };
   try {
     const r = await cancelInvoiceCore(prisma, invoiceId, user.id);
     await writeAudit({ entity: "Invoice", entityId: invoiceId, action: "CANCEL", summary: `Reversal ${r.number}, ${r.reopened} baris selling dibuka kembali`, userId: user.id });

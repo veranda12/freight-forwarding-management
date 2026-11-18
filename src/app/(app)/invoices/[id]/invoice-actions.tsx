@@ -60,13 +60,21 @@ export function InvoiceActions({
   }
 
   function submit() {
+    // Tab cetak dibuka saat klik (sebelum menunggu server) supaya tidak diblokir popup blocker,
+    // lalu diarahkan ke voucher penerimaan (BM/KM) begitu pelunasan tersimpan (permintaan client 17 Nov).
+    const win = window.open("", "_blank");
+    if (win) win.document.write("<p style=\"font-family:sans-serif;padding:24px\">Menyiapkan voucher penerimaan...</p>");
     start(async () => {
       const input = isFx
         ? { amountForeign: Number(amountF), paymentRate: Number(payRate), method, reference, bankAccountId }
         : { amount: Number(amount), method, reference, deductions, bankAccountId };
       const res = await recordReceipt(invoiceId, input);
-      if (res.ok) { toast.success("Pembayaran dicatat."); setOpen(false); router.refresh(); }
-      else toast.error(res.error ?? "Gagal.");
+      if (res.ok) {
+        toast.success("Pembayaran dicatat.");
+        const url = res.journalEntryId ? `/api/accounting/journals/${res.journalEntryId}/pdf` : null;
+        if (url && win) win.location.href = url; else if (url) window.open(url, "_blank"); else win?.close();
+        setOpen(false); router.refresh();
+      } else { win?.close(); toast.error(res.error ?? "Gagal."); }
     });
   }
 
