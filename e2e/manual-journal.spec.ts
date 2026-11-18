@@ -16,7 +16,7 @@ async function pickAccount(page: Page, row: number, account: RegExp) {
 }
 
 test.describe("Jurnal Manual", () => {
-  test("Finance memposting jurnal seimbang lalu membatalkannya", async ({ page }) => {
+  test("Finance memposting jurnal seimbang; Admin membatalkannya (batal khusus Admin)", async ({ page }) => {
     await login(page, "finance@demo.com");
     await page.goto("/accounting/manual-journal");
     await expect(page.getByRole("heading", { name: "Jurnal Umum" })).toBeVisible();
@@ -38,8 +38,13 @@ test.describe("Jurnal Manual", () => {
     await dialog.getByRole("button", { name: "Posting jurnal" }).click();
     await expect(page.getByText("Jurnal Umum diposting.")).toBeVisible();
 
+    await expect(page.locator("tr", { hasText: desc }).first()).toContainText("Berlaku");
+    await expect(page.locator("tr", { hasText: desc }).first().getByRole("button", { name: /Batalkan/ })).toHaveCount(0);
+
+    await page.context().clearCookies();
+    await login(page, "admin@demo.com");
+    await page.goto("/accounting/manual-journal");
     const row = page.locator("tr", { hasText: desc }).first();
-    await expect(row).toContainText("Berlaku");
     await row.getByRole("button", { name: /Batalkan/ }).click();
     await page.getByRole("dialog").getByPlaceholder("contoh: salah akun").fill("uji E2E");
     await page.getByRole("dialog").getByRole("button", { name: /Ya, batalkan/ }).click();

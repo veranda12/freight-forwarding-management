@@ -45,7 +45,7 @@ test.describe("Baris pajak, nomor bukti, dan cetak SOP", () => {
     await dialog.getByPlaceholder("Biaya admin bank Oktober").fill(desc);
     await dialog.getByRole("combobox", { name: "Akun lawan" }).click();
     await page.getByPlaceholder("Ketik kode atau nama…").fill("6310");
-    await page.getByRole("button", { name: /^6310 · / }).click();
+    await page.getByRole("option", { name: /^6310 · / }).click();
     await dialog.getByLabel(/^Nominal /).fill("2600000");
 
     await dialog.getByRole("button", { name: "Tambah baris pajak" }).click();
@@ -93,7 +93,7 @@ test.describe("Baris pajak, nomor bukti, dan cetak SOP", () => {
     await dialog.getByPlaceholder("Bunga jasa giro Oktober").fill(desc);
     await dialog.getByRole("combobox", { name: "Akun lawan" }).click();
     await page.getByPlaceholder("Ketik kode atau nama…").fill("4900");
-    await page.getByRole("button", { name: /^4900 · / }).click();
+    await page.getByRole("option", { name: /^4900 · / }).click();
     await dialog.getByLabel(/^Nominal /).fill("10000000");
 
     await dialog.getByRole("button", { name: "Tambah baris pajak" }).click();

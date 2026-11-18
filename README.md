@@ -49,7 +49,7 @@ Password semua akun: **`demo123`**
 | Sales | sales@demo.com | Buat & **ajukan** quotation, customer, rate — hanya data miliknya sendiri |
 | Operation | ops@demo.com, ops2@demo.com | Review/kirim/kembalikan, terima/tolak, convert quotation; job, booking, container, tracking, dokumen, domestik |
 | Documentation | docs@demo.com | Dokumen B/L/AWB/SI/DO, tracking |
-| Finance | finance@demo.com | Costing, invoice, bill, payment, accounting, laporan |
+| Finance | finance@demo.com | Costing, invoice, bill, payment, accounting, laporan (tanpa batal transaksi: khusus Admin) |
 | Management | manager@demo.com | Read-only semua modul + dashboard & laporan |
 
 Hak akses diatur di menu **Sistem → Role Management** (khusus **Super Admin**): Super Admin membuat/mengubah role dengan daftar centang izin per

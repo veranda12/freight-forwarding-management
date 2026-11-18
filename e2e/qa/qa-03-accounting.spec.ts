@@ -23,16 +23,20 @@ async function cashOut(page: Page, desc: string, amount: string, dateKey?: strin
 }
 
 test.describe.serial("QA-03 Akuntansi", () => {
-  test("01 Kas keluar tercatat dengan jurnal seimbang, lalu dibatalkan (jurnal pembalik)", async ({ page }) => {
+  test("01 Kas keluar dicatat Finance dengan jurnal seimbang, lalu dibatalkan Admin (jurnal pembalik)", async ({ page }) => {
     await login(page, "finance@demo.com");
     const desc = `QA kas keluar ${Date.now()}`;
     await cashOut(page, desc, "125000");
     await expect(page.getByText("Jurnal Pengeluaran dicatat.")).toBeVisible();
     const je = await db.journalEntry.findFirstOrThrow({ where: { description: { contains: desc } }, include: { lines: true } });
     expect(je.createdById).toBe(await userId("finance@demo.com"));
-    expect(je.number).toMatch(/^SLG\/BK\/\d{2}\/\d{2}\/\d{3,}$/); // nomor bukti bank keluar (client SLG)
+    expect(je.number).toMatch(/^SLG\/BK\/\d{2}\/\d{2}\/\d{2}\/\d{4}$/); // nomor bukti bank keluar (client SLG, dengan tanggal)
     expect(je.lines.reduce((s, l) => s + Number(l.debit), 0)).toBeCloseTo(125000, 2);
+    // Batal transaksi khusus Admin (client 17 Nov): Finance tidak punya tombolnya.
+    await expect(page.locator("tr", { hasText: desc }).first().getByRole("button", { name: /Batalkan/ })).toHaveCount(0);
 
+    await login(page, "admin@demo.com");
+    await page.goto("/accounting/cash-entry");
     const row = page.locator("tr", { hasText: desc }).first();
     await row.getByRole("button", { name: /Batalkan/ }).click();
     await page.getByRole("dialog").getByPlaceholder("contoh: salah nominal").fill("uji QA pembatalan");
@@ -44,7 +48,7 @@ test.describe.serial("QA-03 Akuntansi", () => {
     await expectLedgerBalanced();
   });
 
-  test("02 Transfer antar rekening lalu dibatalkan", async ({ page }) => {
+  test("02 Transfer antar rekening dicatat Finance, lalu dibatalkan Admin", async ({ page }) => {
     await login(page, "finance@demo.com");
     await page.goto("/accounting/cash-entry");
     const before = await db.journalEntry.count();
@@ -63,6 +67,11 @@ test.describe.serial("QA-03 Akuntansi", () => {
 
     // tabel transfer tidak menampilkan keterangan: cari baris lewat nomor jurnalnya
     const je = await db.journalEntry.findFirstOrThrow({ where: { description: { contains: note } } });
+    await expect(page.locator("tr", { hasText: je.number }).first().getByRole("button", { name: /Batalkan/ })).toHaveCount(0);
+
+    await login(page, "admin@demo.com");
+    await page.goto("/accounting/cash-entry");
+    await page.getByRole("tab", { name: "Transfer antar rekening" }).click();
     const row = page.locator("tr", { hasText: je.number }).first();
     await row.getByRole("button", { name: /Batalkan/ }).click();
     await page.getByRole("dialog").getByPlaceholder("contoh: salah rekening tujuan").fill("uji QA pembatalan transfer");
@@ -72,7 +81,7 @@ test.describe.serial("QA-03 Akuntansi", () => {
     await expectLedgerBalanced();
   });
 
-  test("03 Setor pajak satu masa lalu batalkan setoran", async ({ page }) => {
+  test("03 Setor pajak satu masa (Finance), lalu setorannya dibatalkan Admin", async ({ page }) => {
     await login(page, "finance@demo.com");
     await page.goto("/accounting/tax");
     const setor = page.getByRole("button", { name: /^Setor$/ }).first();
@@ -87,7 +96,10 @@ test.describe.serial("QA-03 Akuntansi", () => {
     expect(remit.createdById).toBe(await userId("finance@demo.com"));
     expect(await db.taxRemittance.count({ where: { status: "POSTED" } })).toBe(before + 1);
     await expectLedgerBalanced();
+    await expect(page.getByRole("button", { name: /Batalkan/ })).toHaveCount(0);
 
+    await login(page, "admin@demo.com");
+    await page.goto("/accounting/tax");
     const cancel = page.getByRole("button", { name: /Batalkan/ }).first();
     await cancel.click();
     await page.getByRole("dialog").getByPlaceholder("contoh: salah masa pajak").fill("uji QA batal setor");
@@ -97,22 +109,25 @@ test.describe.serial("QA-03 Akuntansi", () => {
     await expectLedgerBalanced();
   });
 
-  test("04 Maker-checker diatur Super Admin: izin 'batal jurnal manual sendiri' dicabut → Finance ditolak; dikembalikan → boleh", async ({ browser }) => {
+  test("04 Izin batal diatur Super Admin: Finance diberi batal jurnal umum tanpa 'buatan sendiri' → ditolak; diberi keduanya → boleh", async ({ browser }) => {
     const admin = await (await browser.newContext()).newPage();
     const fin = await (await browser.newContext()).newPage();
-    const setOwn = async (on: boolean) => {
+    const setPerms = async (cancel: boolean, own: boolean) => {
       await admin.goto("/roles");
       await admin.getByRole("link", { name: "Finance", exact: true }).click();
-      const box = admin.locator('input[data-perm="manualJournal.cancelOwn"]');
-      if ((await box.isChecked()) !== on) await box.setChecked(on);
+      for (const [key, on] of [["manualJournal.cancel", cancel], ["manualJournal.cancelOwn", own]] as const) {
+        const box = admin.locator(`input[data-perm="${key}"]`);
+        if ((await box.isChecked()) !== on) await box.setChecked(on);
+      }
       await admin.getByRole("button", { name: /Simpan role/ }).click();
       await admin.waitForURL("**/roles");
     };
     try {
-      // Role Management khusus Super Admin
+      // Role Management khusus Super Admin. Bawaan Finance tanpa izin batal (client 17 Nov).
       await login(admin, "superadmin@demo.com");
-      await setOwn(false);
+      await setPerms(true, false);
       const role = await db.appRole.findUniqueOrThrow({ where: { key: "FINANCE" } });
+      expect((role.permissions as string[]).includes("manualJournal.cancel")).toBe(true);
       expect((role.permissions as string[]).includes("manualJournal.cancelOwn")).toBe(false);
 
       await login(fin, "finance@demo.com");
@@ -137,8 +152,8 @@ test.describe.serial("QA-03 Akuntansi", () => {
       const je = await db.journalEntry.findFirstOrThrow({ where: { description: { contains: desc } } });
       expect(je.isReversed).toBe(false);
 
-      // izin dikembalikan → langsung berlaku tanpa login ulang
-      await setOwn(true);
+      // izin 'buatan sendiri' ditambahkan → langsung berlaku tanpa login ulang
+      await setPerms(true, true);
       await fin.goto("/accounting/manual-journal");
       await fin.locator("tr", { hasText: desc }).first().getByRole("button", { name: /Batalkan/ }).click();
       await fin.getByRole("dialog").getByPlaceholder("contoh: salah akun").fill("uji maker-checker");
@@ -146,7 +161,8 @@ test.describe.serial("QA-03 Akuntansi", () => {
       await expect(fin.getByText(/Jurnal dibalik dengan JE\//)).toBeVisible();
       expect((await db.journalEntry.findUniqueOrThrow({ where: { id: je.id } })).isReversed).toBe(true);
     } finally {
-      await setOwn(true).catch(() => undefined);
+      // kembali ke bawaan: Finance tanpa izin batal
+      await setPerms(false, false).catch(() => undefined);
       await admin.context().close();
       await fin.context().close();
     }

@@ -63,7 +63,7 @@ test.describe("Demo Freight Forwarding Management System", () => {
     // costing pindah ke halaman sendiri (penyesuaian client SLG): tombol Buka Costing → profitabilitas
     await page.getByRole("link", { name: /Buka Costing/ }).click();
     await page.waitForURL(/\/costing\/.+/);
-    await expect(page.getByText("Gross Profit")).toBeVisible();
+    await expect(page.getByText("Gross Profit", { exact: true })).toBeVisible();
     const resp = await page.request.get(`/api/documents/hbl/${id}`);
     expect(resp.status()).toBe(200);
     expect(resp.headers()["content-type"]).toContain("pdf");

@@ -60,6 +60,15 @@ Format: **Keputusan** — _alasan_.
   disembunyikan untuk role lain (Cari Bukti: `entryActions`). Hapus baris biaya dan container di job tetap untuk
   Finance/Ops karena bagian dari input harian, bukan transaksi yang sudah terjurnal.
 - **Catat Pembayaran invoice langsung membuka cetakan voucher penerimaan** (BM/KM), sama seperti Bayar bill.
+- **Di Role Management (branch `feat/slg-role-management-pg`, 2026-11-18) "khusus Admin" = izin, bukan nama role.**
+  _Cek `role === "ADMIN"` memblokir Super Admin dan mengabaikan Role Management._ Izin batal yang sudah ada
+  (`invoices.cancel`, `vouchers.cancel`, `cashEntry.cancel`, `cashEntry.transferCancel`, `tax.cancel`,
+  `manualJournal.cancel`, `jobs.cancel`) ditambah izin baru `bills.cancel`, `payments.cancel` (pelunasan invoice dan
+  pembayaran vendor), `jobs.statusBack` (mundurkan status job), dan `closing.reopenMonth` (buka bulan closing); masing-masing
+  batal punya pasangan `*Own` (maker-checker). Admin dan Super Admin memegang semuanya dari kode. Role bawaan Finance dan
+  Operation **tidak** memegangnya (migrasi `20261122090000_admin_only_cancel` mencabut dari baris yang sudah ada); Super
+  Admin bisa memberikannya ke role kustom. Edit bill jadi izin sendiri `bills.edit` (dulu ikut izin membuat bill).
+  Batal STT (`domestic.cancel`) tidak termasuk keputusan client, jadi tetap.
 
 ## Voucher = pelunasan, nomor BK/BM/KK/KM (2026-11-17, menggantikan "dokumen pencatatan saja" di bawah)
 
@@ -99,6 +108,11 @@ Format: **Keputusan** — _alasan_.
 
 ## Import Excel master Customer, Vendor, Commodity (2026-11-09)
 
+- **Di Role Management (2026-11-18) import mengikuti izin dan batas data seperti form**: customer butuh
+  `customers.create` + `customers.edit`, vendor `vendors.edit`, commodity `commodities.edit` (`IMPORT_PERMS`). Customer
+  baru tercatat sebagai buatan pengimpor (`createdById`), dan baris yang kodenya milik customer di luar batas data user
+  **dilewati** ("di luar batas data Anda"), sama dengan form Edit Customer. _Tanpa ini Sales bisa menimpa customer Sales
+  lain lewat kodenya._
 - **Template dari kode** (`src/lib/master-import.ts`, satu spesifikasi kolom untuk template, pembacaan, dan petunjuk):
   sheet Data (header, kolom teks untuk NPWP/telepon/kode, dropdown Ya/Tidak dan Tipe vendor), Petunjuk, Contoh. Contoh
   sengaja di sheet terpisah supaya tidak ikut ter-import.
@@ -114,7 +128,7 @@ Format: **Keputusan** — _alasan_.
 
 ## Role Management (PostgreSQL sejak 2026-11-08, port dari branch MariaDB; menggantikan RBAC 6 role tetap)
 
-- **Role kustom (tabel `AppRole`) berisi daftar kunci izin; tiap user satu role** — _admin perlu membuat/mengubah role tanpa mengubah kode._ Katalog izin satu-satunya di `src/lib/permissions.ts` (124 izin per grup menu → modul). Jenis: `view` (menu), `action` (tombol), `approve` (kirim/terima/batal/posting), `own` (maker-checker), `scope` (lihat semua data). Izin aksi apa pun menyiratkan `view` modulnya (`normalizePermissions`). Kunci tak dikenal diabaikan.
+- **Role kustom (tabel `AppRole`) berisi daftar kunci izin; tiap user satu role** — _admin perlu membuat/mengubah role tanpa mengubah kode._ Katalog izin satu-satunya di `src/lib/permissions.ts` (148 izin per grup menu → modul, per 2026-11-18). Jenis: `view` (menu), `action` (tombol), `approve` (kirim/terima/batal/posting), `own` (maker-checker), `scope` (lihat semua data). Izin aksi apa pun menyiratkan `view` modulnya (`normalizePermissions`). Kunci tak dikenal diabaikan.
 - **Dua role sistem** (`isSystem`, tidak bisa diubah/dihapus; izinnya dihitung dari kode oleh `permissionsOfRole`, kolom `permissions` hanya catatan) — _keputusan Andhika 2026-11-08:_
   - **Super Admin** = semua izin, satu-satunya pemegang **Role Management** (`roles.view`, `roles.manage`).
   - **Admin** = semua izin **kecuali** Role Management; tetap memegang User Management, setting, audit, dll.
@@ -125,7 +139,7 @@ Format: **Keputusan** — _alasan_.
 - **Izin dibaca dari DB setiap request** (`getCurrentUser`, `react` `cache`); token login hanya menyimpan id — _perubahan role dan penonaktifan user langsung berlaku; middleware edge tidak bisa membaca DB, jadi middleware hanya cek login._ Halaman: `requirePerm` (redirect ke dashboard atau `/no-access`); server action/route: `assertPerm` (ForbiddenError berpesan jelas). Semua server action wajib memanggil `assertPerm` (kecuali login/logout).
 - **Batas data** (`src/lib/data-scope.ts`): tanpa `<modul>.viewAll`, user hanya melihat data yang ia **Sales PIC atau pembuatnya** (`createdById`, kolom baru; data lama tanpa pembuat dinilai dari Sales PIC). Dokumen turunan ikut pemilik job/STT/customer. Diterapkan di daftar, detail (`findFirst` id + scope → 404), aksi berbasis id, pencarian, dashboard, laporan, Excel, PDF. **Akuntansi & master data tidak dibatasi** (tidak bermakna per orang).
 - **Alur quotation sesuai bisnis**: Draft → **Diajukan** (Sales, `submit`) → Kirim (`send`, margin < 10% butuh `sendLowMargin`) atau Kembalikan + catatan (`return`) → Terima/Tolak (`decide`) → Convert (`convert`). Transisi status atomik (`updateMany` dengan status asal).
-- **Maker-checker** (`assertNotOwn`): pembuat/pengaju/pengirim quotation tidak boleh mengirim/mengembalikan/memutuskannya, kecuali punya `quotations.decideOwn` (bawaan: tidak ada yang punya). Pembatalan invoice, kas, transfer, jurnal manual, setoran pajak, dan STT punya pasangan `*Own`; role awal Finance/Operation **memegangnya** agar perilaku lama tetap (bisa dicabut admin).
+- **Maker-checker** (`assertNotOwn`): pembuat/pengaju/pengirim quotation tidak boleh mengirim/mengembalikan/memutuskannya, kecuali punya `quotations.decideOwn` (bawaan: tidak ada yang punya). Pembatalan invoice, bill, voucher, pelunasan, kas, transfer, jurnal manual, setoran pajak, dan STT punya pasangan `*Own`. Sejak 2026-11-18 role awal Finance/Operation tidak memegang izin batal transaksi (lihat "Transaksi batal dan hak hapus"); `domestic.cancel(+Own)` Operation tetap.
 - Role awal: Sales (buat/ajukan, data sendiri), Operation (review/kirim/putuskan/convert, job, domestik), Documentation, Finance, Management (semua `view` + `viewAll`, tanpa aksi kecuali export/cetak). Seed demo punya **dua** user Operation (`ops@`, `ops2@`) karena maker-checker.
 - Migrasi PostgreSQL `20261108090000_role_management` aman untuk DB berisi data (buat role → petakan enum lama `role_<key>` → hapus enum), diuji di DB kosong dan DB berisi data lama (`prisma migrate diff` kosong). Role awal di migrasi dibuat dari katalog saat itu; `ensureDefaultRoles` (seed) hanya membuat role yang belum ada.
 - **Bukan bagian port** (lapisan khusus MySQL): `prisma-options.ts` (isolasi READ COMMITTED sudah bawaan PostgreSQL), hilangnya `mode: "insensitive"`, raw SQL MySQL. Pencocokan teks di PostgreSQL tetap `mode: "insensitive"`, termasuk `route-match.ts` (D-08).

@@ -4,9 +4,10 @@ import { createBillCore } from "../src/lib/payables";
 import { createInvoiceCore } from "../src/lib/receivables";
 
 /**
- * E2E voucher dari vendor bill dan invoice sebagai dokumen pencatatan (keputusan 2026-11-09): tombol di detail dokumen,
- * centang baris per job, tabel Kode COA otomatis, simpan TANPA pembayaran dan tanpa mengubah status dokumen, cetak,
- * batalkan dari daftar, tombol Buat Voucher di Jurnal Penerimaan & Pengeluaran, form bertab, dan batas izin (termasuk kiriman ulang action).
+ * E2E voucher dari vendor bill dan invoice. Sejak 2026-11-17 (DECISIONS.md "Voucher = pelunasan") voucher MENCATAT
+ * pelunasan saat disimpan dan nomornya = nomor bukti BK/BM/KK/KM. Diuji: tombol di detail dokumen, centang baris per job,
+ * tabel Kode COA otomatis, status dokumen ikut berubah, cetak, batalkan dari daftar (khusus Admin, membatalkan pelunasannya),
+ * tombol Buat Voucher di Jurnal Penerimaan & Pengeluaran, form bertab, dan batas izin (termasuk kiriman ulang action).
  * Memeriksa UI sekaligus database: DATABASE_URL wajib DB uji yang sama dengan server (ditolak bila ffms / ffms_pgcheck).
  */
 
@@ -57,14 +58,13 @@ async function fixtures() {
 test.afterAll(async () => { await db.$disconnect(); });
 
 test.describe("Voucher dari invoice dan vendor bill", () => {
-  test("Bill lintas job: voucher per job dari detail bill, tabel COA otomatis, status bill tidak berubah, cetak", async ({ page }) => {
+  test("Bill lintas job: voucher per job dari detail bill mencatat pembayaran BK, status bill ikut berubah, cetak", async ({ page }) => {
     const { A, B, billId } = await fixtures();
-    const ledgerBefore = { entries: await db.journalEntry.count(), payments: await db.payment.count() };
     await login(page, "finance@demo.com");
     await page.goto(`/bills/${billId}`);
     await page.locator(`a[href="/vouchers/new?bill=${billId}"]:visible`).click();
     await expect(page.getByRole("heading", { name: "Buat Voucher" })).toBeVisible();
-    await expect(page.getByText(/Voucher hanya pencatatan: tidak membuat jurnal/)).toBeVisible();
+    await expect(page.getByText(/Simpan = pembayaran sebesar nilai voucher langsung dicatat/)).toBeVisible();
 
     await page.getByRole("checkbox", { name: new RegExp(`${A.number.replace(/\//g, "\\/")}$`) }).check();
     // Tabel Kode COA otomatis: biaya + PPN Masukan di Debit, PPh 23 + bank di Kredit (job A membawa pajak)
@@ -72,37 +72,34 @@ test.describe("Voucher dari invoice dan vendor bill", () => {
     await expect(table).toBeVisible();
     await expect(table.getByRole("row", { name: /PPN Masukan/ })).toContainText("1400");
     await expect(table.getByRole("row", { name: /PPh 23 dipotong/ })).toContainText("2200");
-    await expect(table.getByRole("row", { name: /Pembayaran kepada/ })).toContainText(rp("991.000"));
     await expect(table.getByRole("row", { name: /Total/ })).toContainText(rp("1.011.000"));
+    const popup = page.context().waitForEvent("page");
     await page.getByRole("button", { name: "Simpan voucher" }).click();
-    await expect(page.getByText(/Voucher SLG\/VC\/.+ tersimpan\./)).toBeVisible();
+    await expect(page.getByText(/Voucher SLG\/[BK]K\/.+ tersimpan, pembayaran sudah dicatat\./)).toBeVisible();
+    await (await popup).close();
     // Sesudah simpan: ke daftar Voucher, voucher baru di baris paling atas dan disorot
     await page.waitForURL(/\/vouchers\?baru=/);
-    const firstSaved = await db.voucher.findFirstOrThrow({ where: { billId }, orderBy: { createdAt: "desc" } });
-    expect(new URL(page.url()).searchParams.get("baru")).toBe(firstSaved.id);
-    const topRow = page.locator("main tbody tr").first();
-    await expect(topRow).toContainText(firstSaved.number);
-    await expect(topRow).toContainText("Baru disimpan");
-    await expect(page.locator("main").getByText("Baru disimpan")).toHaveCount(1);
-
+    const first = await db.voucher.findFirstOrThrow({ where: { billId }, orderBy: { createdAt: "desc" }, include: { payment: true } });
+    expect(new URL(page.url()).searchParams.get("baru")).toBe(first.id);
+    await expect(page.locator("main tbody tr").first()).toContainText(first.number);
+    // Satu transaksi satu nomor: nomor voucher = nomor bukti pembayaran.
+    expect(first.payment?.number).toBe(first.number);
     let bill = await db.vendorBill.findUniqueOrThrow({ where: { id: billId } });
-    expect([bill.status, bill.amountPaid.toNumber()]).toEqual(["UNPAID", 0]);
+    expect([bill.status, bill.amountPaid.toNumber()]).toEqual(["PARTIAL", first.total.toNumber()]);
 
+    // Baris job A sudah dipakai; job B divoucher terpisah → bill lunas.
     await page.goto(`/vouchers/new?bill=${billId}`);
     await expect(page.getByRole("checkbox", { name: new RegExp(`${A.number.replace(/\//g, "\\/")}$`) })).toBeDisabled();
     await page.getByRole("checkbox", { name: new RegExp(`${B.number.replace(/\//g, "\\/")}$`) }).check();
+    const popup2 = page.context().waitForEvent("page");
     await page.getByRole("button", { name: "Simpan voucher" }).click();
+    await (await popup2).close();
     await page.waitForURL(/\/vouchers\?baru=/);
     bill = await db.vendorBill.findUniqueOrThrow({ where: { id: billId } });
-    expect([bill.status, bill.amountPaid.toNumber()]).toEqual(["UNPAID", 0]);
-    expect({ entries: await db.journalEntry.count(), payments: await db.payment.count() }).toEqual(ledgerBefore);
-    // Bill masih bisa dibayar seperti biasa, dan tombol voucher tetap ada (voucher tidak terikat status bayar)
-    await page.goto(`/bills/${billId}`);
-    await expect(page.locator(`a[href="/vouchers/new?bill=${billId}"]:visible`)).toBeVisible();
-    await expect(page.locator("main").getByText("Total voucher aktif")).toBeVisible();
+    expect([bill.status, bill.amountPaid.toNumber()]).toEqual(["PAID", bill.total.toNumber()]);
 
     const vs = await db.voucher.findMany({ where: { billId }, orderBy: { number: "asc" } });
-    expect(vs.map((v) => [v.total.toNumber(), v.paymentId, v.journalEntryId])).toEqual([[991_000, null, null], [300_000, null, null]]);
+    expect(vs.every((v) => !!v.paymentId)).toBe(true);
     for (const v of vs) {
       const pdf = await page.request.get(`/api/vouchers/${v.id}/pdf`);
       expect(pdf.status()).toBe(200);
@@ -111,55 +108,60 @@ test.describe("Voucher dari invoice dan vendor bill", () => {
     await page.goto("/vouchers");
     const row = page.locator("main tr", { hasText: vs[0].number });
     await expect(row).toContainText("Bill");
-    await expect(row).not.toContainText(/Lunas|Belum dibayar/);
     await expect(row.getByRole("button", { name: "Bayar" })).toHaveCount(0);
+    // Finance tidak bisa membatalkan (khusus Admin, client 17 Nov).
+    await expect(row.getByRole("button", { name: "Batalkan" })).toHaveCount(0);
   });
 
-  test("Invoice: voucher penerimaan dari detail invoice, Bank di Debit, status invoice tetap", async ({ page }) => {
+  test("Invoice: voucher penerimaan dari detail invoice mencatat penerimaan BM, status invoice ikut berubah", async ({ page }) => {
     const { invoiceId } = await fixtures();
     await login(page, "finance@demo.com");
     await page.goto(`/invoices/${invoiceId}`);
     await page.locator(`a[href="/vouchers/new?invoice=${invoiceId}"]:visible`).click();
     await expect(page.getByRole("link", { name: "Invoice", exact: true })).toHaveAttribute("aria-current", "page");
-    await expect(page.getByLabel("PPh 23 customer")).toHaveCount(0);
     const inv = await db.invoice.findUniqueOrThrow({ where: { id: invoiceId }, include: { lines: { orderBy: [{ sortOrder: "asc" }, { id: "asc" }] } } });
     await page.locator("main label").filter({ hasText: /Rp\s2\.000\.000/ }).first().getByRole("checkbox").check();
     const carries = inv.lines[0].amount.toNumber() === 2_000_000;
     const expected = 2_000_000 + (carries ? inv.ppnAmount.toNumber() : 0);
     const table = page.getByRole("table", { name: "Isi voucher" });
-    await expect(table.getByRole("row", { name: /Penerimaan dari/ })).toContainText(rp(expected.toLocaleString("id-ID")));
+    await expect(table.getByRole("row", { name: /Total/ })).toContainText(rp(expected.toLocaleString("id-ID")));
+    const popup = page.context().waitForEvent("page");
     await page.getByRole("button", { name: "Simpan voucher" }).click();
-    await expect(page.getByText(/Voucher SLG\/VC\/.+ tersimpan\./)).toBeVisible();
+    await expect(page.getByText(/Voucher SLG\/[BK]M\/.+ tersimpan, penerimaan sudah dicatat\./)).toBeVisible();
+    await (await popup).close();
     await page.waitForURL(/\/vouchers\?baru=/);
 
-    const v = await db.voucher.findFirstOrThrow({ where: { invoiceId } });
-    expect([v.total.toNumber(), v.paymentId, v.kind]).toEqual([expected, null, "INVOICE"]);
+    const v = await db.voucher.findFirstOrThrow({ where: { invoiceId }, include: { payment: true } });
+    expect([v.total.toNumber(), v.kind, v.payment?.number]).toEqual([expected, "INVOICE", v.number]);
     const after = await db.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
-    expect([after.status, after.amountPaid.toNumber()]).toEqual(["UNPAID", 0]);
+    expect([after.status, after.amountPaid.toNumber()]).toEqual([expected >= after.total.toNumber() ? "PAID" : "PARTIAL", expected]);
     expect((await page.request.get(`/api/vouchers/${v.id}/pdf`)).status()).toBe(200);
   });
 
-  test("Batalkan voucher bill dari daftar: baris terbuka lagi, kartu di detail bill menandai Dibatalkan", async ({ page }) => {
+  test("Batalkan voucher bill dari daftar (Admin): pembayaran ikut batal, baris terbuka lagi", async ({ page }) => {
     const { B, billId } = await fixtures();
     await login(page, "finance@demo.com");
     await page.goto(`/vouchers/new?bill=${billId}`);
-    const boxB = page.getByRole("checkbox", { name: new RegExp(`${B.number.replace(/\//g, "\\/")}$`) });
-    await boxB.check();
+    await page.getByRole("checkbox", { name: new RegExp(`${B.number.replace(/\//g, "\\/")}$`) }).check();
+    const popup = page.context().waitForEvent("page");
     await page.getByRole("button", { name: "Simpan voucher" }).click();
+    await (await popup).close();
     await page.waitForURL(/\/vouchers\?baru=/);
     const v = await db.voucher.findFirstOrThrow({ where: { billId } });
 
+    await login(page, "admin@demo.com");
     await page.goto("/vouchers");
     const row = page.locator("main tr", { hasText: v.number });
     await row.getByRole("button", { name: "Batalkan" }).click();
     await page.getByRole("dialog").getByRole("textbox").fill("salah pilih baris (E2E)");
     await page.getByRole("dialog").getByRole("button", { name: "Ya, batalkan" }).click();
-    await expect(page.getByText("Voucher dibatalkan, barisnya terbuka lagi.")).toBeVisible();
-    const c = await db.voucher.findUniqueOrThrow({ where: { id: v.id }, include: { docLines: true } });
+    await expect(page.getByText(/Voucher dibatalkan/)).toBeVisible();
+    const c = await db.voucher.findUniqueOrThrow({ where: { id: v.id }, include: { docLines: true, payment: true } });
     expect([c.status, c.cancelReason, c.docLines.length]).toEqual(["CANCELLED", "salah pilih baris (E2E)", 0]);
+    expect(c.payment?.cancelledAt).toBeTruthy();
+    const bill = await db.vendorBill.findUniqueOrThrow({ where: { id: billId } });
+    expect([bill.status, bill.amountPaid.toNumber()]).toEqual(["UNPAID", 0]);
 
-    await page.goto(`/bills/${billId}`);
-    await expect(page.locator("main").getByText("Dibatalkan").filter({ visible: true })).toBeVisible();
     await page.goto(`/vouchers/new?bill=${billId}`);
     await expect(page.getByRole("checkbox", { name: new RegExp(`${B.number.replace(/\//g, "\\/")}$`) })).toBeEnabled();
   });
