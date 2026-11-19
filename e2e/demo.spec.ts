@@ -47,8 +47,8 @@ test.describe("Demo Freight Forwarding Management System", () => {
     await expect(page).toHaveURL(/\/dashboard/);
   });
 
-  // 3) OPERATION — buka Job, telusuri tab, lihat costing, generate PDF
-  test("3. Operation: detail Job, costing, dan dokumen PDF", async ({ page }) => {
+  // 3) OPERATION — buka Job dan generate PDF; costing tertutup (aturan client SLG: Ops tidak melihat nilai tagihan)
+  test("3. Operation: detail Job dan dokumen PDF, tanpa costing", async ({ page }) => {
     await login(page, "ops@demo.com");
     await openGroup(page, "Ekspor-Impor");
     await page.getByRole("link", { name: "Job / Shipment" }).click();
@@ -60,10 +60,10 @@ test.describe("Demo Freight Forwarding Management System", () => {
     // generate dokumen PDF (House B/L) — cek endpoint menghasilkan PDF
     const id = page.url().split("/jobs/")[1].split(/[?#]/)[0];
 
-    // costing pindah ke halaman sendiri (penyesuaian client SLG): tombol Buka Costing → profitabilitas
-    await page.getByRole("link", { name: /Buka Costing/ }).click();
-    await page.waitForURL(/\/costing\/.+/);
-    await expect(page.getByText("Gross Profit", { exact: true })).toBeVisible();
+    // Ops tidak punya costing.view: tombol Buka Costing tidak ada, dan URL costing dialihkan ke dashboard.
+    await expect(page.getByRole("link", { name: /Buka Costing/ })).toHaveCount(0);
+    await page.goto(`/costing/${id}`);
+    await expect(page).toHaveURL(/\/dashboard/);
     const resp = await page.request.get(`/api/documents/hbl/${id}`);
     expect(resp.status()).toBe(200);
     expect(resp.headers()["content-type"]).toContain("pdf");

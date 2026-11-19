@@ -50,6 +50,20 @@ Format: **Keputusan** — _alasan_.
   kini hanya baris JU, isian formulir lain tetap tersimpan tetapi tidak tercetak). Nilainya milik SLG, jadi tidak
   di-seed. Jurnal bernomor `JE/…` (transfer, setor pajak, aset, armada) dicetak dengan formulir Jurnal Umum.
 
+## Role Operation bawaan mengikuti aturan SLG (2026-11-19)
+
+- Role Management (branch `feat/slg-role-management-pg`, di-pull 19 Nov) memberi role bawaan Operation izin costing, laporan, rate card, charge code, rate, quotation, dan input biaya. Itu melanggar aturan client 5-6 Nov: Ops tidak boleh melihat nilai tagihan ke customer, dan hanya Finance yang menginput biaya.
+- Izin itu dicabut dari bawaan (`DEFAULT_ROLES`) dan dari database lewat migrasi `20261123090000_operation_slg_access`. Hak Ops kembali sama dengan sebelum Role Management: job, container, clearance, B/L, milestone, booking, dokumen, master operasional.
+- Hanya role bawaan Operation yang diubah. Super Admin tetap bisa memberi izin itu ke role mana pun lewat Role Management.
+- Alur quotation maker-checker tetap ada untuk role yang diberi izinnya. Uji E2E-nya memakai role peninjau sementara.
+
+## Rate card per kota: tab kota dan salin tarif (2026-11-18)
+
+- Client bingung karena semua tarif masih "Semua kota", sehingga job Surabaya memakai harga Jakarta. Aturannya tetap: kota diambil dari pelabuhan job (impor POD, ekspor POL), tarif kota menggantikan tarif dasar yang setara.
+- Saringan kota diganti tab kota dengan jumlah tarif aktif per kota. "Tarif dasar" = tarif tanpa kota.
+- Tombol **Salin tarif ke kota** (`copyRateCardToCity`) menyalin tarif aktif dari tarif dasar atau satu kota ke kota lain dengan harga sama. Tarif setara (charge, dasar hitung, berlaku, tipe container, customer) yang sudah ada di kota tujuan dilewati, jadi salin ulang aman dan harga yang sudah diubah tidak tertimpa.
+- Kota baru di luar daftar boleh diketik, tapi pelabuhannya harus ada di master Port dengan kolom Kota yang sama persis.
+
 ## Transaksi batal dan hak hapus (2026-11-17)
 
 - **Buku Besar menyembunyikan transaksi batal**: jurnal yang dibalik beserta jurnal baliknya tidak tampil bila keduanya
