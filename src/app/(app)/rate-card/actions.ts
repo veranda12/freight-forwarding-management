@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { assertPerm } from "@/lib/auth-helpers";
 import { writeAudit } from "@/lib/audit";
 import { errorMessage } from "@/lib/action-error";
+import { copyRateCardToCity } from "@/lib/rate-card";
 
 export type RateCardInput = {
   chargeCodeId: string; containerTypeId: string | null;
@@ -79,4 +80,20 @@ export async function updateRateCardItemAction(id: string, input: RateCardInput)
   }
   revalidatePath("/rate-card");
   return { ok: true };
+}
+
+/** Salin tarif dasar (atau tarif satu kota) ke kota lain. Tarif yang sudah ada di kota tujuan tidak ditimpa. */
+export async function copyRateCardToCityAction(input: { fromCity: string | null; toCity: string; customerId?: string | null }): Promise<{ ok: true; copied: number; skipped: number } | { ok: false; error: string }> {
+  const user = await assertPerm("rateCard.edit");
+  try {
+    const res = await copyRateCardToCity(prisma, input);
+    await writeAudit({
+      entity: "RateCardItem", entityId: input.toCity, action: "CREATE",
+      summary: `Salin ${res.copied} tarif dari ${input.fromCity ?? "tarif dasar"} ke ${input.toCity.trim()}${res.skipped ? `, ${res.skipped} dilewati` : ""}`, userId: user.id,
+    });
+    revalidatePath("/rate-card");
+    return { ok: true, ...res };
+  } catch (e) {
+    return { ok: false, error: errorMessage(e, "Gagal menyalin tarif.") };
+  }
 }
