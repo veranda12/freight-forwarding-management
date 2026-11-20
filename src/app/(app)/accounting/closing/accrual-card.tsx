@@ -31,6 +31,7 @@ export async function AccrualCard({ period, canEdit }: { period: string; canEdit
           Biaya job yang sudah ditagih ke customer tapi tagihan vendornya belum dicatat sampai akhir {periodLabel(period)}.
           Saat Closing, biaya ini dicatat sebagai beban {periodLabel(period)} (kredit {ACCRUED_AP} Hutang Belum Ditagih), lalu dibalik
           otomatis tanggal 1 {periodLabel(next)}. Tagihan asli tetap diinput seperti biasa di tanggal realnya.
+          {period > new Date(Date.now() + 7 * 3600_000).toISOString().slice(0, 7) && ` ${periodLabel(period)} belum berjalan, jadi daftar di bawah masih bisa bertambah sampai bulan itu di-closing.`}
         </p>
       </CardHeader>
       <CardContent className="space-y-6">

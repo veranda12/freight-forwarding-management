@@ -76,7 +76,7 @@ export default async function ClosingPage({ searchParams }: { searchParams: Prom
 
       {/* Bulan berikutnya yang akan di-closing: pratinjau akrual dan daftar periksa biaya. */}
       {status.reopened && <AccrualReviewCard period={status.reopened} />}
-      {status.next <= new Date(Date.now() + 7 * 3600_000).toISOString().slice(0, 7) && <AccrualCard period={status.next} canEdit={hasPerm(user, "closing.lockPeriod")} />}
+      <AccrualCard period={status.next} canEdit={hasPerm(user, "closing.lockPeriod")} />
 
       <Card>
         <CardHeader><CardTitle className="text-base">Tahun buku</CardTitle></CardHeader>
