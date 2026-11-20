@@ -7,6 +7,7 @@ import type { PermissionKey } from "@/lib/permissions";
 import { writeAudit } from "@/lib/audit";
 import { closeFiscalYear } from "@/lib/fiscal";
 import { closeMonth, reopenMonth, recloseMonth, periodLabel } from "@/lib/period-lock";
+import { postMonthAccrual, setAccrualStart } from "@/lib/accrual";
 import { createFixedAsset, runDepreciation, type NewAssetInput } from "@/lib/fixed-assets";
 import { runRevaluation } from "@/lib/fx";
 import { remitTaxPeriod, cancelTaxRemittance } from "@/lib/tax";
@@ -43,12 +44,32 @@ export async function closeYearAction(year: number): Promise<Result<{ netIncome:
   } catch (e) { return fail(e); }
 }
 
-export async function closeMonthAction(period: string): Promise<Result> {
+/** Closing bulan. Sebelum dikunci, biaya job yang sudah ditagih tapi belum dijurnal diakrualkan otomatis (lib/accrual.ts). */
+export async function closeMonthAction(period: string): Promise<Result<{ accrual: { number: string; total: number; count: number } | null }>> {
   const user = await assertPerm("closing.lockPeriod");
   try {
-    await closeMonth(prisma, period, user.id);
-    await writeAudit({ entity: "Accounting", entityId: period, action: "CLOSE_MONTH", summary: `Closing ${periodLabel(period)}`, userId: user.id });
-    refresh("/accounting", "/accounting/closing");
+    const acc = await closeMonth(prisma, period, user.id, (tx) => postMonthAccrual(tx, period, user.id));
+    const je = acc ? await prisma.journalEntry.findUnique({ where: { id: acc.entryId }, select: { number: true } }) : null;
+    const accrual = acc && je ? { number: je.number, total: acc.total, count: acc.count } : null;
+    await writeAudit({
+      entity: "Accounting", entityId: period, action: "CLOSE_MONTH", userId: user.id,
+      summary: `Closing ${periodLabel(period)}${accrual ? `, akrual ${accrual.number} ${accrual.count} biaya Rp ${accrual.total.toLocaleString("id-ID")}` : ""}`,
+    });
+    refresh("/accounting", "/accounting/closing", "/accounting/journal");
+    return { ok: true, accrual };
+  } catch (e) { return fail(e); }
+}
+
+/** Bulan mulai akrual akhir bulan ("YYYY-MM"), atau null untuk menonaktifkan. Izin sama dengan closing bulan. */
+export async function setAccrualStartAction(period: string | null): Promise<Result> {
+  const user = await assertPerm("closing.lockPeriod");
+  try {
+    await setAccrualStart(prisma, period);
+    await writeAudit({
+      entity: "Accounting", entityId: period ?? "-", action: "ACCRUAL_START", userId: user.id,
+      summary: period ? `Akrual akhir bulan berlaku mulai ${periodLabel(period)}` : "Akrual akhir bulan dinonaktifkan",
+    });
+    refresh("/accounting/closing");
     return { ok: true };
   } catch (e) { return fail(e); }
 }

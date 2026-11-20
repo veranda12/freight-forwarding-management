@@ -50,6 +50,19 @@ Format: **Keputusan** — _alasan_.
   kini hanya baris JU, isian formulir lain tetap tersimpan tetapi tidak tercetak). Nilainya milik SLG, jadi tidak
   di-seed. Jurnal bernomor `JE/…` (transfer, setor pajak, aset, armada) dicetak dengan formulir Jurnal Umum.
 
+## Akrual akhir bulan otomatis saat closing (2026-11-20)
+
+- Permintaan client: laba rugi bulanan tidak boleh "terlalu besar" di bulan invoice lalu "rugi semu" di bulan tagihan vendor datang.
+- Saat Closing bulan, biaya buying **non-reimburse** dari job yang **sudah ditagih** (invoice aktif bertanggal ≤ akhir bulan) tapi belum dijurnal sampai akhir bulan dijurnal akrual: Dr beban (akun charge code, fallback 5900), Cr **2050 Hutang Belum Ditagih (Akrual)**, tanggal akhir bulan, sumber `ACCRUAL`, `sourceId` = periode.
+- "Belum dijurnal" = tidak ada vendor bill aktif bertanggal ≤ akhir bulan, voucher belum dibayar ≤ akhir bulan, dan biaya armada belum dicatat ≤ akhir bulan. Bill bertanggal bulan berikutnya tetap diakrualkan.
+- Pembalik otomatis tanggal 1 bulan berikutnya, sebagai jurnal biasa (`sourceId` = `YYYY-MM:REV`), bukan pembatalan, supaya akrual tidak tampil sebagai transaksi batal. Tagihan asli tetap diinput seperti biasa di tanggal realnya; selisih perkiraan vs tagihan jatuh di bulan tagihan.
+- Akrual hanya aktif setelah **bulan mulai** diatur di halaman Tutup Buku (`CompanySetting.accrualStartPeriod`). Job yang pertama kali ditagih sebelum bulan mulai tidak ikut, supaya biaya lama tidak menumpuk di closing pertama. Kosong = akrual nonaktif.
+- Job yang masih belum di-bill bulan berikutnya diakrualkan lagi di closing berikutnya (akrual lalu dibalik tiap bulan, netonya benar).
+- Reimburse tidak diakrualkan (akun 1350, bukan laba rugi). PPN tidak diakrualkan.
+- Baris biaya yang ikut akrual dicatat di `AccrualLine`. Membuka bulan untuk koreksi tetap boleh. Closing ulang tidak membuat atau menghitung ulang akrual (pembaliknya di bulan berikutnya yang mungkin sudah closing). Selama bulan dibuka, halaman Tutup Buku menampilkan **Pemeriksaan akrual**: biaya yang tercatat dua kali (ikut akrual dan juga punya bill/voucher bertanggal bulan itu) dan biaya yang sekarang memenuhi syarat tapi tidak ikut akrual. Penyesuaiannya lewat Jurnal Umum.
+- Form Vendor Bill memberi peringatan bila tanggal bill jatuh di bulan yang biaya terpilihnya sudah diakrualkan.
+- Halaman Tutup Buku menampilkan pratinjau akrual bulan berikutnya dan daftar periksa "biaya yang mungkin belum diinput": job yang ditagih di bulan itu tanpa biaya non-reimburse, atau dengan charge selling yang biasanya punya biaya vendor (pernah dipakai di buying job lain) tapi belum ada di buying. Daftar ini hanya pengingat.
+
 ## Role Operation bawaan mengikuti aturan SLG (2026-11-19)
 
 - Role Management (branch `feat/slg-role-management-pg`, di-pull 19 Nov) memberi role bawaan Operation izin costing, laporan, rate card, charge code, rate, quotation, dan input biaya. Itu melanggar aturan client 5-6 Nov: Ops tidak boleh melihat nilai tagihan ke customer, dan hanya Finance yang menginput biaya.

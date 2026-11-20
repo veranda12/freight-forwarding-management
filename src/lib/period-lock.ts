@@ -82,15 +82,22 @@ const assertPeriod = (p: string) => {
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(p)) throw new Error("Format periode tidak valid.");
 };
 
-/** Closing bulan berikutnya. Harus berurutan dan tidak boleh bulan yang belum berjalan. */
-export async function closeMonth(db: PrismaClient, period: string, userId?: string): Promise<void> {
+/**
+ * Closing bulan berikutnya. Harus berurutan dan tidak boleh bulan yang belum berjalan.
+ * `beforeLock` jalan di transaksi yang sama sebelum bulan dikunci (dipakai jurnal akrual akhir bulan, lib/accrual.ts).
+ */
+export async function closeMonth<T = void>(
+  db: PrismaClient, period: string, userId?: string, beforeLock?: (tx: Prisma.TransactionClient) => Promise<T>,
+): Promise<T | undefined> {
   assertPeriod(period);
-  await db.$transaction(async (tx) => {
+  return db.$transaction(async (tx) => {
     const next = await nextPeriod(tx);
     if (period !== next) throw new Error(`Closing harus berurutan. Bulan berikutnya yang bisa di-closing: ${periodLabel(next)}.`);
     if (period > jktKey(new Date()).slice(0, 7)) throw new Error(`${periodLabel(period)} belum berjalan.`);
+    const out = beforeLock ? await beforeLock(tx) : undefined;
     await tx.periodClosing.create({ data: { period, status: "CLOSED", closedById: userId } });
-  });
+    return out;
+  }, { timeout: 60_000 });
 }
 
 /** Buka satu bulan yang sudah closing untuk koreksi. Hanya satu bulan boleh terbuka dalam satu waktu. */
