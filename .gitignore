@@ -56,3 +56,6 @@ docs/
 
 # logo & file unggahan
 /public/uploads/
+
+# Dokumen asli client untuk uji pembacaan dokumen (jangan di-commit)
+/data-training/
