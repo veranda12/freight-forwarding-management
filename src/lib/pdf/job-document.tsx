@@ -1,11 +1,14 @@
 import React from "react";
 import { Document, Page, View, Text, StyleSheet } from "@react-pdf/renderer";
 import { formatDate, formatNumber } from "@/lib/format";
+import { CompanyLogo } from "./logo-mark";
+import { COMPANY_TAGLINE } from "@/config/product";
 
 const s = StyleSheet.create({
   page: { padding: 36, fontSize: 9, fontFamily: "Helvetica", color: "#111827" },
   headerRow: { flexDirection: "row", justifyContent: "space-between", borderBottom: 2, borderColor: "#0b4a8f", paddingBottom: 8, marginBottom: 10 },
   coName: { fontSize: 15, fontFamily: "Helvetica-Bold", color: "#0b4a8f" },
+  coTag: { fontSize: 8.5, fontFamily: "Helvetica-Bold", color: "#0b4a8f", marginTop: 1 },
   coMeta: { fontSize: 8, color: "#374151", marginTop: 2 },
   docTitle: { fontSize: 14, fontFamily: "Helvetica-Bold", textAlign: "right" },
   docNo: { fontSize: 9, textAlign: "right", color: "#374151", marginTop: 2 },
@@ -46,6 +49,8 @@ export type PdfJob = {
 
 export type PdfCompany = {
   name: string; address: string | null; city: string | null; phone: string | null; email: string | null; npwp: string | null;
+  /** Logo unggahan (data URI); null = logo vektor bawaan. */
+  logoFile: string | null;
 };
 
 const TITLES: Record<string, string> = {
@@ -80,11 +85,16 @@ export function JobDocument({ kind, job, company }: { kind: string; job: PdfJob;
     <Document title={`${docTitle} - ${job.number}`}>
       <Page size="A4" style={s.page}>
         <View style={s.headerRow}>
-          <View>
+          {/* Kolom kiri mengisi sisa ruang: alamat panjang membungkus, tidak menabrak judul dokumen di kanan. */}
+          <View style={{ flexDirection: "row", flex: 1, paddingRight: 14 }}>
+            <CompanyLogo file={company.logoFile} style={{ width: 46, height: 46, marginRight: 8 }} />
+            <View style={{ flex: 1 }}>
             <Text style={s.coName}>{company.name}</Text>
-            <Text style={s.coMeta}>{company.address}{company.city ? `, ${company.city}` : ""}</Text>
-            <Text style={s.coMeta}>Telp: {company.phone ?? "-"} · {company.email ?? ""}</Text>
-            <Text style={s.coMeta}>NPWP: {company.npwp ?? "-"}</Text>
+            <Text style={s.coTag}>{COMPANY_TAGLINE}</Text>
+            {company.address ? <Text style={s.coMeta}>{company.address}{company.city ? `, ${company.city}` : ""}</Text> : null}
+            {company.phone || company.email ? <Text style={s.coMeta}>{[company.phone && `Telp: ${company.phone}`, company.email].filter(Boolean).join(" · ")}</Text> : null}
+            {company.npwp ? <Text style={s.coMeta}>NPWP: {company.npwp}</Text> : null}
+            </View>
           </View>
           <View>
             <Text style={s.docTitle}>{docTitle}</Text>

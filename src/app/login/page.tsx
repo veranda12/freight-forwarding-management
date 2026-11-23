@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { Ship } from "lucide-react";
+import { LogoMark } from "@/components/brand/logo-mark";
 import { getCurrentUser, homeFor } from "@/lib/auth-helpers";
 import { PRODUCT } from "@/config/product";
 import { LoginForm } from "./login-form";
@@ -17,7 +17,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
       {/* Panel kiri (branding) */}
       <div className="relative hidden flex-col justify-between bg-primary p-10 text-primary-foreground lg:flex">
         <div className="flex items-center gap-2 text-lg font-semibold">
-          <Ship className="h-6 w-6" />
+          <LogoMark className="h-7 w-7" color="currentColor" />
           {PRODUCT.name}
         </div>
         <div className="space-y-4">
@@ -45,7 +45,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
         <div className="w-full max-w-sm space-y-6">
           <div className="space-y-2 text-center lg:hidden">
             <div className="flex items-center justify-center gap-2 text-lg font-semibold text-primary">
-              <Ship className="h-6 w-6" /> {PRODUCT.name}
+              <LogoMark className="h-7 w-7" /> {PRODUCT.name}
             </div>
           </div>
           <div className="space-y-1">

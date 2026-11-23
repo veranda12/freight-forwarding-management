@@ -7,6 +7,7 @@ import { jobScope } from "@/lib/data-scope";
 import { TZ } from "@/lib/format";
 import { JOB_STATUS_LABELS } from "@/lib/enums";
 import { blOf, invoiceNumbersOf, jobListWhere, parseJobListFilter } from "@/lib/job-list";
+import { PRODUCT } from "@/config/product";
 
 export const runtime = "nodejs";
 
@@ -32,7 +33,7 @@ export async function GET(req: NextRequest) {
   });
 
   const wb = new ExcelJS.Workbook();
-  wb.creator = "CargoFlow";
+  wb.creator = PRODUCT.name;
   wb.created = new Date();
   const ws = wb.addWorksheet("Job");
   ws.columns = [

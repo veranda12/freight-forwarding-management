@@ -12,7 +12,7 @@ async function cashOut(page: Page, desc: string) {
   await page.getByRole("button", { name: /Catat transaksi/ }).click();
   const dlg = page.getByRole("dialog");
   await dlg.getByRole("button", { name: /Jurnal Pengeluaran/ }).click();
-  await pickOption(page, dlg.getByRole("combobox").nth(0), /BCA/);
+  await pickOption(page, dlg.getByRole("combobox").nth(0), /Mandiri Utama/);
   await pickOption(page, dlg.getByRole("combobox", { name: "Akun lawan" }).first(), /^6310/);
   await dlg.getByRole("textbox", { name: /^Nominal/ }).first().fill("15000");
   await dlg.getByPlaceholder("Biaya admin bank Oktober").fill(desc);

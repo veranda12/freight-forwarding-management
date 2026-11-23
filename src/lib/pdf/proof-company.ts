@@ -1,15 +1,24 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { PrismaClient } from "@prisma/client";
+import { COMPANY_FALLBACK } from "@/config/product";
+
+/**
+ * Logo unggahan di Pengaturan sebagai data URI (react-pdf membaca path Windows sebagai URL), atau null bila belum ada.
+ * Null berarti cetakan memakai logo vektor bawaan (lib/pdf/logo-mark.tsx).
+ */
+export function companyLogoFile(logoPath: string | null | undefined): string | null {
+  const logo = logoPath ? path.join(process.cwd(), "public", logoPath.replace(/^\/+/, "")) : null;
+  if (!logo || !fs.existsSync(logo)) return null;
+  return `data:image/${logo.endsWith(".png") ? "png" : "jpeg"};base64,${fs.readFileSync(logo).toString("base64")}`;
+}
 
 /** Data kop perusahaan untuk cetak bukti. */
 export async function proofCompany(db: PrismaClient) {
   const company = await db.companySetting.findFirst();
-  const logo = company?.logoPath ? path.join(process.cwd(), "public", company.logoPath.replace(/^\/+/, "")) : null;
   return {
-    name: company?.name ?? "", address: company?.address ?? null, city: company?.city ?? null, phone: company?.phone ?? null,
-    // Data URI, karena react-pdf membaca path Windows sebagai URL.
-    logoFile: logo && fs.existsSync(logo) ? `data:image/${logo.endsWith(".png") ? "png" : "jpeg"};base64,${fs.readFileSync(logo).toString("base64")}` : null,
+    name: company?.name ?? COMPANY_FALLBACK, address: company?.address ?? null, city: company?.city ?? null, phone: company?.phone ?? null,
+    logoFile: companyLogoFile(company?.logoPath),
   };
 }
 

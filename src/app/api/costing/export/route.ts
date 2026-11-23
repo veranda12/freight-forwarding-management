@@ -8,6 +8,7 @@ import { TZ } from "@/lib/format";
 import { MODE_SHORT } from "@/lib/enums";
 import { exportName, parseListFilter } from "@/lib/list-filter";
 import { COSTING_KEYS, costingBl, costingWhere } from "@/lib/costing-list";
+import { PRODUCT } from "@/config/product";
 
 export const runtime = "nodejs";
 
@@ -49,7 +50,7 @@ export async function GET(req: NextRequest) {
   });
 
   const wb = new ExcelJS.Workbook();
-  wb.creator = "CargoFlow";
+  wb.creator = PRODUCT.name;
   wb.created = new Date();
 
   const sum = wb.addWorksheet("Ringkasan");

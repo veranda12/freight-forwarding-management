@@ -4,6 +4,7 @@ import { jktKey } from "./accounting-core";
 import { BILL_STATUS_LABELS, INV_STATUS_LABELS, SECTION_LABELS } from "./enums";
 import type { InvoiceExportFilter } from "./doc-export-filter";
 import { billOutstanding, billWhere, MAX_BILLS, type BillFilter } from "./bill-groups";
+import { PRODUCT } from "@/config/product";
 
 /**
  * Export Excel daftar Invoice dan Vendor Bill: sheet Ringkasan (satu baris per dokumen) dan Rincian (satu baris per
@@ -170,7 +171,7 @@ const BILL_LINE_COLS: Col<BillLineRow>[] = [
 
 function newWorkbook() {
   const wb = new ExcelJS.Workbook();
-  wb.creator = "CargoFlow";
+  wb.creator = PRODUCT.name;
   wb.created = new Date();
   return wb;
 }

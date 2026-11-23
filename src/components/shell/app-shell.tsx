@@ -3,9 +3,10 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Ship, Menu, PanelLeftClose, PanelLeft, LogOut, ChevronDown } from "lucide-react";
+import { Menu, PanelLeftClose, PanelLeft, LogOut, ChevronDown } from "lucide-react";
 import { NAV, groupItems, type NavItem } from "@/config/nav";
 import { PRODUCT } from "@/config/product";
+import { LogoMark } from "@/components/brand/logo-mark";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -171,7 +172,7 @@ export function AppShell({
 
   const Brand = (
     <div className={cn("flex h-14 items-center gap-2 border-b px-4 font-semibold text-primary", collapsed && "justify-center px-0")}>
-      <Ship className="h-6 w-6 shrink-0" />
+      <LogoMark className="h-7 w-7 shrink-0" />
       {!collapsed && <span className="text-lg">{PRODUCT.name}</span>}
     </div>
   );

@@ -1,4 +1,4 @@
-/** Lanjutan seed-cash-demo: lepas centang manual lama di BCA Oktober lalu cocokkan ulang dengan rekening koran. */
+/** Lanjutan seed-cash-demo: lepas centang manual lama di rekening utama (CoA 1200) Oktober lalu cocokkan ulang dengan rekening koran. */
 import { PrismaClient } from "@prisma/client";
 import { PRISMA_CLIENT_OPTIONS } from "../../src/lib/prisma-options";
 import { autoMatch, matchManual } from "../../src/lib/bank-statement";

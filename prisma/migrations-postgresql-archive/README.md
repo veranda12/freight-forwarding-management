@@ -21,3 +21,5 @@ Catatan:
 - Merge client SLG `43c9900` (2026-11-23: akrual akhir bulan, rate card per kota, role Operation bawaan): 3 migrasi
   PostgreSQL `20261123090000_operation_slg_access`, `20261124090000_month_accrual`, `20261124100000_accrual_start_lines`
   diarsipkan di sini; padanan MariaDB-nya `prisma/migrations/20261124110000_slg_accrual_operation`.
+- Rebranding SentraHub (2026-11-23, merge client `d1de500`): `20261125090000_company_sentra` diarsipkan di sini;
+  padanan MariaDB-nya `prisma/migrations/20261125100000_company_sentra`.

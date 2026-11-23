@@ -98,20 +98,20 @@ async function main() {
   }, { timeout: 120_000 });
 
   // ---------- Company ----------
+  // NPWP perusahaan belum diketahui (dikosongkan), tapi generatornya tetap dipanggil sekali: menjaga urutan faker supaya
+  // data demo sesudahnya (customer, Sales PIC, job) tetap sama persis dengan sebelumnya.
+  npwp();
   await prisma.companySetting.create({
     data: {
-      name: "PT Samudra Lintas Logistik",
-      legalName: "PT Samudra Lintas Logistik",
-      npwp: npwp(),
-      address: "Jl. Enggano Raya No. 88, Tanjung Priok",
-      city: "Jakarta Utara",
-      phone: "+62 21 4390 1234",
-      email: "ops@samudralintas.co.id",
-      website: "www.samudralintas.co.id",
-      bankName: "Bank Central Asia (BCA)",
-      bankAccount: "0881234567",
-      bankHolder: "PT Samudra Lintas Logistik",
-      bankBranch: "KCP Tanjung Priok",
+      // Identitas client (2026-11-23). NPWP, telepon, email, dan website diisi admin di Pengaturan bila sudah ada;
+      // baris yang kosong tidak tercetak.
+      name: "PT Sentra Logistik Global",
+      legalName: "PT Sentra Logistik Global",
+      address: "Dock Desk Coworking Space, Pelindo Tower Lantai 4, Jl. Yos Sudarso No. 9 RT. 006 RW. 013, Rawa Badak Utara, Koja",
+      city: "Kota Adm. Jakarta Utara, DKI Jakarta 14230",
+      bankName: "Bank Mandiri",
+      bankAccount: "103-00-1361596-4",
+      bankHolder: "PT Sentra Logistik Global",
     },
   });
 
@@ -152,7 +152,7 @@ async function main() {
   const coaDefs: [string, string, "ASSET" | "LIABILITY" | "EQUITY" | "REVENUE" | "EXPENSE", "DEBIT" | "CREDIT", boolean][] = [
     ["1000", "Kas & Bank", "ASSET", "DEBIT", false],
     ["1100", "Kas", "ASSET", "DEBIT", true],
-    ["1200", "Bank BCA", "ASSET", "DEBIT", true],
+    ["1200", "Bank Mandiri", "ASSET", "DEBIT", true],
     ["1300", "Piutang Usaha", "ASSET", "DEBIT", true],
     ["1350", "Titipan Reimburse Customer", "ASSET", "DEBIT", true],
     ["1450", "PPh 23 Dibayar Dimuka", "ASSET", "DEBIT", true],
@@ -203,7 +203,7 @@ async function main() {
   // Master kas & rekening: akun 1200 jadi rekening default, 1100 jadi kas kecil.
   await prisma.bankAccount.createMany({
     data: [
-      { kind: "BANK", name: "BCA Operasional", bankName: "Bank Central Asia (BCA)", accountNo: "0881234567", accountHolder: "PT Samudra Lintas Logistik", branch: "KCP Tanjung Priok", coaAccountId: acc["1200"], isDefaultReceipt: true, isDefaultPayment: true },
+      { kind: "BANK", name: "Mandiri Utama", bankName: "Bank Mandiri", accountNo: "103-00-1361596-4", accountHolder: "PT Sentra Logistik Global", coaAccountId: acc["1200"], isDefaultReceipt: true, isDefaultPayment: true },
       { kind: "CASH", name: "Kas Kecil", coaAccountId: acc["1100"] },
     ],
   });

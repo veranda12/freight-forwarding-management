@@ -6,6 +6,8 @@ import { domesticScope } from "@/lib/data-scope";
 import { DOM_MODE_LABELS } from "@/lib/enums";
 import { SttDocument } from "@/lib/pdf/stt-document";
 import type { PdfCompany } from "@/lib/pdf/job-document";
+import { companyLogoFile } from "@/lib/pdf/proof-company";
+import { COMPANY_FALLBACK } from "@/config/product";
 
 export const runtime = "nodejs";
 
@@ -25,8 +27,8 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
   if (!stt) return NextResponse.json({ error: "STT not found" }, { status: 404 });
 
   const pdfCompany: PdfCompany = company
-    ? { name: company.name, address: company.address, city: company.city, phone: company.phone, email: company.email, npwp: company.npwp }
-    : { name: "PT Samudra Lintas Logistik", address: null, city: null, phone: null, email: null, npwp: null };
+    ? { name: company.name, address: company.address, city: company.city, phone: company.phone, email: company.email, npwp: company.npwp, logoFile: companyLogoFile(company.logoPath) }
+    : { name: COMPANY_FALLBACK, address: null, city: null, phone: null, email: null, npwp: null, logoFile: null };
 
   const buffer = await renderToBuffer(
     <SttDocument

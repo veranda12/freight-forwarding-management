@@ -1,5 +1,3 @@
-import fs from "node:fs";
-import path from "node:path";
 import { NextRequest, NextResponse } from "next/server";
 import { renderToBuffer } from "@react-pdf/renderer";
 import { prisma } from "@/lib/prisma";
@@ -8,6 +6,8 @@ import { invoiceScope } from "@/lib/data-scope";
 import { displayUnits, groupContainers, jobRateCity, rateCardScope } from "@/lib/rate-card";
 import { mergeReceiptLines } from "@/lib/pdf/invoice-print-lines";
 import { InvoiceDocument, type PdfExcludedLine, type PdfInvoice, type PdfInvoiceCompany } from "@/lib/pdf/invoice-document";
+import { companyLogoFile } from "@/lib/pdf/proof-company";
+import { COMPANY_FALLBACK } from "@/config/product";
 
 export const runtime = "nodejs";
 
@@ -84,14 +84,12 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
     excluded: multi ? [] : excluded,
   };
 
-  const logo = company?.logoPath ? path.join(process.cwd(), "public", company.logoPath.replace(/^\/+/, "")) : null;
   const pdfCompany: PdfInvoiceCompany = {
-    name: company?.name ?? "PT Samudra Lintas Logistik",
+    name: company?.name ?? COMPANY_FALLBACK,
     address: company?.address ?? null, city: company?.city ?? null, phone: company?.phone ?? null, email: company?.email ?? null, npwp: company?.npwp ?? null,
     bankName: company?.bankName ?? null, bankAccount: company?.bankAccount ?? null, bankHolder: company?.bankHolder ?? null, bankBranch: company?.bankBranch ?? null,
     signatoryName: company?.signatoryName ?? null, signatoryTitle: company?.signatoryTitle ?? null,
-    // Data URI, karena react-pdf membaca path Windows (D:\...) sebagai URL dan logonya tidak tampil.
-    logoFile: logo && fs.existsSync(logo) ? `data:image/${logo.endsWith(".png") ? "png" : "jpeg"};base64,${fs.readFileSync(logo).toString("base64")}` : null,
+    logoFile: companyLogoFile(company?.logoPath),
   };
 
   const buffer = await renderToBuffer(<InvoiceDocument inv={pdfInv} company={pdfCompany} />);

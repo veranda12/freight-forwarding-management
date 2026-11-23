@@ -15,7 +15,7 @@ Bayangkan ada **Pak Budi** punya pabrik kaos di Cikarang. Dia mau **menjual kaos
 - Barang numpuknya di mana?
 - Bea cukai gimana?
 
-Nah, di sinilah muncul **"Pak Pengatur Kiriman"** — namanya **Freight Forwarder**. Di sistem kita, perusahaannya bernama **PT Samudra Lintas Logistik**.
+Nah, di sinilah muncul **"Pak Pengatur Kiriman"** — namanya **Freight Forwarder**. Di sistem kita, perusahaannya bernama **PT Sentra Logistik Global**.
 
 **Freight Forwarder itu seperti "panitia / event organizer" untuk barang.** Pak Budi tinggal bilang: *"Tolong kirimkan 1 kontainer kaos saya ke Los Angeles."* Lalu si Forwarder yang mengurus **semuanya**: sewa tempat di kapal, bikin surat, nganter pakai truk, urus bea cukai, sampai barang nyampai.
 
@@ -106,7 +106,7 @@ Jadi Sales tidak bisa ngutak-atik uang, dan bos tidak sengaja menghapus data. Se
 11. Buka tab **Milestones** → centang satu milestone → timeline ter-update.
 
 ### Babak 5 — "Bikin surat sakti" (Dokumen PDF) · 1 menit
-12. Di tab **Documents** → klik **House B/L** / **Shipping Instruction** / **Delivery Order** → PDF rapi berkop **PT Samudra Lintas Logistik** terbuka di tab baru.
+12. Di tab **Documents** → klik **House B/L** / **Shipping Instruction** / **Delivery Order** → PDF rapi berkop **PT Sentra Logistik Global** terbuka di tab baru.
 
 ### Babak 6 — "Lacak seperti ojek online" (Publik) · 1 menit
 13. Buka menu **Tracking** → klik **Lihat** pada sebuah job → halaman publik `/track/<nomor>` terbuka **tanpa login** dan **tanpa data harga** — ini yang dibagikan ke customer.

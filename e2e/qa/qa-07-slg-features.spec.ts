@@ -55,7 +55,7 @@ test.describe.serial("QA-07 Fitur client SLG", () => {
     const row = page.locator("tr", { hasText: v.number });
     await row.getByRole("button", { name: /Bayar/ }).click();
     const dlg = page.getByRole("dialog");
-    await pickOption(page, dlg.getByRole("combobox").first(), /BCA/);
+    await pickOption(page, dlg.getByRole("combobox").first(), /Mandiri Utama/);
     await dlg.getByRole("button", { name: /Simpan pembayaran/ }).click();
     await expect(page.getByText(/Voucher dibayar, nomor bukti SLG\/BK\//)).toBeVisible();
     const paid = await db.voucher.findUniqueOrThrow({ where: { id: v.id } });
@@ -117,7 +117,7 @@ test.describe.serial("QA-07 Fitur client SLG", () => {
     await page.getByRole("button", { name: /Catat transaksi/ }).click();
     const dlg = page.getByRole("dialog");
     await dlg.getByRole("button", { name: /Jurnal Pengeluaran/ }).click();
-    await pickOption(page, dlg.getByRole("combobox").nth(0), /BCA/);
+    await pickOption(page, dlg.getByRole("combobox").nth(0), /Mandiri Utama/);
     await pickOption(page, dlg.getByRole("combobox", { name: "Akun lawan" }).first(), /^6310/);
     await dlg.getByRole("textbox", { name: /^Nominal/ }).first().fill("100000");
     const desc = `QA edit bukti ${Date.now()}`;

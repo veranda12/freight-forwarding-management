@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { Ship, Home, Search } from "lucide-react";
+import { Home, Search } from "lucide-react";
+import { LogoMark } from "@/components/brand/logo-mark";
 import { PRODUCT } from "@/config/product";
 import { Button } from "@/components/ui/button";
 
@@ -7,7 +8,7 @@ export default function NotFound() {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-muted/30 px-4 text-center">
       <Link href="/dashboard" className="mb-8 flex items-center gap-2 text-lg font-semibold text-primary">
-        <Ship className="h-6 w-6" /> {PRODUCT.name}
+        <LogoMark className="h-7 w-7" /> {PRODUCT.name}
       </Link>
       <p className="text-6xl font-bold tracking-tight text-primary">404</p>
       <h1 className="mt-3 text-xl font-semibold">Halaman tidak ditemukan</h1>
