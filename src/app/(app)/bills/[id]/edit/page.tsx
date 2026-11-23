@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { requirePerm } from "@/lib/auth-helpers";
 import { billScope, jobScope } from "@/lib/data-scope";
 import { prisma } from "@/lib/prisma";
+import { accruedPeriodsByLine } from "@/lib/accrual";
 import { jktKey } from "@/lib/accounting-core";
 import { billChangeState, billCostingIds } from "@/lib/payables";
 import { PageHeader } from "@/components/page-header";
@@ -54,6 +55,7 @@ export default async function EditBillPage({ params }: { params: Promise<{ id: s
     }),
     prisma.currency.findMany({ where: { isBase: false }, select: { code: true, name: true }, orderBy: { code: "asc" } }),
   ]);
+  const accrued = await accruedPeriodsByLine(prisma, lines.map((l) => l.id));
   const rows: BillLineOpt[] = lines.map((l) => ({
     id: l.id, vendorId: l.vendor!.id, vendor: l.vendor!.name, isForeign: !!l.vendor!.isForeign,
     job: l.job.number, bl: [l.job.hblNo, l.job.mblNo, l.job.hawbNo, l.job.mawbNo].filter(Boolean).join(" / "),
@@ -69,6 +71,7 @@ export default async function EditBillPage({ params }: { params: Promise<{ id: s
       </div>
       <BillBuilder
         lines={rows}
+        accrued={accrued}
         currencies={currencies}
         today={today}
         edit={{

@@ -405,18 +405,18 @@ export const DEFAULT_ROLES: { key: string; name: string; description: string; pe
   },
   {
     key: "OPERATION", name: "Operation",
-    description: "Mereview, mengirim, dan memutuskan quotation; mengonversi ke job dan mengelola job, booking, dokumen, domestik.",
+    description: "Mengelola job, container, clearance, booking, dokumen, dan domestik. Tidak melihat nilai tagihan maupun costing.",
+    // Aturan client SLG (5-6 Nov): Ops tidak boleh melihat nilai tagihan ke customer dan tidak menginput biaya
+    // (hanya Finance). Jadi tanpa costing, laporan, rate card, charge code, rate, quotation, dan input biaya
+    // (migrasi 20261123090000_operation_slg_access).
     permissions: [
-      ...views("dashboard", "tracking", "currencies", "charges", "rateCard", "domesticCheck", "domesticTariffs", "rates",
-        "costing", "reports", "bookings"),
+      ...views("dashboard", "tracking", "currencies", "domesticCheck", "domesticTariffs", "bookings"),
       "customers.view", "customers.viewAll",
       "vendors.view", "vendors.edit", "agents.view", "agents.edit", "ports.view", "ports.edit",
       "vehicles.view", "vehicles.edit", "containers.view", "containers.edit", "commodities.view", "commodities.edit",
       "weightRules.view", "weightRules.edit",
-      "quotations.view", "quotations.viewAll", "quotations.return", "quotations.send", "quotations.sendLowMargin",
-      "quotations.decide", "quotations.convert",
-      "jobs.view", "jobs.viewAll", "jobs.create", "jobs.status", "jobs.milestone", "jobs.charges",
-      "jobs.containers", "jobs.clearance", "jobs.fleetCost", "jobs.bl",
+      "jobs.view", "jobs.viewAll", "jobs.create", "jobs.status", "jobs.milestone",
+      "jobs.containers", "jobs.clearance", "jobs.bl",
       "documents.view", "documents.generate",
       "domestic.view", "domestic.viewAll", "domestic.create", "domestic.status", "domestic.cancel", "domestic.cancelOwn", "domestic.print",
     ],

@@ -29,8 +29,10 @@ export type BillEditInit = {
 };
 
 /** Satu bill untuk satu vendor. Biayanya boleh dari beberapa job, dipilih dengan ceklis. Dipakai juga untuk edit bill. */
-export function BillBuilder({ lines, currencies, today, edit, focusJob }: {
+export function BillBuilder({ lines, currencies, today, edit, focusJob, accrued = {} }: {
   lines: BillLineOpt[]; currencies: { code: string; name: string }[]; today: string; edit?: BillEditInit;
+  /** Periode akrual ("YYYY-MM") per id baris biaya: peringatan bila bill bertanggal di bulan yang sama (biaya tercatat dua kali). */
+  accrued?: Record<string, string[]>;
   /** Jalan pintas dari Costing: hanya vendor yang punya biaya di job ini, filter job terpasang, biayanya tercentang. */
   focusJob?: string;
 }) {
@@ -178,6 +180,16 @@ export function BillBuilder({ lines, currencies, today, edit, focusJob }: {
             <div className="space-y-1.5"><Label>Tanggal tagihan</Label><Input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></div>
             <div className="space-y-1.5"><Label>Jatuh tempo</Label><Input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} /></div>
           </div>
+          {(() => {
+            const hit = selected.filter((id) => accrued[id]?.includes(date.slice(0, 7)));
+            if (!hit.length) return null;
+            return (
+              <p className="rounded-md border border-warning/50 bg-warning/5 px-3 py-2 text-xs">
+                {hit.length} biaya yang dipilih sudah diakrualkan di bulan {date.slice(5, 7)}/{date.slice(0, 4)}. Bill bertanggal di bulan itu membuat
+                bebannya tercatat dua kali. Pakai tanggal real datangnya tagihan (bulan berikutnya).
+              </p>
+            );
+          })()}
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5"><Label>Mata uang</Label>
               <Select value={currency} onValueChange={setCurrency}>

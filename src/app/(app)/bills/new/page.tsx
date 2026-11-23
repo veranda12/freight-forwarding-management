@@ -1,6 +1,7 @@
 import { requirePerm } from "@/lib/auth-helpers";
 import { jobScope } from "@/lib/data-scope";
 import { prisma } from "@/lib/prisma";
+import { accruedPeriodsByLine } from "@/lib/accrual";
 import { PageHeader } from "@/components/page-header";
 import { Breadcrumbs } from "@/components/breadcrumbs";
 import { BillBuilder, type BillLineOpt } from "./bill-builder";
@@ -25,6 +26,7 @@ export default async function NewBillPage({ searchParams }: { searchParams: Prom
   ]);
   const asked = ((await searchParams).job ?? "").trim().slice(0, 60);
   const focusJob = asked && lines.some((l) => l.job.number === asked) ? asked : undefined;
+  const accrued = await accruedPeriodsByLine(prisma, lines.map((l) => l.id));
   const rows: BillLineOpt[] = lines.map((l) => ({
     id: l.id, vendorId: l.vendor!.id, vendor: l.vendor!.name, isForeign: !!l.vendor!.isForeign,
     job: l.job.number, bl: [l.job.hblNo, l.job.mblNo, l.job.hawbNo, l.job.mawbNo].filter(Boolean).join(" / "),
@@ -37,7 +39,7 @@ export default async function NewBillPage({ searchParams }: { searchParams: Prom
         <Breadcrumbs items={[{ label: "Vendor Bill (AP)", href: "/bills" }, { label: "Buat Bill" }]} />
         <PageHeader title="Buat Vendor Bill" description="Pilih vendor, lalu centang biayanya. Satu bill bisa berisi biaya beberapa job dari vendor yang sama" />
       </div>
-      <BillBuilder lines={rows} currencies={currencies} today={today} focusJob={focusJob} />
+      <BillBuilder lines={rows} currencies={currencies} today={today} focusJob={focusJob} accrued={accrued} />
     </div>
   );
 }

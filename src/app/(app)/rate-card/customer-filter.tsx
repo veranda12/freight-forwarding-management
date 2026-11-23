@@ -28,18 +28,3 @@ export function CustomerFilter({ value, customers, city = "all" }: { value: stri
     </Select>
   );
 }
-
-/** Saring rate card per kota: semua (`all`), tarif tanpa kota saja (`none`), atau satu kota. */
-export function CityFilter({ value, cities, customer = "all" }: { value: string; cities: string[]; customer?: string }) {
-  const go = useFilterNav({ customer, city: value });
-  return (
-    <Select value={value} onValueChange={(v) => go("city", v)}>
-      <SelectTrigger aria-label="Saring kota" className="w-full sm:w-56"><SelectValue /></SelectTrigger>
-      <SelectContent>
-        <SelectItem value="all">Semua kota</SelectItem>
-        <SelectItem value="none">Tarif tanpa kota saja</SelectItem>
-        {cities.map((c) => <SelectItem key={c} value={c}>Kota {c}</SelectItem>)}
-      </SelectContent>
-    </Select>
-  );
-}

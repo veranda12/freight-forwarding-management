@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { db, login, captureAction, replayAction, expectRejected, expectLedgerBalanced, newDraft } from "./qa-helpers";
+import { db, login, captureAction, replayAction, expectRejected, expectLedgerBalanced, newDraft, useQuotationReviewers } from "./qa-helpers";
 
 /**
  * QA-05 — Anomali: klik bersamaan (race), transisi status ilegal, pembayaran berlebih/negatif/ke invoice batal,
@@ -17,6 +17,8 @@ async function submitFirstDraft(page: Page) {
 }
 
 test.describe.serial("QA-05 Anomali", () => {
+  useQuotationReviewers();
+
   test("01 Race: dua Operation menekan Kirim bersamaan → tepat satu berhasil, satu ditolak", async ({ browser }) => {
     const sales = await (await browser.newContext()).newPage();
     await login(sales, "sales@demo.com");

@@ -18,3 +18,6 @@ Catatan:
 - Sinkron client SLG + Role Management (2026-11-19, merge `feat/slg-role-management-pg` @ `a5048ae`): 15 migrasi PostgreSQL
   `20261109090000_payment_cancel` … `20261122090000_admin_only_cancel` diarsipkan di sini; padanan MariaDB-nya satu
   migrasi `prisma/migrations/20261122100000_slg_client_sync`.
+- Merge client SLG `43c9900` (2026-11-23: akrual akhir bulan, rate card per kota, role Operation bawaan): 3 migrasi
+  PostgreSQL `20261123090000_operation_slg_access`, `20261124090000_month_accrual`, `20261124100000_accrual_start_lines`
+  diarsipkan di sini; padanan MariaDB-nya `prisma/migrations/20261124110000_slg_accrual_operation`.

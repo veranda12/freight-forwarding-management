@@ -10,6 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { ClosingButton, MonthGrid } from "./closing-panel";
+import { AccrualCard, AccrualReviewCard } from "./accrual-card";
 
 export const dynamic = "force-dynamic";
 
@@ -72,6 +73,10 @@ export default async function ClosingPage({ searchParams }: { searchParams: Prom
           />
         </CardContent>
       </Card>
+
+      {/* Bulan berikutnya yang akan di-closing: pratinjau akrual dan daftar periksa biaya. */}
+      {status.reopened && <AccrualReviewCard period={status.reopened} />}
+      <AccrualCard period={status.next} canEdit={hasPerm(user, "closing.lockPeriod")} />
 
       <Card>
         <CardHeader><CardTitle className="text-base">Tahun buku</CardTitle></CardHeader>

@@ -2,14 +2,14 @@
 
 export const JOURNAL_SOURCES = [
   "INVOICE", "RECEIPT", "BILL", "PAYMENT", "CASH_ENTRY", "BANK_TRANSFER", "TAX_REMIT", "MANUAL", "FLEET_COST",
-  "DEBIT_NOTE", "CREDIT_NOTE", "FX", "FX_REVAL", "DEPRECIATION", "CLOSING", "VOUCHER",
+  "DEBIT_NOTE", "CREDIT_NOTE", "FX", "FX_REVAL", "DEPRECIATION", "ACCRUAL", "CLOSING", "VOUCHER",
 ] as const;
 
 export const SOURCE_LABEL: Record<string, string> = {
   INVOICE: "Invoice", RECEIPT: "Penerimaan", BILL: "Vendor bill", PAYMENT: "Bayar vendor",
   CASH_ENTRY: "Penerimaan/pengeluaran", VOUCHER: "Voucher", BANK_TRANSFER: "Transfer antar rekening", TAX_REMIT: "Setor pajak", MANUAL: "Jurnal umum, modal", FLEET_COST: "Beban armada", DEBIT_NOTE: "Debit note",
   CREDIT_NOTE: "Credit note", FX: "Selisih kurs", FX_REVAL: "Revaluasi kurs",
-  DEPRECIATION: "Penyusutan", CLOSING: "Tutup buku",
+  DEPRECIATION: "Penyusutan", ACCRUAL: "Akrual akhir bulan", CLOSING: "Tutup buku",
 };
 
 export const PAGE_SIZES = [25, 50, 100] as const;

@@ -178,6 +178,8 @@ enum JournalSource {
   CASH_ENTRY
   BANK_TRANSFER
   VOUCHER
+  /// Akrual biaya belum ditagih saat closing bulan, dibalik otomatis tanggal 1 bulan berikutnya. sourceId = "YYYY-MM".
+  ACCRUAL
 }
 
 enum VoucherStatus {
@@ -335,25 +337,42 @@ model VerificationToken {
 // ============================================================
 
 model CompanySetting {
-  id             String   @id @default(cuid())
-  name           String
-  legalName      String?
-  npwp           String?
-  address        String?  @db.Text
-  city           String?
-  phone          String?
-  email          String?
-  website        String?
-  logoPath       String?  @db.Text
-  bankName       String?
-  bankAccount    String?
-  bankHolder     String?
-  bankBranch     String?
-  signatoryName  String?
-  signatoryTitle String?
+  id                 String   @id @default(cuid())
+  name               String
+  legalName          String?
+  npwp               String?
+  address            String?  @db.Text
+  city               String?
+  phone              String?
+  email              String?
+  website            String?
+  logoPath           String?  @db.Text
+  bankName           String?
+  bankAccount        String?
+  bankHolder         String?
+  bankBranch         String?
+  signatoryName      String?
+  signatoryTitle     String?
   /// Kode perusahaan pada nomor bukti, misalnya SLG/BK/26/11/06/0001.
-  docCode        String   @default("SLG")
-  updatedAt      DateTime @updatedAt
+  docCode            String   @default("SLG")
+  /// Akrual akhir bulan berlaku untuk job yang ditagih mulai bulan ini ("YYYY-MM"). Kosong = akrual belum aktif.
+  accrualStartPeriod String?
+  updatedAt          DateTime @updatedAt
+}
+
+/// Baris biaya (buying) yang ikut jurnal akrual satu periode. Dipakai memeriksa biaya yang tercatat dua kali
+/// (akrual + vendor bill di bulan yang sama) saat bulan dibuka untuk koreksi.
+model AccrualLine {
+  id            String       @id @default(cuid())
+  period        String
+  entryId       String
+  entry         JournalEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  costingLineId String?
+  costingLine   CostingLine? @relation(fields: [costingLineId], references: [id], onDelete: SetNull)
+  amount        Decimal      @db.Decimal(18, 2)
+
+  @@index([period])
+  @@index([costingLineId])
 }
 
 /// Kotak dokumen SOP pada cetakan bukti, per jenis formulir: BBM, BBK, BKM, BKK, JU, VC, VM.
@@ -631,7 +650,8 @@ model JournalEntry {
   createdBy    User?         @relation(fields: [createdById], references: [id])
   createdAt    DateTime      @default(now())
 
-  lines JournalLine[]
+  lines        JournalLine[]
+  accrualLines AccrualLine[]
 
   @@index([date])
   @@index([source, sourceId])
@@ -927,49 +947,50 @@ model Booking {
 
 model CostingLine {
   vehicleId         String?
-  vehicle           Vehicle?    @relation(fields: [vehicleId], references: [id])
-  id                String      @id @default(cuid())
+  vehicle           Vehicle?      @relation(fields: [vehicleId], references: [id])
+  id                String        @id @default(cuid())
   jobId             String
-  job               Job         @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  job               Job           @relation(fields: [jobId], references: [id], onDelete: Cascade)
   side              ChargeSide
   chargeCodeId      String
-  chargeCode        ChargeCode  @relation(fields: [chargeCodeId], references: [id])
-  description       String?     @db.Text
+  chargeCode        ChargeCode    @relation(fields: [chargeCodeId], references: [id])
+  description       String?       @db.Text
   vendorId          String?
-  vendor            Vendor?     @relation(fields: [vendorId], references: [id])
-  currency          String      @default("IDR")
-  exchangeRate      Decimal     @default(1) @db.Decimal(18, 6)
-  qty               Decimal     @default(1) @db.Decimal(18, 2)
-  unitPrice         Decimal     @default(0) @db.Decimal(18, 2) // foreign per unit
-  amountForeign     Decimal     @default(0) @db.Decimal(18, 2)
-  estimatedIdr      Decimal     @default(0) @db.Decimal(18, 2)
-  actualIdr         Decimal     @default(0) @db.Decimal(18, 2)
+  vendor            Vendor?       @relation(fields: [vendorId], references: [id])
+  currency          String        @default("IDR")
+  exchangeRate      Decimal       @default(1) @db.Decimal(18, 6)
+  qty               Decimal       @default(1) @db.Decimal(18, 2)
+  unitPrice         Decimal       @default(0) @db.Decimal(18, 2) // foreign per unit
+  amountForeign     Decimal       @default(0) @db.Decimal(18, 2)
+  estimatedIdr      Decimal       @default(0) @db.Decimal(18, 2)
+  actualIdr         Decimal       @default(0) @db.Decimal(18, 2)
   /// PPN masukan baris buying (IDR), diketik sesuai faktur/invoice vendor yang ditujukan ke perusahaan.
   /// Tidak dihitung dari tarif. Terisi sebagai PPN Masukan (1400) saat baris ini masuk voucher atau vendor bill.
   /// Baris reimburse tidak punya PPN: nilainya diisi termasuk PPN dan ditagihkan ke customer.
-  ppnIdr            Decimal     @default(0) @db.Decimal(18, 2)
-  taxable           Boolean     @default(true)
-  asReceipt         Boolean     @default(false)
+  ppnIdr            Decimal       @default(0) @db.Decimal(18, 2)
+  taxable           Boolean       @default(true)
+  asReceipt         Boolean       @default(false)
   /// Satuan untuk cetakan, misalnya 40HC, B/L, km.
   unitLabel         String?
   /// Dibuat dari rate card; dihitung ulang selama belum ditagih.
-  fromRateCard      Boolean     @default(false)
-  invoiced          Boolean     @default(false)
+  fromRateCard      Boolean       @default(false)
+  invoiced          Boolean       @default(false)
   /// Invoice yang menagih baris selling ini. Pembatalan invoice hanya membuka kembali baris miliknya.
   invoiceId         String?
-  invoice           Invoice?    @relation("InvoiceCostings", fields: [invoiceId], references: [id], onDelete: SetNull)
-  billed            Boolean     @default(false)
+  invoice           Invoice?      @relation("InvoiceCostings", fields: [invoiceId], references: [id], onDelete: SetNull)
+  billed            Boolean       @default(false)
   /// Vendor bill yang menagih baris buying ini. Edit/batal bill hanya membuka kembali baris miliknya.
   billId            String?
-  bill              VendorBill? @relation("BillCostings", fields: [billId], references: [id], onDelete: SetNull)
+  bill              VendorBill?   @relation("BillCostings", fields: [billId], references: [id], onDelete: SetNull)
   /// Selling: baris buying reimburse asalnya (dibuat otomatis, nominal sama). Lihat src/lib/selling-sync.ts.
-  buyingLineId      String?     @unique
+  buyingLineId      String?       @unique
   /// Voucher pengeluaran yang memuat baris buying ini. Baris terkunci sejak voucher dibuat.
   voucherId         String?
-  voucher           Voucher?    @relation(fields: [voucherId], references: [id], onDelete: SetNull)
-  sortOrder         Int         @default(0)
+  voucher           Voucher?      @relation(fields: [voucherId], references: [id], onDelete: SetNull)
+  sortOrder         Int           @default(0)
   recordedAt        DateTime?
   recordedJournalId String?
+  accrualLines      AccrualLine[]
 
   @@index([jobId, side])
   @@index([invoiceId])

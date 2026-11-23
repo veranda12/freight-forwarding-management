@@ -158,6 +158,7 @@ async function main() {
     ["1450", "PPh 23 Dibayar Dimuka", "ASSET", "DEBIT", true],
     ["1500", "Uang Muka / WIP", "ASSET", "DEBIT", true],
     ["2000", "Hutang Usaha", "LIABILITY", "CREDIT", true],
+    ["2050", "Hutang Belum Ditagih (Akrual)", "LIABILITY", "CREDIT", true],
     ["2100", "PPN Keluaran", "LIABILITY", "CREDIT", true],
     ["2200", "Hutang PPh 23", "LIABILITY", "CREDIT", true],
     ["3000", "Modal Disetor", "EQUITY", "CREDIT", true],

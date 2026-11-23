@@ -67,10 +67,10 @@ export function MonthGrid({ months, canClose, canReopen, otherReopened }: {
   const [confirm, setConfirm] = useState<{ period: string; kind: "close" | "reopen" } | null>(null);
   const [reason, setReason] = useState("");
 
-  function run(fn: () => Promise<{ ok: boolean; error?: string }>, done: string) {
+  function run<R extends { ok: boolean; error?: string }>(fn: () => Promise<R>, done: string | ((res: R) => string)) {
     start(async () => {
       const res = await fn();
-      if (res.ok) { toast.success(done); setConfirm(null); setReason(""); router.refresh(); }
+      if (res.ok) { toast.success(typeof done === "string" ? done : done(res)); setConfirm(null); setReason(""); router.refresh(); }
       else toast.error(res.error);
     });
   }
@@ -123,11 +123,15 @@ export function MonthGrid({ months, canClose, canReopen, otherReopened }: {
                 <DialogDescription>
                   Setelah closing, semua transaksi bertanggal {label(confirm.period)} tidak bisa dibuat, diedit, atau dibatalkan,
                   termasuk invoice, bill, voucher, pembayaran, kas, dan jurnal. Koreksi nanti lewat tombol Buka untuk koreksi (khusus Admin).
+                  {" "}Biaya job yang sudah ditagih tapi tagihan vendornya belum dicatat ikut dijurnal akrual otomatis, lalu dibalik tanggal 1 bulan berikutnya.
                 </DialogDescription>
               </DialogHeader>
               <DialogFooter>
                 <DialogClose asChild><Button variant="ghost">Batal</Button></DialogClose>
-                <Button disabled={pending} onClick={() => run(() => closeMonthAction(confirm.period), `${label(confirm.period)} sudah closing.`)}>
+                <Button disabled={pending} onClick={() => run(() => closeMonthAction(confirm.period), (res) => {
+                  const a = "accrual" in res ? (res.accrual as { number: string; count: number; total: number } | null) : null;
+                  return `${label(confirm.period)} sudah closing.${a ? ` Jurnal akrual ${a.number}: ${a.count} biaya, Rp ${a.total.toLocaleString("id-ID")}.` : " Tidak ada biaya yang perlu diakrualkan."}`;
+                })}>
                   {pending && <Loader2 className="animate-spin" />} Closing
                 </Button>
               </DialogFooter>

@@ -135,10 +135,11 @@ describe("input", () => {
 const perms = (key: string) => new Set<string>(normalizePermissions(DEFAULT_ROLES.find((r) => r.key === key)!.permissions));
 
 describe("hak akses (role bawaan)", () => {
-  it("Ops tidak melihat invoice, bill, dan voucher; tetap mengelola job, charge, dan alur quotation", () => {
+  it("Ops tidak melihat nilai tagihan dan tidak input biaya (5-6 Nov); tetap mengelola job", () => {
     const ops = perms("OPERATION");
-    for (const k of ["invoices.view", "bills.view", "vouchers.view", "kasir.view", "invoices.edit"]) expect(ops.has(k), k).toBe(false);
-    for (const k of ["jobs.status", "jobs.charges", "jobs.bl", "quotations.send", "quotations.decide", "quotations.convert"]) expect(ops.has(k), k).toBe(true);
+    for (const k of ["invoices.view", "bills.view", "vouchers.view", "kasir.view", "invoices.edit", "costing.view", "reports.view", "rateCard.view",
+      "jobs.charges", "jobs.viewFinancials", "quotations.view"]) expect(ops.has(k), k).toBe(false);
+    for (const k of ["jobs.status", "jobs.bl", "jobs.containers", "jobs.clearance"]) expect(ops.has(k), k).toBe(true);
   });
   it("Finance mengelola costing, voucher, dan edit bukti; Sales tetap melihat tagihan dan margin", () => {
     const fin = perms("FINANCE");

@@ -62,6 +62,33 @@ Format: **Keputusan** — _alasan_.
   kini hanya baris JU, isian formulir lain tetap tersimpan tetapi tidak tercetak). Nilainya milik SLG, jadi tidak
   di-seed. Jurnal bernomor `JE/…` (transfer, setor pajak, aset, armada) dicetak dengan formulir Jurnal Umum.
 
+## Akrual akhir bulan otomatis saat closing (2026-11-20)
+
+- Permintaan client: laba rugi bulanan tidak boleh "terlalu besar" di bulan invoice lalu "rugi semu" di bulan tagihan vendor datang.
+- Saat Closing bulan, biaya buying **non-reimburse** dari job yang **sudah ditagih** (invoice aktif bertanggal ≤ akhir bulan) tapi belum dijurnal sampai akhir bulan dijurnal akrual: Dr beban (akun charge code, fallback 5900), Cr **2050 Hutang Belum Ditagih (Akrual)**, tanggal akhir bulan, sumber `ACCRUAL`, `sourceId` = periode.
+- "Belum dijurnal" = tidak ada vendor bill aktif bertanggal ≤ akhir bulan, voucher belum dibayar ≤ akhir bulan, dan biaya armada belum dicatat ≤ akhir bulan. Bill bertanggal bulan berikutnya tetap diakrualkan.
+- Pembalik otomatis tanggal 1 bulan berikutnya, sebagai jurnal biasa (`sourceId` = `YYYY-MM:REV`), bukan pembatalan, supaya akrual tidak tampil sebagai transaksi batal. Tagihan asli tetap diinput seperti biasa di tanggal realnya; selisih perkiraan vs tagihan jatuh di bulan tagihan.
+- Akrual hanya aktif setelah **bulan mulai** diatur di halaman Tutup Buku (`CompanySetting.accrualStartPeriod`). Job yang pertama kali ditagih sebelum bulan mulai tidak ikut, supaya biaya lama tidak menumpuk di closing pertama. Kosong = akrual nonaktif.
+- Job yang masih belum di-bill bulan berikutnya diakrualkan lagi di closing berikutnya (akrual lalu dibalik tiap bulan, netonya benar).
+- Reimburse tidak diakrualkan (akun 1350, bukan laba rugi). PPN tidak diakrualkan.
+- Baris biaya yang ikut akrual dicatat di `AccrualLine`. Membuka bulan untuk koreksi tetap boleh. Closing ulang tidak membuat atau menghitung ulang akrual (pembaliknya di bulan berikutnya yang mungkin sudah closing). Selama bulan dibuka, halaman Tutup Buku menampilkan **Pemeriksaan akrual**: biaya yang tercatat dua kali (ikut akrual dan juga punya bill/voucher bertanggal bulan itu) dan biaya yang sekarang memenuhi syarat tapi tidak ikut akrual. Penyesuaiannya lewat Jurnal Umum.
+- Form Vendor Bill memberi peringatan bila tanggal bill jatuh di bulan yang biaya terpilihnya sudah diakrualkan.
+- Halaman Tutup Buku menampilkan pratinjau akrual bulan berikutnya dan daftar periksa "biaya yang mungkin belum diinput": job yang ditagih di bulan itu tanpa biaya non-reimburse, atau dengan charge selling yang biasanya punya biaya vendor (pernah dipakai di buying job lain) tapi belum ada di buying. Daftar ini hanya pengingat.
+
+## Role Operation bawaan mengikuti aturan SLG (2026-11-19)
+
+- Role Management (branch `feat/slg-role-management-pg`, di-pull 19 Nov) memberi role bawaan Operation izin costing, laporan, rate card, charge code, rate, quotation, dan input biaya. Itu melanggar aturan client 5-6 Nov: Ops tidak boleh melihat nilai tagihan ke customer, dan hanya Finance yang menginput biaya.
+- Izin itu dicabut dari bawaan (`DEFAULT_ROLES`) dan dari database lewat migrasi `20261123090000_operation_slg_access`. Hak Ops kembali sama dengan sebelum Role Management: job, container, clearance, B/L, milestone, booking, dokumen, master operasional.
+- Hanya role bawaan Operation yang diubah. Super Admin tetap bisa memberi izin itu ke role mana pun lewat Role Management.
+- Alur quotation maker-checker tetap ada untuk role yang diberi izinnya. Uji E2E-nya memakai role peninjau sementara.
+
+## Rate card per kota: tab kota dan salin tarif (2026-11-18)
+
+- Client bingung karena semua tarif masih "Semua kota", sehingga job Surabaya memakai harga Jakarta. Aturannya tetap: kota diambil dari pelabuhan job (impor POD, ekspor POL), tarif kota menggantikan tarif dasar yang setara.
+- Saringan kota diganti tab kota dengan jumlah tarif aktif per kota. "Tarif dasar" = tarif tanpa kota.
+- Tombol **Salin tarif ke kota** (`copyRateCardToCity`) menyalin tarif aktif dari tarif dasar atau satu kota ke kota lain dengan harga sama. Tarif setara (charge, dasar hitung, berlaku, tipe container, customer) yang sudah ada di kota tujuan dilewati, jadi salin ulang aman dan harga yang sudah diubah tidak tertimpa.
+- Kota baru di luar daftar boleh diketik, tapi pelabuhannya harus ada di master Port dengan kolom Kota yang sama persis.
+
 ## Transaksi batal dan hak hapus (2026-11-17)
 
 - **Buku Besar menyembunyikan transaksi batal**: jurnal yang dibalik beserta jurnal baliknya tidak tampil bila keduanya

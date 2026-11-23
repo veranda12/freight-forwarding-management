@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { db, login, pickOption, userId, isoContainerNo, expectLedgerBalanced, accountBalance } from "./qa-helpers";
+import { db, login, pickOption, userId, isoContainerNo, expectLedgerBalanced, accountBalance, useQuotationReviewers } from "./qa-helpers";
 
 /**
  * QA-01 — Alur Ekspor-Impor end-to-end, berurutan lintas role, diverifikasi ke database:
@@ -9,6 +9,8 @@ import { db, login, pickOption, userId, isoContainerNo, expectLedgerBalanced, ac
  */
 
 test.describe.serial("QA-01 Alur Ekspor-Impor lintas role", () => {
+  useQuotationReviewers();
+
   const S: { quoId?: string; quoNumber?: string; jobId?: string; jobNumber?: string; invoiceId?: string; containerNo?: string; customer?: string } = {};
 
   test("01 Sales membuat quotation lewat form (Sea FCL Export, USD, 2 charge, vendor per baris)", async ({ page }) => {

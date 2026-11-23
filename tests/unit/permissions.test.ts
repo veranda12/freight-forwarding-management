@@ -55,10 +55,15 @@ describe("role awal", () => {
     }
   });
 
-  it("Operation mengirim, memutuskan, dan mengonversi quotation", () => {
+  it("Operation tanpa nilai tagihan dan tanpa input biaya (aturan client SLG 5-6 Nov)", () => {
     const o = role("OPERATION");
-    for (const k of ["quotations.viewAll", "quotations.send", "quotations.decide", "quotations.return", "quotations.convert"]) expect(o.has(k as never), k).toBe(true);
-    expect(o.has("quotations.create" as never)).toBe(false);
+    for (const k of [
+      "costing.view", "reports.view", "charges.view", "rateCard.view", "rates.view", "jobs.charges", "jobs.fleetCost", "jobs.viewFinancials",
+      "invoices.view", "quotations.view", "quotations.send", "quotations.decide", "quotations.convert",
+    ]) expect(o.has(k as never), k).toBe(false);
+    for (const k of ["jobs.create", "jobs.status", "jobs.containers", "jobs.clearance", "jobs.bl", "tracking.view", "documents.generate"]) {
+      expect(o.has(k as never), k).toBe(true);
+    }
   });
 
   it("Management hanya melihat (tanpa aksi); maker-checker quotation aktif bawaan", () => {

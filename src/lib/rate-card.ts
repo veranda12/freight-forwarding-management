@@ -368,3 +368,35 @@ export async function displayUnits(
   const noJob = need.some((l) => !l.jobId) ? await rateCardUnits(db, customerId, need.filter((l) => !l.jobId).map((l) => l.chargeCodeId), []) : new Map<string, string>();
   return lines.map((l) => l.unitLabel ?? (l.jobId ? maps.get(l.jobId) : noJob)?.get(l.chargeCodeId) ?? null);
 }
+
+/** Kunci "tarif setara": dua baris aktif dengan kunci sama di kota yang sama dianggap duplikat. */
+const rateKey = (r: { chargeCodeId: string; basis: string; condition: string; containerTypeId: string | null; customerId: string | null }) =>
+  [r.chargeCodeId, r.basis, r.condition, r.containerTypeId ?? "", r.customerId ?? ""].join("|");
+
+/**
+ * Salin tarif aktif dari tarif dasar (`fromCity` null) atau dari satu kota ke kota lain (permintaan client 18 Nov:
+ * tarif Surabaya cukup disalin dari Jakarta lalu harga yang berbeda diubah). Tarif yang setaranya sudah ada di kota
+ * tujuan dilewati supaya harga yang sudah diatur tidak tertimpa. `customerId`: undefined semua, null standar saja.
+ */
+export async function copyRateCardToCity(
+  db: Pick<PrismaClient, "rateCardItem">,
+  opts: { fromCity: string | null; toCity: string; customerId?: string | null },
+): Promise<{ copied: number; skipped: number }> {
+  const toCity = opts.toCity.trim();
+  const fromCity = opts.fromCity?.trim() || null;
+  if (!toCity) throw new Error("Pilih kota tujuan.");
+  if (fromCity === toCity) throw new Error("Kota asal dan tujuan sama.");
+  const customer = opts.customerId === undefined ? {} : { customerId: opts.customerId };
+  const [source, existing] = await Promise.all([
+    db.rateCardItem.findMany({ where: { isActive: true, city: fromCity, ...customer }, orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }] }),
+    db.rateCardItem.findMany({ where: { isActive: true, city: toCity, ...customer } }),
+  ]);
+  const taken = new Set(existing.map(rateKey));
+  const fresh = source.filter((r) => !taken.has(rateKey(r)));
+  if (fresh.length) {
+    await db.rateCardItem.createMany({
+      data: fresh.map(({ id: _id, createdAt: _c, city: _city, ...r }) => ({ ...r, city: toCity })),
+    });
+  }
+  return { copied: fresh.length, skipped: source.length - fresh.length };
+}

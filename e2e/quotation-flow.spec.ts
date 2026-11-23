@@ -1,4 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
+import { db } from "./qa/qa-helpers";
+import { DEFAULT_ROLES } from "../src/lib/permissions";
+import { roleIdOf } from "../src/lib/roles";
 
 /**
  * Alur quotation sesuai bisnis (Role Management):
@@ -20,6 +23,28 @@ async function login(page: Page, email: string) {
   await page.getByRole("button", { name: "Masuk" }).click();
   await page.waitForURL("**/dashboard");
 }
+
+/**
+ * Untuk client SLG, role bawaan Operation tidak memegang izin quotation (Ops tidak melihat nilai tagihan).
+ * Alur maker-checker tetap diuji: selama spec ini ops@ dan ops2@ dipindah ke role peninjau sementara
+ * (izin Operation + kirim/kembalikan/putuskan/convert quotation), lalu dikembalikan ke Operation.
+ */
+const REVIEWERS = ["ops@demo.com", "ops2@demo.com"];
+const REVIEWER_ROLE = "role_qa_quotation_reviewer";
+test.beforeAll(async () => {
+  const ops = DEFAULT_ROLES.find((r) => r.key === "OPERATION")!.permissions;
+  const permissions = [...ops, "quotations.view", "quotations.viewAll", "quotations.return", "quotations.send", "quotations.sendLowMargin", "quotations.decide", "quotations.convert"];
+  await db.appRole.upsert({
+    where: { id: REVIEWER_ROLE },
+    create: { id: REVIEWER_ROLE, key: "QA_QUOTATION_REVIEWER", name: "QA Peninjau Quotation", permissions },
+    update: { permissions },
+  });
+  await db.user.updateMany({ where: { email: { in: REVIEWERS } }, data: { roleId: REVIEWER_ROLE } });
+});
+test.afterAll(async () => {
+  await db.user.updateMany({ where: { email: { in: REVIEWERS } }, data: { roleId: roleIdOf("OPERATION") } });
+  await db.appRole.delete({ where: { id: REVIEWER_ROLE } }).catch(() => undefined);
+});
 
 const statusCell = (page: Page, label: string) => page.getByText(label, { exact: true });
 

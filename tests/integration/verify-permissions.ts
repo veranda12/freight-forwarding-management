@@ -51,7 +51,8 @@ async function main() {
   const qAll = await db.quotation.count();
   const qMine = await db.quotation.findMany({ where: quotationScope(sales), select: { ownerId: true, createdById: true } });
   ok(qMine.length > 0 && qMine.length < qAll && qMine.every((q) => q.ownerId === uid || q.createdById === uid), `quotation Sales: ${qMine.length}/${qAll}, semuanya milik sendiri`);
-  ok((await db.quotation.count({ where: quotationScope(ops) })) === qAll, "quotation Operation: semua data");
+  ok((await db.quotation.count({ where: quotationScope(mgr) })) === qAll, "quotation Management: semua data");
+  ok((await db.quotation.count({ where: quotationScope(ops) })) < qAll, "quotation Operation (SLG, tanpa izin quotation): tidak melihat semua data");
 
   const cAll = await db.customer.count();
   const cMine = await db.customer.findMany({ where: customerScope(sales), select: { salesPicId: true, createdById: true } });
@@ -82,13 +83,18 @@ async function main() {
 
   // 3. Izin & maker-checker
   ok(!hasPerm(sales, "quotations.send") && hasPerm(sales, "quotations.submit"), "Sales: boleh ajukan, tidak boleh kirim");
-  ok(hasPerm(ops, "quotations.send") && hasPerm(ops, "quotations.decide") && !hasPerm(ops, "quotations.decideOwn"), "Operation: kirim & putuskan, tanpa izin dokumen sendiri");
-  const blocked = (() => { try { assertNotOwn(ops, "quotations.decideOwn", [ops.id], "menerima"); return false; } catch { return true; } })();
-  ok(blocked, "maker-checker: Operation tidak boleh memutuskan quotation yang ia kirim sendiri");
-  const allowed = (() => { try { assertNotOwn(ops, "quotations.decideOwn", [sales.id], "menerima"); return true; } catch { return false; } })();
-  ok(allowed, "maker-checker: Operation boleh memutuskan quotation kiriman orang lain");
-  const withOwn: SessionUser = { ...ops, permissions: new Set<PermissionKey>([...ops.permissions, "quotations.decideOwn"]) };
-  const ownOk = (() => { try { assertNotOwn(withOwn, "quotations.decideOwn", [ops.id], "menerima"); return true; } catch { return false; } })();
+  // Aturan client SLG (5-6 Nov): Operation bawaan tanpa nilai tagihan, costing, dan quotation.
+  ok(["costing.view", "reports.view", "rateCard.view", "jobs.charges", "quotations.view", "quotations.send"].every((k) => !hasPerm(ops, k as PermissionKey)),
+    "Operation (SLG): tanpa costing, laporan, rate card, input biaya, dan quotation");
+  // Maker-checker berlaku untuk role yang diberi izin kirim/putuskan quotation (mis. role kustom dari Operation).
+  const checker: SessionUser = { ...ops, permissions: new Set<PermissionKey>([...ops.permissions, "quotations.view", "quotations.send", "quotations.decide"]) };
+  ok(hasPerm(checker, "quotations.send") && hasPerm(checker, "quotations.decide") && !hasPerm(checker, "quotations.decideOwn"), "checker: kirim & putuskan, tanpa izin dokumen sendiri");
+  const blocked = (() => { try { assertNotOwn(checker, "quotations.decideOwn", [checker.id], "menerima"); return false; } catch { return true; } })();
+  ok(blocked, "maker-checker: checker tidak boleh memutuskan quotation yang ia kirim sendiri");
+  const allowed = (() => { try { assertNotOwn(checker, "quotations.decideOwn", [sales.id], "menerima"); return true; } catch { return false; } })();
+  ok(allowed, "maker-checker: checker boleh memutuskan quotation kiriman orang lain");
+  const withOwn: SessionUser = { ...checker, permissions: new Set<PermissionKey>([...checker.permissions, "quotations.decideOwn"]) };
+  const ownOk = (() => { try { assertNotOwn(withOwn, "quotations.decideOwn", [checker.id], "menerima"); return true; } catch { return false; } })();
   ok(ownOk, "maker-checker: dengan izin 'dokumen sendiri', boleh memutuskan kiriman sendiri");
   const adminUser = await sessionOf("admin@demo.com");
   const superUser = await sessionOf("superadmin@demo.com");
