@@ -51,7 +51,12 @@ async function main() {
   FINANCE = await sessionOf("finance@demo.com");
 
   const ts = Date.now();
-  const customer = await db.customer.findFirstOrThrow({ orderBy: { code: "asc" } });
+  // Customer yang bukan milik sales@demo.com: invoice-nya harus tak terlihat Sales sampai ia jadi Sales PIC job (uji batas data).
+  const salesUser = await db.user.findUniqueOrThrow({ where: { email: "sales@demo.com" } });
+  const customer = await db.customer.findFirstOrThrow({
+    where: { AND: [{ OR: [{ salesPicId: null }, { salesPicId: { not: salesUser.id } }] }, { OR: [{ createdById: null }, { createdById: { not: salesUser.id } }] }] },
+    orderBy: { code: "asc" },
+  });
   const vendor = await db.vendor.findFirstOrThrow({ orderBy: { code: "asc" } });
   const service = await db.chargeCode.findFirstOrThrow({ where: { code: "HANDLING" } });
   const bank = await db.bankAccount.findFirstOrThrow({ where: { kind: "BANK", currency: "IDR", isActive: true } });

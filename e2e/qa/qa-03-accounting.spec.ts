@@ -14,7 +14,7 @@ async function cashOut(page: Page, desc: string, amount: string, dateKey?: strin
   await page.getByRole("button", { name: /Catat transaksi/ }).click();
   const dlg = page.getByRole("dialog");
   await dlg.getByRole("button", { name: /Jurnal Pengeluaran/ }).click();
-  await pickOption(page, dlg.getByRole("combobox").nth(0), /BCA/);
+  await pickOption(page, dlg.getByRole("combobox").nth(0), /Mandiri Utama/);
   await pickOption(page, dlg.getByRole("combobox", { name: "Akun lawan" }).first(), /^6310/);
   if (dateKey) await dlg.locator('input[type="date"]').fill(dateKey);
   await dlg.getByRole("textbox", { name: /^Nominal/ }).first().fill(amount);
@@ -55,7 +55,7 @@ test.describe.serial("QA-03 Akuntansi", () => {
     await page.getByRole("tab", { name: "Transfer antar rekening" }).click();
     await page.getByRole("button", { name: /Transfer antar rekening/ }).click();
     const dlg = page.getByRole("dialog");
-    await pickOption(page, dlg.getByRole("combobox").nth(0), /BCA Operasional/);
+    await pickOption(page, dlg.getByRole("combobox").nth(0), /Mandiri Utama/);
     await pickOption(page, dlg.getByRole("combobox").nth(1), /Kas Kecil/);
     await dlg.locator('input[type="number"]').first().fill("250000");
     const note = `QA transfer ${Date.now()}`;

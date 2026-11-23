@@ -3,6 +3,7 @@ import { Prisma, type PrismaClient, type VendorType } from "@prisma/client";
 import { VENDOR_TYPE_LABELS } from "./enums";
 import { pad } from "./crud";
 import { normalizePermissions, type PermissionKey } from "./permissions";
+import { PRODUCT } from "@/config/product";
 
 /**
  * Import Excel master Customer, Vendor, Commodity.
@@ -479,7 +480,7 @@ const TEXT_KINDS = new Set<ColKind>(["code", "text", "email"]);
 export async function buildTemplate(kind: ImportKind): Promise<Buffer> {
   const spec = IMPORT_SPECS[kind];
   const wb = new ExcelJS.Workbook();
-  wb.creator = "CargoFlow";
+  wb.creator = PRODUCT.name;
   wb.created = new Date();
   const header = (c: ImportCol) => (c.required ? `${c.header} *` : c.header);
   const col = (i: number) => {

@@ -1,9 +1,11 @@
 import React from "react";
-import { Document, Image, Page, View, Text, StyleSheet } from "@react-pdf/renderer";
+import { Document, Page, View, Text, StyleSheet } from "@react-pdf/renderer";
+import { CompanyLogo } from "./logo-mark";
 import { formatInTimeZone } from "date-fns-tz";
 import { id as idLocale } from "date-fns/locale";
 import { formatNumber, TZ } from "@/lib/format";
 import { formInfo, type ProofFormCode } from "@/lib/proof-forms";
+import { COMPANY_TAGLINE } from "@/config/product";
 
 const INK = "#111827";
 const B = 0.8; // tebal garis
@@ -30,6 +32,7 @@ const s = StyleSheet.create({
   cell: { paddingVertical: 2.5, paddingHorizontal: 4 },
   logo: { width: LOGO_W - 12, height: 42, objectFit: "contain" },
   coName: { fontSize: 11, fontFamily: "Helvetica-Bold", textAlign: "center" },
+  coTag: { fontSize: 7.5, fontFamily: "Helvetica-Bold", textAlign: "center", marginTop: 1 },
   sop: { fontSize: 10, fontFamily: "Helvetica-Bold", textAlign: "center" },
   title: { fontSize: 11, fontFamily: "Helvetica-Bold", textAlign: "center" },
   signTop: { textAlign: "center", fontFamily: "Helvetica-Bold", paddingVertical: 2.5 },
@@ -97,10 +100,10 @@ export function ProofDocument({ doc }: { doc: ProofDoc }) {
           {/* Kop: logo | nama PT, SOP, Doc. No, Revision */}
           <View style={[s.row, s.bb]}>
             <View style={[s.br, { width: LOGO_W, alignItems: "center", justifyContent: "center", padding: 4 }]}>
-              {doc.company.logoFile ? <Image src={doc.company.logoFile} style={s.logo} /> : null}
+              <CompanyLogo file={doc.company.logoFile} style={s.logo} />
             </View>
             <View style={{ flex: 1 }}>
-              <View style={[s.bb, s.cell, { paddingVertical: 4 }]}><Text style={s.coName}>{doc.company.name}</Text></View>
+              <View style={[s.bb, s.cell, { paddingVertical: 4 }]}><Text style={s.coName}>{doc.company.name}</Text><Text style={s.coTag}>{COMPANY_TAGLINE}</Text></View>
               <View style={s.row}>
                 <View style={[s.br, { flex: 1, justifyContent: "center" }]}><Text style={s.sop}>Standard Operating Procedure</Text></View>
                 <View style={{ width: META_W }}>
@@ -185,7 +188,7 @@ const v = StyleSheet.create({
   head: { flexDirection: "row", alignItems: "center", paddingBottom: 6, borderBottomWidth: 1.5, borderColor: BLUE },
   logo: { width: 54, height: 44, objectFit: "contain", marginRight: 8 },
   coName: { fontSize: 15, fontFamily: "Helvetica-Bold", color: BLUE },
-  coSub: { fontSize: 8, fontFamily: "Helvetica-Oblique", color: BLUE, marginTop: 2 },
+  coTag: { fontSize: 8.5, fontFamily: "Helvetica-Bold", color: BLUE, marginTop: 1 },
   titleBox: { borderWidth: 1, borderColor: BLUE, borderRadius: 4, paddingVertical: 5, paddingHorizontal: 12, alignItems: "center" },
   title: { fontSize: 12, fontFamily: "Helvetica-Bold", color: BLUE },
   subtitle: { fontSize: 8.5, fontFamily: "Helvetica-Bold", color: BLUE, marginTop: 1 },
@@ -212,7 +215,8 @@ const VOUCHER_SIGNS: [string, string][] = [
 const dashMoney = (n: number) => (Math.abs(n) < 0.005 ? "-" : money(n));
 
 /**
- * Template voucher client: kop logo + nama PT dan kotak RECEIPT / PAYMENT VOUCHER, No. Voucher dan tanggal,
+ * Template voucher client: kop logo + nama PT + tagline (tanpa alamat, catatan client 2026-11-23) dan kotak
+ * RECEIPT / PAYMENT VOUCHER, No. Voucher dan tanggal,
  * baris rekening, tabel Keterangan - Kode COA - Debit - Kredit dengan Total, lalu empat kotak tanda tangan.
  * Nomor tetap nomor bukti SLG (BM/BK/KM/KK/VC).
  */
@@ -222,7 +226,6 @@ function VoucherProof({ doc, flow }: { doc: ProofDoc; flow: "IN" | "OUT" }) {
   const totalDebit = doc.rows.reduce((t, r) => t + r.debit, 0);
   const totalCredit = doc.rows.reduce((t, r) => t + r.credit, 0);
   const cols = { desc: INNER * 0.4, acc: INNER * 0.18, amt: INNER * 0.21 };
-  const address = [doc.company.address, doc.company.city].filter(Boolean).join(", ");
   const meta: [string, string][] = [
     ["No. Voucher", doc.number],
     [isIn ? "Tanggal Penerimaan" : "Tanggal Pembayaran", formatInTimeZone(doc.date, TZ, "dd MMMM yyyy", { locale: idLocale })],
@@ -232,10 +235,10 @@ function VoucherProof({ doc, flow }: { doc: ProofDoc; flow: "IN" | "OUT" }) {
     <Document title={`${title} ${doc.number}`}>
       <Page size="A5" orientation="landscape" style={v.page}>
         <View style={v.head}>
-          {doc.company.logoFile ? <Image src={doc.company.logoFile} style={v.logo} /> : null}
-          <View style={{ flex: 1 }}>
+          <CompanyLogo file={doc.company.logoFile} style={v.logo} />
+          <View style={{ flex: 1, paddingRight: 10 }}>
             <Text style={v.coName}>{doc.company.name}</Text>
-            {address ? <Text style={v.coSub}>{address}</Text> : null}
+            <Text style={v.coTag}>{COMPANY_TAGLINE}</Text>
           </View>
           <View style={v.titleBox}>
             <Text style={v.title}>{title}</Text>

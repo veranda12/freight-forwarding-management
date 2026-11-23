@@ -1,6 +1,6 @@
 /**
  * Data demo untuk fitur kas dan rekening: rekening Mandiri (IDR) dan BCA USD, transfer antar rekening,
- * kas masuk/keluar, dan rekening koran BCA Operasional Oktober 2026 yang sebagian sudah cocok.
+ * kas masuk/keluar, dan rekening koran Mandiri Utama Oktober 2026 yang sebagian sudah cocok.
  * Dijalankan sekali di database demo. Berhenti jika rekening demo sudah ada.
  */
 import { PrismaClient } from "@prisma/client";
@@ -19,8 +19,8 @@ async function main() {
   const kas = await db.bankAccount.findFirstOrThrow({ where: { coaAccount: { code: "1100" } } });
   const coa = async (code: string) => (await db.coaAccount.findUniqueOrThrow({ where: { code } })).id;
 
-  const mandiri = await createBankAccount(db, { kind: "BANK", name: "Mandiri Operasional", bankName: "Bank Mandiri", accountNo: "1270009988776", accountHolder: "PT Samudra Lintas Logistik", branch: "Tanjung Priok" });
-  const usd = await createBankAccount(db, { kind: "BANK", name: "BCA USD", bankName: "BCA", accountNo: "0843219876", accountHolder: "PT Samudra Lintas Logistik", branch: "Sunter", currency: "USD", notes: "Penerimaan dari overseas agent" });
+  const mandiri = await createBankAccount(db, { kind: "BANK", name: "Mandiri Operasional", bankName: "Bank Mandiri", accountNo: "1270009988776", accountHolder: "PT Sentra Logistik Global", branch: "Tanjung Priok" });
+  const usd = await createBankAccount(db, { kind: "BANK", name: "BCA USD", bankName: "BCA", accountNo: "0843219876", accountHolder: "PT Sentra Logistik Global", branch: "Sunter", currency: "USD", notes: "Penerimaan dari overseas agent" });
 
   await createTransfer(db, { fromId: bca.id, toId: kas.id, dateKey: "2026-10-19", amount: 5_000_000, description: "Pengisian kas kecil Oktober" }, admin.id);
   await createTransfer(db, { fromId: bca.id, toId: mandiri.id, dateKey: "2026-10-20", amount: 250_000_000, fee: 6_500, description: "Pemindahan dana operasional", reference: "TRF-2026-10-20" }, admin.id);
@@ -31,7 +31,7 @@ async function main() {
   await createCashEntry(db, { direction: "IN", bankAccountId: mandiri.id, counterAccountId: await coa("4900"), amount: 182_450, dateKey: "2026-10-27", description: "Bunga jasa giro Oktober" }, admin.id);
   await createCashEntry(db, { direction: "OUT", bankAccountId: bca.id, counterAccountId: await coa("6300"), amount: 15_000, dateKey: "2026-10-28", description: "Biaya administrasi rekening Oktober" }, admin.id);
 
-  // Rekening koran BCA Operasional 1-28 Oktober: semua mutasi buku, kecuali pembayaran terakhir yang belum
+  // Rekening koran Mandiri Utama 1-28 Oktober: semua mutasi buku, kecuali pembayaran terakhir yang belum
   // didebet bank, ditambah bunga yang hanya ada di koran dan belum dicatat.
   const bcaCoa = await coa("1200");
   const from = new Date("2026-10-01T00:00:00+07:00"), to = new Date("2026-10-29T00:00:00+07:00");

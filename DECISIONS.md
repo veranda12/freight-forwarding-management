@@ -50,6 +50,30 @@ Format: **Keputusan** — _alasan_.
   kini hanya baris JU, isian formulir lain tetap tersimpan tetapi tidak tercetak). Nilainya milik SLG, jadi tidak
   di-seed. Jurnal bernomor `JE/…` (transfer, setor pajak, aset, armada) dicetak dengan formulir Jurnal Umum.
 
+## Rebranding SentraHub dan identitas PT Sentra Logistik Global (2026-11-23)
+
+- Nama aplikasi **SentraHub** (dulu CargoFlow), dari satu tempat `src/config/product.ts`. Nama PT pengguna **PT Sentra
+  Logistik Global**; prefix nomor dokumen `SLG` tetap cocok.
+- **Logo** = gambar ulang vektor dari kop surat client (sumbernya hanya ±70 px), satu sumber geometri
+  `src/lib/brand-logo.ts`. Dipakai di web (`components/brand/logo-mark.tsx`: login, sidebar, tracking, 404), favicon
+  (`app/icon.svg`, dibuat dari `logoSvg()`), dan semua cetakan (`lib/pdf/logo-mark.tsx` → `CompanyLogo`).
+- Di cetakan, **logo unggahan di Pengaturan menang**. Tanpa unggahan, dipakai logo vektor, sehingga logo tetap ada
+  walau folder `public/uploads` hilang saat deploy. Cetakan yang memakai logo: invoice, voucher
+  penerimaan/pengeluaran, kop Jurnal Umum SOP, dokumen job (HBL/MBL/SI/DO/…), dan STT.
+- Alamat kantor (Dock Desk Coworking Space, Pelindo Tower Lantai 4, …, Koja / Kota Adm. Jakarta Utara, DKI Jakarta
+  14230) dan rekening **Bank Mandiri 103-00-1361596-4** a.n. PT Sentra Logistik Global ada di seed. DB yang sudah
+  terpasang diperbarui migrasi `20261125090000_company_sentra`, hanya bila datanya masih data demo lama, supaya data
+  yang sudah diisi tidak ditimpa. Rekening bawaan menjadi "Mandiri Utama" (CoA 1200 "Bank Mandiri").
+- NPWP, telepon, email, dan website PT belum diketahui, jadi dikosongkan (baris kosong tidak tercetak); diisi admin di
+  Pengaturan.
+- Tagline **"International and Domestic Freight Forwarder"** di bawah nama PT pada semua cetakan, mengikuti kop surat
+  client (`COMPANY_TAGLINE` di `src/config/product.ts`).
+- Catatan client (Mbak Eka, 2026-11-23): **invoice** menampilkan tagline lalu alamat sesuai NPWP; **voucher**
+  penerimaan/pengeluaran **tanpa alamat**. Dokumen job (HBL/MBL/SI/DO/…) dan STT tetap memuat alamat; kop Jurnal Umum
+  memang tanpa alamat.
+- Kolom teks kop di invoice, voucher, dokumen job, dan STT memakai `flex: 1`. Tanpa itu, alamat panjang tidak membungkus
+  dan menabrak kotak judul di kanan (ketahuan saat cek visual dengan alamat client).
+
 ## Akrual akhir bulan otomatis saat closing (2026-11-20)
 
 - Permintaan client: laba rugi bulanan tidak boleh "terlalu besar" di bulan invoice lalu "rugi semu" di bulan tagihan vendor datang.
@@ -175,7 +199,7 @@ Format: **Keputusan** — _alasan_.
 
 - Faker locale `id_ID` dengan **seed tetap (faker.seed(20261002))** → data demo deterministik, `prisma db seed` idempoten (truncate lalu isi ulang).
 - Nomor kontainer digenerasi dengan **check digit ISO 6346** yang valid.
-- Perusahaan pengguna: **PT Samudra Lintas Logistik** (Jakarta Utara).
+- Perusahaan pengguna: **PT Sentra Logistik Global** (Jakarta Utara); lihat bagian rebranding SentraHub.
 
 ## UI
 

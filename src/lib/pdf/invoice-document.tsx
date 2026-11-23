@@ -1,8 +1,10 @@
 import React from "react";
-import { Document, Page, View, Text, Image, StyleSheet } from "@react-pdf/renderer";
+import { Document, Page, View, Text, StyleSheet } from "@react-pdf/renderer";
+import { CompanyLogo } from "./logo-mark";
 import type { InvoiceSection } from "@prisma/client";
 import { SECTION_LABELS, SECTION_ORDER } from "@/lib/enums";
 import { amountInWords } from "@/lib/amount-words";
+import { COMPANY_TAGLINE } from "@/config/product";
 
 const INK = "#1f2937";
 const MUTED = "#6b7280";
@@ -15,9 +17,10 @@ const SOFT = "#f6f7f9";
 const s = StyleSheet.create({
   page: { paddingTop: 30, paddingBottom: 46, paddingHorizontal: 34, fontSize: 8.5, fontFamily: "Helvetica", color: INK },
   header: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 },
-  brand: { flexDirection: "row", gap: 8, maxWidth: 300 },
+  brand: { flexDirection: "row", gap: 8, flex: 1, paddingRight: 14 },
   logo: { width: 52, height: 52, objectFit: "contain" },
   coName: { fontSize: 13, fontFamily: "Helvetica-Bold" },
+  coTag: { fontSize: 8, fontFamily: "Helvetica-Bold", marginTop: 1 },
   coMeta: { fontSize: 7.5, color: "#374151", marginTop: 1.5 },
   titleBox: { width: 210 },
   title: { fontSize: 15, fontFamily: "Helvetica-Bold", color: "#fff", backgroundColor: HEAD, paddingVertical: 5, paddingHorizontal: 8, textAlign: "center", letterSpacing: 1.5 },
@@ -104,11 +107,13 @@ function Header({ company, title, inv, showDue }: { company: PdfInvoiceCompany; 
   return (
     <View style={s.header}>
       <View style={s.brand}>
-        {company.logoFile ? <Image src={company.logoFile} style={s.logo} /> : null}
-        <View>
+        <CompanyLogo file={company.logoFile} style={s.logo} />
+        {/* flex: 1 memberi kolom teks lebar pasti, sehingga alamat panjang membungkus, tidak menabrak kotak INVOICE. */}
+        <View style={{ flex: 1 }}>
           <Text style={s.coName}>{company.name}</Text>
+          <Text style={s.coTag}>{COMPANY_TAGLINE}</Text>
           {company.address ? <Text style={s.coMeta}>{company.address}{company.city ? `, ${company.city}` : ""}</Text> : null}
-          <Text style={s.coMeta}>{[company.phone && `Tel ${company.phone}`, company.email].filter(Boolean).join("  |  ")}</Text>
+          {company.phone || company.email ? <Text style={s.coMeta}>{[company.phone && `Tel ${company.phone}`, company.email].filter(Boolean).join("  |  ")}</Text> : null}
           {company.npwp ? <Text style={s.coMeta}>NPWP {company.npwp}</Text> : null}
         </View>
       </View>

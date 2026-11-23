@@ -1,6 +1,6 @@
-# CargoFlow — Freight Forwarding Management System
+# SentraHub — Freight Forwarding Management System
 
-Sistem manajemen freight forwarding (Sea FCL/LCL, Air, Land, Customs Clearance) untuk PT Samudra Lintas Logistik — dibangun dengan **Next.js 15, Prisma, PostgreSQL, Tailwind + shadcn/ui, Auth.js v5**. Data demo realistis via seed deterministik.
+Sistem manajemen freight forwarding (Sea FCL/LCL, Air, Land, Customs Clearance) untuk PT Sentra Logistik Global — dibangun dengan **Next.js 15, Prisma, PostgreSQL, Tailwind + shadcn/ui, Auth.js v5**. Data demo realistis via seed deterministik.
 
 > Nama produk dapat diganti dari satu file: `src/config/product.ts`.
 

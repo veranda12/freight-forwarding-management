@@ -5,6 +5,7 @@ import { billScope, invoiceScope, jobScope } from "@/lib/data-scope";
 import { prisma } from "@/lib/prisma";
 import { getArAging, getApAging } from "@/lib/accounting";
 import { MODE_LABELS } from "@/lib/enums";
+import { PRODUCT } from "@/config/product";
 
 export const runtime = "nodejs";
 
@@ -19,7 +20,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
   const wb = new ExcelJS.Workbook();
-  wb.creator = "CargoFlow";
+  wb.creator = PRODUCT.name;
   wb.created = new Date();
 
   const money = '#,##0';
