@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import bcrypt from "bcryptjs";
-import { db, login, userId, captureAction, replayAction, expectRejected, newDraft } from "./qa-helpers";
+import { db, login, userId, captureAction, replayAction, expectRejected, newDraft, useQuotationReviewers } from "./qa-helpers";
 
 /**
  * QA-04 — Keamanan & otorisasi. Tombol yang disembunyikan tidak cukup: server action ASLI direkam dari user yang berhak,
@@ -18,6 +18,8 @@ async function submitFirstDraft(page: Page): Promise<string> {
 }
 
 test.describe.serial("QA-04 Keamanan & otorisasi", () => {
+  useQuotationReviewers();
+
   test("01 Tanpa login: halaman diarahkan ke login, API tidak membocorkan data", async ({ browser }) => {
     const ctx = await browser.newContext();
     const page = await ctx.newPage();

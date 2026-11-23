@@ -1,6 +1,8 @@
-import { expect, type Browser, type BrowserContext, type Page } from "@playwright/test";
+import { expect, test, type Browser, type BrowserContext, type Page } from "@playwright/test";
 import { PrismaClient } from "@prisma/client";
 import { isoCheckDigit } from "../../src/lib/job-containers";
+import { DEFAULT_ROLES } from "../../src/lib/permissions";
+import { roleIdOf } from "../../src/lib/roles";
 
 /**
  * Helper suite QA. Tes memverifikasi UI SEKALIGUS kebenaran data di database (DATABASE_URL harus database UJI yang
@@ -117,4 +119,29 @@ export async function newDraft(email = "sales@demo.com"): Promise<string> {
     },
   });
   return copy.id;
+}
+
+/**
+ * Role bawaan Operation client SLG tidak memegang izin quotation (aturan client 5-6 Nov, migrasi operation_slg_access).
+ * Spec yang menguji maker-checker quotation memindahkan ops@ dan ops2@ ke role peninjau sementara (izin Operation +
+ * kirim/kembalikan/putuskan/convert quotation) selama spec berjalan, lalu mengembalikannya ke Operation. Pola yang sama
+ * dengan e2e/quotation-flow.spec.ts; aman karena suite berjalan dengan satu worker. Panggil di dalam describe.
+ */
+export function useQuotationReviewers() {
+  const reviewers = ["ops@demo.com", "ops2@demo.com"];
+  const roleId = "role_qa_suite_quotation_reviewer";
+  test.beforeAll(async () => {
+    const ops = DEFAULT_ROLES.find((r) => r.key === "OPERATION")!.permissions;
+    const permissions = [...ops, "quotations.view", "quotations.viewAll", "quotations.return", "quotations.send", "quotations.sendLowMargin", "quotations.decide", "quotations.convert"];
+    await db.appRole.upsert({
+      where: { id: roleId },
+      create: { id: roleId, key: "QA_SUITE_QUOTATION_REVIEWER", name: "QA Suite Peninjau Quotation", permissions },
+      update: { permissions },
+    });
+    await db.user.updateMany({ where: { email: { in: reviewers } }, data: { roleId } });
+  });
+  test.afterAll(async () => {
+    await db.user.updateMany({ where: { email: { in: reviewers } }, data: { roleId: roleIdOf("OPERATION") } });
+    await db.appRole.delete({ where: { id: roleId } }).catch(() => undefined);
+  });
 }
