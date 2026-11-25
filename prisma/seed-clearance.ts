@@ -66,7 +66,7 @@ export async function seedClearance(prisma: PrismaClient, opts: { demo?: boolean
     const c = existing
       ? await prisma.chargeCode.update({ where: { code }, data: { invoiceSection: section, asReceipt } })
       : await prisma.chargeCode.create({
-        data: { code, name, defaultTaxable: false, isPph23: false, invoiceSection: section, asReceipt, revenueAccountId: accounts[rev], expenseAccountId: accounts[exp] },
+        data: { code, name, defaultTaxable: false, isPph23: false, invoiceSection: section, asReceipt, isTransport: ["TRUCK", "XDIST", "OVWT", "EXTTRUCK"].includes(code), revenueAccountId: accounts[rev], expenseAccountId: accounts[exp] },
       });
     charge[code] = c.id;
   }

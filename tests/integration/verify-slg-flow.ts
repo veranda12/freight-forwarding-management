@@ -42,11 +42,13 @@ async function main() {
   if (dbName === "ffms") throw new Error("Jangan jalankan uji ini di database demo ffms.");
   console.log(`   database: ${dbName}`);
   await lockMonth(db, null);
-  await db.accountingSetting.upsert({ where: { id: "default" }, update: { ppnRate: 0.011 }, create: { id: "default", ppnRate: 0.011 } });
+  await db.accountingSetting.upsert({ where: { id: "default" }, update: { ppnRate: 0.011, ppnRateNoTransport: 0.11 }, create: { id: "default", ppnRate: 0.011, ppnRateNoTransport: 0.11 } });
 
   const customer = await db.customer.findFirstOrThrow();
   const vendor = await db.vendor.findFirstOrThrow();
   const service = await db.chargeCode.findFirstOrThrow({ where: { code: "HANDLING" } });
+  // Baris transportasi membuat invoice kena PPN 1,1%; tanpa itu 11%.
+  const truck = await db.chargeCode.update({ where: { code: "TRUCK" }, data: { isTransport: true } });
   const bank = await db.bankAccount.findFirstOrThrow({ where: { kind: "BANK", currency: "IDR", isActive: true } });
   const kas = await db.bankAccount.findFirstOrThrow({ where: { kind: "CASH", isActive: true } });
   const expense = await db.coaAccount.findFirstOrThrow({ where: { code: "6300" } });
@@ -56,7 +58,7 @@ async function main() {
   // 1. Contoh client: pendapatan 8.450.000, reimburse 7.201.974, PPN 92.950
   const j1 = await mkJob("A", `MBL-A-${Date.now()}`);
   const j2 = await mkJob("B", `MBL-B-${Date.now()}`);
-  const a = await line(j1.id, "SELLING", service.id, 8_450_000, false);
+  const a = await line(j1.id, "SELLING", truck.id, 8_450_000, false);
   const b = await line(j1.id, "SELLING", service.id, 7_201_974, true);
   const c = await line(j1.id, "SELLING", service.id, 1_000_000, false);
   const j2Line = await line(j2.id, "SELLING", service.id, 500_000, false);
@@ -81,6 +83,17 @@ async function main() {
   ok(inv.number === number && inv.lines.length === 3, "baris bisa ditambah, nomor tetap");
   ok(Number(inv.ppnAmount) === 103_950, "PPN dihitung ulang setelah edit");
   ok(await balanced(inv.journalEntryId!), "jurnal invoice tetap seimbang setelah edit");
+
+  // Tanpa biaya transportasi: PPN 11%. Tambah trucking lewat edit: tarif ikut jadi 1,1%.
+  const jT = await mkJob("T", `MBL-T-${Date.now()}`);
+  const hT = await line(jT.id, "SELLING", service.id, 1_000_000, false);
+  const tT = await line(jT.id, "SELLING", truck.id, 2_000_000, false);
+  const invTId = await createInvoiceCore(db, [hT.id], undefined, { date: today });
+  let invT = await db.invoice.findUniqueOrThrow({ where: { id: invTId } });
+  ok(Number(invT.ppnRate) === 0.11 && Number(invT.ppnAmount) === 110_000, "tanpa transportasi: PPN 11% = 110.000");
+  await updateInvoiceCore(db, invTId, [hT.id, tT.id], {});
+  invT = await db.invoice.findUniqueOrThrow({ where: { id: invTId } });
+  ok(Number(invT.ppnRate) === 0.011 && Number(invT.ppnAmount) === 33_000, "trucking ditambah: PPN jadi 1,1% = 33.000");
 
   await updateJobCharge(db, c.id, { side: "SELLING", chargeCodeId: service.id, qty: 1, unitPrice: 2_000_000, taxable: true, asReceipt: false });
   inv = await db.invoice.findUniqueOrThrow({ where: { id: invId }, include: { lines: true } });

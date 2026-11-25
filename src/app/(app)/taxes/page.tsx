@@ -2,7 +2,7 @@ import Link from "next/link";
 import { Plus, Pencil } from "lucide-react";
 import { requirePerm, hasPerm } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
-import { getPpnRate } from "@/lib/receivables";
+import { getPpnRates } from "@/lib/receivables";
 import { PpnRateForm } from "./ppn-rate-form";
 import { formatNumber } from "@/lib/format";
 import { PageHeader } from "@/components/page-header";
@@ -17,13 +17,13 @@ export default async function TaxesPage() {
   const user = await requirePerm("taxes.view");
   const canWrite = hasPerm(user, "taxes.edit");
   const taxes = await prisma.taxRate.findMany({ orderBy: { code: "asc" } });
-  const ppnRate = await getPpnRate(prisma);
+  const ppnRates = await getPpnRates(prisma);
   return (
     <div className="space-y-6">
       <PageHeader title="Pajak" description="Konfigurasi PPN dan PPh 23">
         {canWrite && <Button asChild><Link href="/taxes/new"><Plus /> Pajak Baru </Link></Button>}
       </PageHeader>
-      <PpnRateForm percent={Math.round(ppnRate * 10000) / 100} canWrite={hasPerm(user, "taxes.ppnRate")} />
+      <PpnRateForm transport={Math.round(ppnRates.transport * 10000) / 100} other={Math.round(ppnRates.other * 10000) / 100} canWrite={hasPerm(user, "taxes.ppnRate")} />
       <Card>
         <CardContent className="p-0">
           <Table>

@@ -36,11 +36,11 @@ export async function saveChargeTaxAction(input: ChargeTaxInput): Promise<{ ok: 
   return { ok: true };
 }
 
-/** Mengatur kelompok cetak invoice dan penanda biaya as receipt sebuah charge code. */
-export async function saveChargePrintAction(input: { id: string; invoiceSection: InvoiceSection | null; asReceipt: boolean }): Promise<{ ok: true } | { ok: false; error: string }> {
+/** Mengatur kelompok cetak invoice, penanda as receipt, dan penanda biaya transportasi sebuah charge code. */
+export async function saveChargePrintAction(input: { id: string; invoiceSection: InvoiceSection | null; asReceipt: boolean; isTransport: boolean }): Promise<{ ok: true } | { ok: false; error: string }> {
   const user = await assertPerm("charges.edit");
-  const c = await prisma.chargeCode.update({ where: { id: input.id }, data: { invoiceSection: input.invoiceSection, asReceipt: !!input.asReceipt } });
-  await writeAudit({ entity: "ChargeCode", entityId: input.id, action: "UPDATE_PRINT", summary: `${c.code}: seksi ${input.invoiceSection ?? "-"}, as receipt ${input.asReceipt ? "ya" : "tidak"}`, userId: user.id });
+  const c = await prisma.chargeCode.update({ where: { id: input.id }, data: { invoiceSection: input.invoiceSection, asReceipt: !!input.asReceipt, isTransport: !!input.isTransport } });
+  await writeAudit({ entity: "ChargeCode", entityId: input.id, action: "UPDATE_PRINT", summary: `${c.code}: seksi ${input.invoiceSection ?? "-"}, as receipt ${input.asReceipt ? "ya" : "tidak"}, transportasi ${input.isTransport ? "ya" : "tidak"}`, userId: user.id });
   revalidatePath("/charges");
   revalidatePath("/rate-card");
   return { ok: true };
@@ -62,7 +62,7 @@ export async function saveChargeMappingAction(input: { id: string; name: string;
 /** Menambah charge code baru beserta pajak dan pemetaan akunnya. */
 export async function createChargeCodeAction(input: {
   code: string; name: string; revenueAccountId: string; expenseAccountId: string;
-  defaultTaxable: boolean; isPph23: boolean; isPph26: boolean; pph26Rate: number; asReceipt?: boolean;
+  defaultTaxable: boolean; isPph23: boolean; isPph26: boolean; pph26Rate: number; asReceipt?: boolean; isTransport?: boolean;
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   const user = await assertPerm("charges.create");
   try {

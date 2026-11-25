@@ -14,9 +14,11 @@ import { MoneyInput } from "@/components/money-input";
 import { SearchableSelect } from "@/components/searchable-select";
 import { formatIDR, formatMoney } from "@/lib/format";
 import { editInvoiceAction } from "../../actions";
+import type { PpnRates } from "@/lib/receivables";
+import { ppnLabel } from "../../ppn-label";
 
 export type EditLine = {
-  id: string; code: string; name: string; description: string; qty: string; unitPrice: string; currency: string; rate: number; asReceipt: boolean;
+  id: string; code: string; name: string; description: string; qty: string; unitPrice: string; currency: string; rate: number; asReceipt: boolean; transport: boolean;
 };
 type Extra = { key: number; chargeCodeId: string; description: string; qty: string; unitPrice: string; asReceipt: boolean };
 
@@ -24,9 +26,9 @@ let seq = 0;
 const idrOf = (qty: string, price: string, rate = 1) => Math.round((Number(qty) || 0) * (Number(price) || 0) * rate * 100) / 100;
 
 /** Edit isi invoice: ubah qty dan harga, hapus baris, tagih baris yang belum ditagih, atau tambah biaya baru. */
-export function InvoiceEditor({ invoiceId, ppnRate, lines, pending, charges, head }: {
-  invoiceId: string; ppnRate: number; lines: EditLine[]; pending: EditLine[];
-  charges: { id: string; label: string; asReceipt: boolean }[]; head: { date: string; dueDate: string; notes: string };
+export function InvoiceEditor({ invoiceId, ppnRates, lines, pending, charges, head }: {
+  invoiceId: string; ppnRates: PpnRates; lines: EditLine[]; pending: EditLine[];
+  charges: { id: string; label: string; asReceipt: boolean; transport: boolean }[]; head: { date: string; dueDate: string; notes: string };
 }) {
   const router = useRouter();
   const [saving, start] = useTransition();
@@ -39,12 +41,15 @@ export function InvoiceEditor({ invoiceId, ppnRate, lines, pending, charges, hea
   const setExtra = (key: number, p: Partial<Extra>) => setExtras((x) => x.map((e) => (e.key === key ? { ...e, ...p } : e)));
 
   const active = [
-    ...rows.filter((r) => !removed.includes(r.id)).map((r) => ({ idr: idrOf(r.qty, r.unitPrice, r.currency === "IDR" ? 1 : r.rate), asReceipt: r.asReceipt })),
-    ...pending.filter((p) => added.includes(p.id)).map((p) => ({ idr: idrOf(p.qty, p.unitPrice, p.currency === "IDR" ? 1 : p.rate), asReceipt: p.asReceipt })),
-    ...extras.map((e) => ({ idr: idrOf(e.qty, e.unitPrice), asReceipt: e.asReceipt })),
+    ...rows.filter((r) => !removed.includes(r.id)).map((r) => ({ idr: idrOf(r.qty, r.unitPrice, r.currency === "IDR" ? 1 : r.rate), asReceipt: r.asReceipt, transport: r.transport })),
+    ...pending.filter((p) => added.includes(p.id)).map((p) => ({ idr: idrOf(p.qty, p.unitPrice, p.currency === "IDR" ? 1 : p.rate), asReceipt: p.asReceipt, transport: p.transport })),
+    ...extras.map((e) => ({ idr: idrOf(e.qty, e.unitPrice), asReceipt: e.asReceipt, transport: !!charges.find((c) => c.id === e.chargeCodeId)?.transport })),
   ];
   const revenue = active.filter((a) => !a.asReceipt).reduce((s, a) => s + a.idr, 0);
   const reimburse = active.filter((a) => a.asReceipt).reduce((s, a) => s + a.idr, 0);
+  // Sama dengan server: tarif dihitung ulang dari isi invoice saat disimpan.
+  const transport = active.some((a) => a.transport && !a.asReceipt);
+  const ppnRate = transport ? ppnRates.transport : ppnRates.other;
   const ppn = Math.round(revenue * ppnRate * 100) / 100;
   const extrasReady = extras.every((e) => e.chargeCodeId && Number(e.qty) > 0 && Number(e.unitPrice) >= 0);
 
@@ -148,7 +153,7 @@ export function InvoiceEditor({ invoiceId, ppnRate, lines, pending, charges, hea
           <div className="space-y-1 rounded-md bg-muted/40 px-3 py-2">
             <Line label="Pendapatan" value={formatIDR(revenue)} />
             <Line label="Reimburse" value={formatIDR(reimburse)} />
-            <Line label={`PPN ${(ppnRate * 100).toLocaleString("id-ID", { maximumFractionDigits: 2 })}%`} value={formatIDR(ppn)} />
+            <Line label={ppnLabel(ppnRate, transport)} value={formatIDR(ppn)} />
             <Line label="Total" value={formatIDR(revenue + reimburse + ppn)} strong />
           </div>
           <Button className="w-full" onClick={save} disabled={saving || active.length === 0 || !extrasReady}>{saving ? <Loader2 className="animate-spin" /> : <Save />} Simpan perubahan</Button>

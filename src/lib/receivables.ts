@@ -17,11 +17,23 @@ type Tx = Prisma.TransactionClient;
 type Db = PrismaClient | Tx;
 type SellingLine = Prisma.CostingLineGetPayload<{ include: { chargeCode: true } }>;
 
-/** Tarif PPN keluaran untuk invoice baru. */
-export async function getPpnRate(db: Db): Promise<number> {
-  const s = await db.accountingSetting.findUnique({ where: { id: "default" }, select: { ppnRate: true } });
-  return s ? Number(s.ppnRate) : 0.011;
+export type PpnRates = { transport: number; other: number };
+
+/** Tarif PPN keluaran dari pengaturan: untuk invoice dengan biaya transportasi dan tanpa. */
+export async function getPpnRates(db: Db): Promise<PpnRates> {
+  const s = await db.accountingSetting.findUnique({ where: { id: "default" }, select: { ppnRate: true, ppnRateNoTransport: true } });
+  return { transport: s ? Number(s.ppnRate) : 0.011, other: s ? Number(s.ppnRateNoTransport) : 0.11 };
 }
+
+/**
+ * Tarif PPN satu invoice (keputusan tim pajak client 25 Nov): ada biaya transportasi (trucking beserta surcharge-nya,
+ * freight laut/udara/kereta) di luar reimburse = tarif transportasi (1,1%), tidak ada = tarif biasa (11%). Murni.
+ */
+export function pickPpnRate(lines: { isTransport: boolean; asReceipt: boolean }[], rates: PpnRates): number {
+  return lines.some((l) => l.isTransport && !l.asReceipt) ? rates.transport : rates.other;
+}
+
+const ratesInput = (lines: SellingLine[]) => lines.map((l) => ({ isTransport: l.chargeCode.isTransport, asReceipt: l.asReceipt }));
 
 /** Hitung nilai invoice. PPN hanya dari pendapatan, reimburse (as receipt) tidak dihitung. Murni. */
 export function invoiceTotals(lines: { amount: number; asReceipt: boolean }[], ppnRate: number) {
@@ -97,7 +109,7 @@ export async function createInvoiceCore(db: PrismaClient, lineIds: string[], use
     const date = opts.date ? dateOf(opts.date) : new Date();
     const dueDate = opts.dueDate ? dateOf(opts.dueDate) : new Date(date);
     if (!opts.dueDate) dueDate.setDate(dueDate.getDate() + (job.customer.termOfPayment ?? 30));
-    const ppnRate = await getPpnRate(tx);
+    const ppnRate = pickPpnRate(ratesInput(lines), await getPpnRates(tx));
     const number = await genInvoiceNumber(tx, date);
     const { totals, lineData, jLines } = invoiceContent(lines, acc, ppnRate, number);
 
@@ -162,7 +174,8 @@ export async function rebuildInvoice(tx: Tx, invoiceId: string, opts: InvoiceOpt
   const rate = cur === inv.currency && !opts.rate ? Number(inv.exchangeRate) : await resolveRate(tx, lines, cur, opts.rate);
 
   const acc = await accountMap(tx);
-  const ppnRate = Number(inv.ppnRate);
+  // Tarif dihitung ulang dari isi invoice, karena baris transportasi bisa bertambah atau terhapus.
+  const ppnRate = pickPpnRate(ratesInput(lines), await getPpnRates(tx));
   const { totals, lineData, jLines } = invoiceContent(lines, acc, ppnRate, inv.number);
   await tx.invoiceLine.deleteMany({ where: { invoiceId } });
   await tx.invoice.update({
@@ -170,7 +183,7 @@ export async function rebuildInvoice(tx: Tx, invoiceId: string, opts: InvoiceOpt
     data: {
       jobId: lines[0].jobId, date, ...(opts.dueDate ? { dueDate: dateOf(opts.dueDate) } : {}), ...(opts.notes !== undefined ? { notes: opts.notes } : {}),
       ...foreignFields(totals.total, cur, rate),
-      subtotal: new Prisma.Decimal(totals.subtotal), taxableBase: new Prisma.Decimal(totals.revenue),
+      subtotal: new Prisma.Decimal(totals.subtotal), taxableBase: new Prisma.Decimal(totals.revenue), ppnRate: new Prisma.Decimal(ppnRate),
       ppnAmount: new Prisma.Decimal(totals.ppn), total: new Prisma.Decimal(totals.total), lines: { create: lineData },
     },
   });
