@@ -11,6 +11,7 @@ import { PRISMA_CLIENT_OPTIONS } from "../../src/lib/prisma-options";
 import { addJobCharge, deleteJobCharge, updateJobCharge } from "../../src/lib/job-charges";
 import { applyRateCard } from "../../src/lib/rate-card";
 import { isoContainerNo } from "./iso-container";
+import { mergeReceiptLines } from "../../src/lib/pdf/invoice-print-lines";
 
 const db = new PrismaClient(PRISMA_CLIENT_OPTIONS);
 let failures = 0;
@@ -128,6 +129,57 @@ async function main() {
   await db.costingLine.updateMany({ where: { jobId: job3.id, side: "SELLING", chargeCodeId: noRate.id }, data: { actualIdr: 250_000, unitPrice: 250_000 } });
   await deleteJobCharge(db, nr2);
   ok((await sellNo()).length === 1, "hapus buying: selling yang sudah diberi harga tetap ada");
+
+  // 12. Job campuran 1x20GP + 2x40HC (client 26 Nov): LOLO lift on/off per tipe container. Buying bertipe hanya mengganti
+  //     estimasi tipe yang sama; cetakan menggabung lift on & off per tipe, 20GP dan 40HC tetap terpisah.
+  const t20 = await db.containerType.findFirstOrThrow({ where: { code: "20GP" } });
+  const jobM = await db.job.create({
+    data: {
+      number: `JOB/UJI-SYNC-MIX/${stamp}`, mode: "SEA_FCL", direction: "IMPORT", status: "ARRIVED", customerId: customer.id,
+      customsLane: "RED", distanceKm: 20,
+      containers: { create: [
+        { containerNo: isoContainerNo("SYM", stamp), containerTypeId: t20.id, grossWeightKg: 8000 },
+        { containerNo: isoContainerNo("SYN", stamp), containerTypeId: t40.id, grossWeightKg: 10000 },
+        { containerNo: isoContainerNo("SYO", stamp), containerTypeId: t40.id, grossWeightKg: 10000 },
+      ] },
+    },
+  });
+  await applyRateCard(db, jobM.id);
+  const loloM = () => db.costingLine.findMany({ where: { jobId: jobM.id, side: "SELLING", chargeCodeId: LOLO }, orderBy: { sortOrder: "asc" } });
+  const est = await loloM();
+  ok(est.length === 2 && est.map((e) => e.unitLabel).sort().join() === "20GP,40HC", `job campuran: estimasi LOLO per tipe (${est.map((e) => e.unitLabel).join(", ")})`);
+  const buyU = (unitLabel: string | null, qty: number, unitPrice: number, description: string) =>
+    ({ ...buy(LOLO, unitPrice, true), qty, unitLabel, description });
+  await addJobCharge(db, jobM.id, buyU("40HC", 2, 500_000, "lift on"));
+  await addJobCharge(db, jobM.id, buyU("20GP", 1, 300_000, "lift on"));
+  await addJobCharge(db, jobM.id, buyU("40HC", 2, 450_000, "lift off"));
+  await addJobCharge(db, jobM.id, buyU("20GP", 1, 280_000, "lift off"));
+  const lm = await loloM();
+  const byUnit = (u: string) => lm.filter((x) => x.unitLabel === u);
+  ok(lm.length === 4 && lm.every((x) => x.buyingLineId) && byUnit("40HC").length === 2 && byUnit("20GP").length === 2,
+    `LOLO selling = 4 baris kuitansi, 2 per tipe, tanpa estimasi tersisa (${lm.map((x) => `${x.unitLabel}:${Number(x.actualIdr)}`).join(", ")})`);
+  const printed = mergeReceiptLines(lm.map((x) => ({
+    section: "LOCAL" as const, name: "LOLO Fee", note: x.description, qty: Number(x.qty), unitLabel: x.unitLabel,
+    unitPrice: Number(x.unitPrice), amount: Number(x.actualIdr), asReceipt: true,
+  })));
+  const p40 = printed.find((x) => x.unitLabel === "40HC"), p20 = printed.find((x) => x.unitLabel === "20GP");
+  ok(printed.length === 2 && p40?.amount === 1_900_000 && p40.qty === 2 && p20?.amount === 580_000,
+    `cetakan: LOLO 40HC 2 x 950.000 = ${p40?.amount}, LOLO 20GP = ${p20?.amount} (${printed.length} baris)`);
+  // Buying tanpa tipe di job campuran tidak menempel ke tipe estimasi mana pun.
+  const jobN = await db.job.create({
+    data: {
+      number: `JOB/UJI-SYNC-MIX2/${stamp}`, mode: "SEA_FCL", direction: "IMPORT", status: "ARRIVED", customerId: customer.id,
+      customsLane: "RED", distanceKm: 20,
+      containers: { create: [
+        { containerNo: isoContainerNo("SYP", stamp), containerTypeId: t20.id, grossWeightKg: 8000 },
+        { containerNo: isoContainerNo("SYQ", stamp), containerTypeId: t40.id, grossWeightKg: 10000 },
+      ] },
+    },
+  });
+  await applyRateCard(db, jobN.id);
+  const nb = await addJobCharge(db, jobN.id, buyU(null, 2, 400_000, "lift on"));
+  const ns = await db.costingLine.findFirstOrThrow({ where: { buyingLineId: nb } });
+  ok(ns.unitLabel === null, `buying tanpa tipe di job campuran: unit selling kosong (${ns.unitLabel})`);
 
   const jobAfter = await db.job.findUniqueOrThrow({ where: { id: job.id } });
   ok(Number(jobAfter.revenueIdr) > 0, `revenue job dihitung ulang (${Number(jobAfter.revenueIdr)})`);

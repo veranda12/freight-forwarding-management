@@ -43,7 +43,7 @@ export default async function JobCostingPage({ params }: { params: Promise<{ id:
   const isAir = job.mode === "AIR";
   // Baris tanpa unit (mis. reimburse dari buying) memakai unit dari rate card: 40HC, B/L, dst.
   const units = await displayUnits(prisma, job.customerId, job.costings.map((c) => ({ chargeCodeId: c.chargeCodeId, unitLabel: c.unitLabel, jobId: job.id })));
-  const costings = job.costings.map((c, i) => ({ ...c, unitLabel: units[i] }));
+  const costings = job.costings.map((c, i) => ({ ...c, rawUnit: c.unitLabel, unitLabel: units[i] }));
   const selling = costings.filter((c) => c.side === "SELLING");
   const buying = costings.filter((c) => c.side === "BUYING");
   const canBill = hasPerm(user, "bills.create");
@@ -73,6 +73,7 @@ export default async function JobCostingPage({ params }: { params: Promise<{ id:
       rates: Object.fromEntries(rateRows.filter(([, r]) => r > 0)),
       vendors: vendors.map((v) => ({ id: v.id, label: `${v.name} (${v.code})` })),
       vehicles: vehicles.map((v) => ({ id: v.id, label: `${v.plate} · ${v.type}` })),
+      containerTypes: [...new Set(job.containers.flatMap((c) => (c.containerType ? [c.containerType.code] : [])))].sort(),
     };
   }
   const revenue = Number(job.revenueIdr);
@@ -139,7 +140,7 @@ function CostTable({
     id: string; side: string; chargeCodeId: string; chargeCode: { code: string; name: string }; description: string | null;
     vendorId: string | null; vehicleId: string | null; vendor: { name: string } | null; vehicle: { plate: string } | null;
     currency: string; exchangeRate: any; qty: any; unitPrice: any; amountForeign: any; actualIdr: any; ppnIdr: any; taxable: boolean;
-    asReceipt: boolean; unitLabel: string | null; invoiced: boolean; billed: boolean; recordedAt: Date | null;
+    asReceipt: boolean; unitLabel: string | null; rawUnit: string | null; invoiced: boolean; billed: boolean; recordedAt: Date | null;
     voucherId: string | null; voucher: { number: string } | null; invoice: { number: string; status: string } | null;
   }[];
   totalIdr: number;
@@ -199,7 +200,7 @@ function CostTable({
                           <ChargeForm jobId={jobId} side={side} options={chargeOptions} initial={{
                             id: r.id, chargeCodeId: r.chargeCodeId, description: r.description, qty: Number(r.qty), unitPrice: Number(r.unitPrice),
                             currency: r.currency, rate: Number(r.exchangeRate), asReceipt: r.asReceipt, vendorId: r.vendorId, vehicleId: r.vehicleId,
-                            ppnIdr: Number(r.ppnIdr),
+                            ppnIdr: Number(r.ppnIdr), unitLabel: r.rawUnit,
                           }} />
                           <DeleteChargeButton lineId={r.id} label={r.chargeCode.code} />
                         </span>

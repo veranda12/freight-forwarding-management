@@ -70,12 +70,17 @@ export async function syncSellingFromBuying(tx: Tx, buyingId: string): Promise<v
     }
     // Estimasi reimburse dari rate card untuk charge yang sama dan belum ditagih: diganti angka kuitansi (bukan ditambah).
     // Tarif jasa (mis. Red Line Rp 4,5 juta) tidak diganti: biaya kuitansinya jadi baris reimburse tersendiri.
-    const estimate = await tx.costingLine.findFirst({
+    // Estimasi dibuat per tipe container (LOLO 20GP dan 40HC beda tarif, client 26 Nov): buying dengan tipe container
+    // hanya mengganti estimasi tipe yang sama. Buying tanpa tipe mengambil tipe estimasi hanya bila job cuma punya satu tipe.
+    const estimates = await tx.costingLine.findMany({
       where: { jobId: b.jobId, side: "SELLING", chargeCodeId: b.chargeCodeId, fromRateCard: true, asReceipt: true, invoiced: false, buyingLineId: null },
       orderBy: { sortOrder: "asc" },
     });
+    const estimate = b.unitLabel ? estimates.find((e) => e.unitLabel === b.unitLabel) : estimates[0];
     if (estimate) {
-      await tx.costingLine.update({ where: { id: estimate.id }, data: { ...sellingCopy(b), unitLabel: b.unitLabel ?? estimate.unitLabel, buyingLineId: b.id } });
+      const types = await tx.jobContainer.findMany({ where: { jobId: b.jobId }, distinct: ["containerTypeId"], select: { containerTypeId: true } });
+      const single = types.length <= 1;
+      await tx.costingLine.update({ where: { id: estimate.id }, data: { ...sellingCopy(b), unitLabel: b.unitLabel ?? (single ? estimate.unitLabel : null), buyingLineId: b.id } });
       return;
     }
     await tx.costingLine.create({ data: { jobId: b.jobId, ...sellingCopy(b), buyingLineId: b.id, sortOrder: await nextSort(tx, b.jobId) } });
