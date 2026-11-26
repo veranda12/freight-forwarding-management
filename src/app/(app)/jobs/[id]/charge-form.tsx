@@ -15,10 +15,11 @@ import { addJobChargeAction, deleteJobChargeAction, updateJobChargeAction } from
 
 type Opt = { id: string; label: string };
 export type ChargeOpt = { id: string; code: string; name: string; asReceipt: boolean };
-export type ChargeFormOptions = { charges: ChargeOpt[]; currencies: string[]; rates: Record<string, number>; vendors: Opt[]; vehicles: Opt[] };
+/** `containerTypes`: tipe container job ini (20GP, 40HC, ...), untuk memilih unit baris per tipe. */
+export type ChargeFormOptions = { charges: ChargeOpt[]; currencies: string[]; rates: Record<string, number>; vendors: Opt[]; vehicles: Opt[]; containerTypes: string[] };
 export type ChargeInitial = {
   id: string; chargeCodeId: string; description: string | null; qty: number; unitPrice: number; currency: string;
-  rate: number; asReceipt: boolean; vendorId: string | null; vehicleId: string | null; ppnIdr: number;
+  rate: number; asReceipt: boolean; vendorId: string | null; vehicleId: string | null; ppnIdr: number; unitLabel: string | null;
 };
 
 const NONE = "__none__";
@@ -31,12 +32,14 @@ export function ChargeForm({ jobId, side, options, initial }: { jobId: string; s
   const blank = {
     chargeCodeId: "", description: "", qty: "1", unitPrice: "", currency: "IDR", rate: "", asReceipt: false,
     source: "VENDOR" as "VENDOR" | "OWN_FLEET", vendorId: NONE, vehicleId: NONE, ppnIdr: "",
+    // Kosong: unit ikut estimasi rate card (job satu tipe) atau satuan rate card (mis. B/L).
+    unitLabel: NONE,
   };
   const fromInitial = (i: ChargeInitial) => ({
     chargeCodeId: i.chargeCodeId, description: i.description ?? "", qty: String(i.qty), unitPrice: String(i.unitPrice),
     currency: i.currency, rate: i.currency === "IDR" ? "" : String(i.rate), asReceipt: i.asReceipt,
     source: (i.vehicleId ? "OWN_FLEET" : "VENDOR") as "VENDOR" | "OWN_FLEET", vendorId: i.vendorId ?? NONE, vehicleId: i.vehicleId ?? NONE,
-    ppnIdr: i.ppnIdr > 0 ? String(i.ppnIdr) : "",
+    ppnIdr: i.ppnIdr > 0 ? String(i.ppnIdr) : "", unitLabel: i.unitLabel ?? NONE,
   });
   const [f, setF] = useState(initial ? fromInitial(initial) : blank);
   const set = (p: Partial<typeof f>) => setF((x) => ({ ...x, ...p }));
@@ -46,6 +49,12 @@ export function ChargeForm({ jobId, side, options, initial }: { jobId: string; s
   const label = side === "SELLING" ? "selling" : "buying";
   const withPpn = side === "BUYING" && !f.asReceipt;
   const ppnIdr = withPpn ? Number(f.ppnIdr) || 0 : 0;
+  // Unit lain yang sudah tersimpan (mis. B/L dari rate card) tetap bisa dipilih agar tidak hilang saat diubah.
+  const unitChoices = options.containerTypes.length
+    ? [...options.containerTypes, ...(initial?.unitLabel && !options.containerTypes.includes(initial.unitLabel) ? [initial.unitLabel] : [])]
+    : [];
+  // Tampil untuk job dengan beberapa tipe container, atau bila baris sudah punya unit.
+  const showUnit = unitChoices.length > 0 && (options.containerTypes.length > 1 || !!initial?.unitLabel);
 
   function submit() {
     start(async () => {
@@ -55,6 +64,8 @@ export function ChargeForm({ jobId, side, options, initial }: { jobId: string; s
         vendorId: side === "BUYING" && f.source === "VENDOR" && f.vendorId !== NONE ? f.vendorId : null,
         vehicleId: side === "BUYING" && f.source === "OWN_FLEET" && f.vehicleId !== NONE ? f.vehicleId : null,
         ...(side === "BUYING" ? { ppnIdr: withPpn ? f.ppnIdr || null : null } : {}),
+        // Isian tipe tidak tampil: unit baris dibiarkan.
+        ...(showUnit ? { unitLabel: f.unitLabel === NONE ? null : f.unitLabel } : {}),
       };
       const res = initial ? await updateJobChargeAction(initial.id, input) : await addJobChargeAction(jobId, input);
       if (res.ok) {
@@ -90,6 +101,21 @@ export function ChargeForm({ jobId, side, options, initial }: { jobId: string; s
               <SelectContent>{options.charges.map((c) => <SelectItem key={c.id} value={c.id}>{c.code} · {c.name}</SelectItem>)}</SelectContent>
             </Select>
           </div>
+          {showUnit && (
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label>Tipe container</Label>
+              <Select value={f.unitLabel} onValueChange={(v) => set({ unitLabel: v })}>
+                <SelectTrigger aria-label="Tipe container"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NONE}>Tidak per container (mis. per B/L)</SelectItem>
+                  {unitChoices.map((u) => <SelectItem key={u} value={u}>{u}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              {options.containerTypes.length > 1 && (
+                <p className="text-xs text-muted-foreground">Job ini punya beberapa tipe container. Input biaya per tipe (mis. LOLO 20GP dan LOLO 40HC terpisah) agar di invoice dirinci per tipe.</p>
+              )}
+            </div>
+          )}
           <div className="space-y-1.5"><Label htmlFor="cf-qty">Qty</Label><Input id="cf-qty" type="number" min={0} value={f.qty} onChange={(e) => set({ qty: e.target.value })} /></div>
           <div className="space-y-1.5"><Label htmlFor="cf-price">Harga per unit ({f.currency})</Label><Input id="cf-price" type="number" min={0} value={f.unitPrice} onChange={(e) => set({ unitPrice: e.target.value })} /></div>
           <div className="space-y-1.5">

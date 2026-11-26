@@ -17,7 +17,7 @@ export type JobChargeInput = {
   taxable: boolean;
   /** Biaya aktual yang ditagih ulang sesuai kuitansi. Kosong = ikut charge code. */
   asReceipt?: boolean | null;
-  /** Satuan untuk cetakan invoice, misalnya 40HC atau B/L. */
+  /** Satuan untuk cetakan invoice, misalnya 40HC atau B/L. undefined = tidak diubah, kosong = dihapus. */
   unitLabel?: string | null;
   /** Hanya untuk BUYING: vendor, atau armada sendiri. */
   vendorId?: string | null;
@@ -56,7 +56,7 @@ export function validateJobCharge(input: JobChargeInput) {
     ppnIdr,
     side: input.side, chargeCodeId: input.chargeCodeId, qty: r2(qty), unitPrice: r2(unitPrice), currency, rate,
     taxable: !!input.taxable, vendorId, vehicleId, description: (input.description ?? "").trim() || null,
-    asReceipt: input.asReceipt == null ? null : !!input.asReceipt, unitLabel: (input.unitLabel ?? "").trim() || null,
+    asReceipt: input.asReceipt == null ? null : !!input.asReceipt, unitLabel: input.unitLabel === undefined ? undefined : (input.unitLabel ?? "").trim() || null,
   };
 }
 
@@ -104,7 +104,7 @@ async function lineData(tx: Tx, v: ReturnType<typeof validateJobCharge>) {
     vendorId: v.vendorId, vehicleId: v.vehicleId, currency: v.currency,
     exchangeRate: new Prisma.Decimal(rate), qty: new Prisma.Decimal(v.qty), unitPrice: new Prisma.Decimal(v.unitPrice),
     amountForeign: new Prisma.Decimal(amountForeign), estimatedIdr: new Prisma.Decimal(idr), actualIdr: new Prisma.Decimal(idr),
-    taxable: v.taxable, asReceipt, ...(v.unitLabel ? { unitLabel: v.unitLabel } : {}),
+    taxable: v.taxable, asReceipt, ...(v.unitLabel !== undefined ? { unitLabel: v.unitLabel } : {}),
   };
 }
 
