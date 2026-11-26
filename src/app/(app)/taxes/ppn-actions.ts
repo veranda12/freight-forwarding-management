@@ -5,12 +5,15 @@ import { prisma } from "@/lib/prisma";
 import { assertPerm } from "@/lib/auth-helpers";
 import { writeAudit } from "@/lib/audit";
 
-export async function savePpnRateAction(percent: number): Promise<{ ok: true } | { ok: false; error: string }> {
+/** Tarif PPN dalam persen: invoice dengan biaya transportasi dan tanpa. */
+export async function savePpnRateAction(transportPct: number, otherPct: number): Promise<{ ok: true } | { ok: false; error: string }> {
   const user = await assertPerm("taxes.ppnRate");
-  if (!Number.isFinite(percent) || percent < 0 || percent > 100) return { ok: false, error: "Tarif harus 0 sampai 100." };
-  const ppnRate = Math.round(percent * 100) / 10000;
-  await prisma.accountingSetting.upsert({ where: { id: "default" }, update: { ppnRate }, create: { id: "default", ppnRate } });
-  await writeAudit({ entity: "AccountingSetting", entityId: "default", action: "PPN_RATE", summary: `${percent}%`, userId: user.id });
+  const valid = (n: number) => Number.isFinite(n) && n >= 0 && n <= 100;
+  if (!valid(transportPct) || !valid(otherPct)) return { ok: false, error: "Tarif harus 0 sampai 100." };
+  const ppnRate = Math.round(transportPct * 100) / 10000;
+  const ppnRateNoTransport = Math.round(otherPct * 100) / 10000;
+  await prisma.accountingSetting.upsert({ where: { id: "default" }, update: { ppnRate, ppnRateNoTransport }, create: { id: "default", ppnRate, ppnRateNoTransport } });
+  await writeAudit({ entity: "AccountingSetting", entityId: "default", action: "PPN_RATE", summary: `Transportasi ${transportPct}%, tanpa transportasi ${otherPct}%`, userId: user.id });
   revalidatePath("/taxes");
   return { ok: true };
 }

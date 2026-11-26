@@ -244,7 +244,7 @@ async function main() {
   for (const [code, name, rev, exp, taxable, pph23] of chargeDefs) {
     const c = await prisma.chargeCode.create({
       data: {
-        code, name, defaultTaxable: taxable, isPph23: pph23, invoiceSection: sectionOf(code),
+        code, name, defaultTaxable: taxable, isPph23: pph23, invoiceSection: sectionOf(code), isTransport: ["OF", "LCL", "AF", "TRUCK", "LSS"].includes(code),
         revenueAccountId: acc[rev], expenseAccountId: acc[exp],
       },
     });

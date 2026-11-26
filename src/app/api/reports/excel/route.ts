@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { getArAging, getApAging } from "@/lib/accounting";
 import { MODE_LABELS } from "@/lib/enums";
 import { PRODUCT } from "@/config/product";
+import { containerJobSelect, containerReport, toContainerJob } from "@/lib/container-report";
 
 export const runtime = "nodejs";
 
@@ -89,6 +90,44 @@ export async function GET(req: NextRequest) {
           days: d.days, bucket: `${d.bucket} hari`, total: d.total, paid: d.paid, outstanding: d.outstanding,
         });
       }
+    }
+    styleHeader(wd);
+  } else if (type === "containers") {
+    const year = Number(req.nextUrl.searchParams.get("year")) || new Date(Date.now() + 7 * 3600_000).getUTCFullYear();
+    const jobs = await prisma.job.findMany({
+      where: { ...jobScope(user), status: { not: "CANCELLED" }, containers: { some: {} } },
+      select: containerJobSelect,
+    });
+    const data = containerReport(jobs.map(toContainerJob), year);
+    const ws = wb.addWorksheet(`Container ${year}`);
+    ws.columns = [
+      { header: "Bulan", key: "month", width: 12 },
+      { header: "Jml Job", key: "jobs", width: 10 },
+      ...data.types.map((t) => ({ header: t, key: `t:${t}`, width: 10 })),
+      { header: "Total Container", key: "containers", width: 16 },
+      { header: "TEU", key: "teu", width: 10, style: { numFmt: "0.##" } },
+    ];
+    for (const m of data.months) {
+      ws.addRow({ month: m.month, jobs: m.jobs.length, containers: m.containers, teu: m.teu, ...Object.fromEntries(data.types.map((t) => [`t:${t}`, m.byType[t] ?? 0])) });
+    }
+    const tr = ws.addRow({ month: "Total", jobs: data.total.jobs, containers: data.total.containers, teu: data.total.teu, ...Object.fromEntries(data.types.map((t) => [`t:${t}`, data.total.byType[t] ?? 0])) });
+    tr.font = { bold: true };
+    styleHeader(ws);
+
+    const wd = wb.addWorksheet("Rincian");
+    wd.columns = [
+      { header: "Bulan", key: "month", width: 10 },
+      { header: "No. Job", key: "number", width: 26 },
+      { header: "Customer", key: "customer", width: 32 },
+      { header: "Arah", key: "dir", width: 8 },
+      { header: "Tanggal", key: "date", width: 12, style: { numFmt: "dd/mm/yyyy" } },
+      { header: "No. Container", key: "no", width: 16 },
+      { header: "Tipe", key: "code", width: 8 },
+      { header: "TEU", key: "teu", width: 6 },
+    ];
+    for (const m of data.months) for (const j of m.jobs) for (const c of j.containers) {
+      wd.addRow({ month: m.month, number: j.number, customer: j.customer, dir: j.direction === "EXPORT" ? "Ekspor" : "Impor", date: new Date(j.date.getTime() + 7 * 3600_000), // Excel membaca tanggal apa adanya, geser ke WIB
+        no: c.containerNo, code: c.type?.code ?? "-", teu: c.type?.teu ?? 0 });
     }
     styleHeader(wd);
   } else {

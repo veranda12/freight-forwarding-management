@@ -45,8 +45,8 @@ export default async function ChargesPage() {
                   <TableCell>{c.name}</TableCell>
                   <TableCell className="text-muted-foreground text-xs">{c.revenueAccount ? `${c.revenueAccount.code} ${c.revenueAccount.name}` : "-"}</TableCell>
                   <TableCell className="text-muted-foreground text-xs">{c.expenseAccount ? `${c.expenseAccount.code} ${c.expenseAccount.name}` : "-"}</TableCell>
-                  <TableCell className="text-xs text-muted-foreground">{c.invoiceSection ? SECTION_LABELS[c.invoiceSection] : "-"}{c.asReceipt && <Badge variant="outline" className="ml-1.5 text-[10px]">Reimburse</Badge>}</TableCell>
-                  <TableCell className="text-right whitespace-nowrap">{canEdit && <><ChargeMapEdit id={c.id} code={c.code} name={c.name} revenueAccountId={c.revenueAccountId} expenseAccountId={c.expenseAccountId} revenueAccounts={revenueAccounts} expenseAccounts={expenseAccounts} /><ChargePrintEdit id={c.id} code={c.code} name={c.name} invoiceSection={c.invoiceSection} asReceipt={c.asReceipt} /></>}</TableCell>
+                  <TableCell className="text-xs text-muted-foreground">{c.invoiceSection ? SECTION_LABELS[c.invoiceSection] : "-"}{c.asReceipt && <Badge variant="outline" className="ml-1.5 text-[10px]">Reimburse</Badge>}{c.isTransport && <Badge variant="outline" className="ml-1.5 text-[10px]">Transportasi</Badge>}</TableCell>
+                  <TableCell className="text-right whitespace-nowrap">{canEdit && <><ChargeMapEdit id={c.id} code={c.code} name={c.name} revenueAccountId={c.revenueAccountId} expenseAccountId={c.expenseAccountId} revenueAccounts={revenueAccounts} expenseAccounts={expenseAccounts} /><ChargePrintEdit id={c.id} code={c.code} name={c.name} invoiceSection={c.invoiceSection} asReceipt={c.asReceipt} isTransport={c.isTransport} /></>}</TableCell>
                 </TableRow>
               ))}
             </TableBody>

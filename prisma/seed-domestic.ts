@@ -100,7 +100,7 @@ export async function seedDomestic(prisma: PrismaClient) {
   // --- Charge code untuk invoice STT (status PPN bisa diubah di menu Charge Code) ---
   await prisma.chargeCode.upsert({
     where: { code: "DOMFRT" }, update: {},
-    create: { code: "DOMFRT", name: "Freight Kargo Domestik", defaultTaxable: true, isPph23: false, invoiceSection: "LOCAL", revenueAccountId: rev.id, expenseAccountId: exp.id },
+    create: { code: "DOMFRT", name: "Freight Kargo Domestik", defaultTaxable: true, isPph23: false, invoiceSection: "LOCAL", isTransport: true, revenueAccountId: rev.id, expenseAccountId: exp.id },
   });
   await prisma.chargeCode.upsert({
     where: { code: "PACK" }, update: {},

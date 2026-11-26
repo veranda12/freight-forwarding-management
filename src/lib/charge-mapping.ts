@@ -19,6 +19,7 @@ export type NewChargeInput = {
   pph26Rate: number;
   /** Reimburse (as receipt): ditagih ulang sesuai kuitansi. */
   asReceipt?: boolean;
+  isTransport?: boolean;
 };
 
 /** Validasi murni kode charge: huruf besar, angka, atau garis bawah, 2 sampai 15 karakter. */
@@ -76,7 +77,7 @@ export async function createChargeCode(db: PrismaClient, input: NewChargeInput) 
       defaultTaxable: !!input.defaultTaxable, isPph23: !!input.isPph23,
       isPph26: !!input.isPph26, pph26Rate: Number(input.pph26Rate),
       // Reimburse (as receipt): ditagih ulang sesuai kuitansi, tidak kena PPN keluaran.
-      asReceipt: !!input.asReceipt, ...(input.asReceipt ? { defaultTaxable: false } : {}),
+      asReceipt: !!input.asReceipt, isTransport: !!input.isTransport, ...(input.asReceipt ? { defaultTaxable: false } : {}),
     },
     select: { id: true, code: true, name: true },
   });

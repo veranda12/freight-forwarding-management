@@ -14,25 +14,26 @@ import { saveChargePrintAction } from "./actions";
 
 const NONE = "__none__";
 
-/** Atur kelompok cetak invoice dan penanda as receipt sebuah charge code. */
-export function ChargePrintEdit({ id, code, name, invoiceSection, asReceipt }: {
-  id: string; code: string; name: string; invoiceSection: InvoiceSection | null; asReceipt: boolean;
+/** Atur kelompok cetak invoice, penanda as receipt, dan penanda biaya transportasi sebuah charge code. */
+export function ChargePrintEdit({ id, code, name, invoiceSection, asReceipt, isTransport }: {
+  id: string; code: string; name: string; invoiceSection: InvoiceSection | null; asReceipt: boolean; isTransport: boolean;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [open, setOpen] = useState(false);
   const [section, setSection] = useState<string>(invoiceSection ?? NONE);
   const [receipt, setReceipt] = useState(asReceipt);
+  const [transport, setTransport] = useState(isTransport);
 
   function save() {
     start(async () => {
-      const res = await saveChargePrintAction({ id, invoiceSection: section === NONE ? null : (section as InvoiceSection), asReceipt: receipt });
+      const res = await saveChargePrintAction({ id, invoiceSection: section === NONE ? null : (section as InvoiceSection), asReceipt: receipt, isTransport: transport });
       if (res.ok) { toast.success(`Cetak invoice ${code} disimpan.`); setOpen(false); router.refresh(); } else toast.error(res.error);
     });
   }
 
   return (
-    <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (o) { setSection(invoiceSection ?? NONE); setReceipt(asReceipt); } }}>
+    <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (o) { setSection(invoiceSection ?? NONE); setReceipt(asReceipt); setTransport(isTransport); } }}>
       <DialogTrigger asChild><Button size="sm" variant="ghost"><Printer /> Invoice & Reimburse</Button></DialogTrigger>
       <DialogContent>
         <DialogHeader>
@@ -53,6 +54,10 @@ export function ChargePrintEdit({ id, code, name, invoiceSection, asReceipt }: {
           <label className="flex items-center gap-2">
             <input type="checkbox" checked={receipt} onChange={(e) => setReceipt(e.target.checked)} className="h-4 w-4 accent-primary" />
             Reimburse (as receipt): ditagih sesuai kuitansi, tidak masuk pendapatan, dicetak berarsir. Otomatis tercentang Reimburse saat diinput di costing.
+          </label>
+          <label className="flex items-start gap-2">
+            <input type="checkbox" checked={transport} onChange={(e) => setTransport(e.target.checked)} className="mt-0.5 h-4 w-4 accent-primary" />
+            <span>Biaya transportasi<span className="block text-xs text-muted-foreground">Trucking beserta surcharge-nya (extra distance, overweight, extended trucking) dan freight laut, udara, atau kereta. Invoice yang memuatnya kena PPN tarif transportasi (1,1%), tanpa itu tarif biasa (11%). Invoice yang belum dibayar ikut dihitung ulang saat diedit.</span></span>
           </label>
         </div>
         <DialogFooter>

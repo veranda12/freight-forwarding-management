@@ -14,10 +14,12 @@ import { EmptyState } from "@/components/empty-state";
 import { formatIDR } from "@/lib/format";
 import { createInvoiceAction } from "./actions";
 import type { InvoiceCandidate } from "./candidates";
+import type { PpnRates } from "@/lib/receivables";
+import { ppnLabel } from "./ppn-label";
 
 /** Pilih satu job yang ditagih untuk invoice baru. `initialJobId` (dari Costing) langsung dipilih bila siap ditagih. */
-export function InvoiceBuilder({ candidates, currencies, ppnRate, today, initialJobId }: {
-  candidates: InvoiceCandidate[]; currencies: { code: string; name: string }[]; ppnRate: number; today: string; initialJobId?: string;
+export function InvoiceBuilder({ candidates, currencies, ppnRates, today, initialJobId }: {
+  candidates: InvoiceCandidate[]; currencies: { code: string; name: string }[]; ppnRates: PpnRates; today: string; initialJobId?: string;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -38,6 +40,8 @@ export function InvoiceBuilder({ candidates, currencies, ppnRate, today, initial
 
   const revenue = picked.reduce((s, c) => s + c.revenue, 0);
   const reimburse = picked.reduce((s, c) => s + c.reimburse, 0);
+  const transport = picked.some((c) => c.hasTransport);
+  const ppnRate = transport ? ppnRates.transport : ppnRates.other;
   const ppn = Math.round(revenue * ppnRate * 100) / 100;
 
   function save() {
@@ -118,7 +122,7 @@ export function InvoiceBuilder({ candidates, currencies, ppnRate, today, initial
             <Line label={picked[0]?.number ?? "Belum ada job dipilih"} value="" />
             <Line label="Pendapatan" value={formatIDR(revenue)} />
             <Line label="Reimburse" value={formatIDR(reimburse)} />
-            <Line label={`PPN ${(ppnRate * 100).toLocaleString("id-ID", { maximumFractionDigits: 2 })}%`} value={formatIDR(ppn)} />
+            <Line label={ppnLabel(ppnRate, transport)} value={formatIDR(ppn)} />
             <Line label="Total" value={formatIDR(revenue + reimburse + ppn)} strong />
           </div>
           <Button className="w-full" onClick={save} disabled={pending || picked.length === 0}>{pending ? <Loader2 className="animate-spin" /> : <Save />} Buat Invoice</Button>

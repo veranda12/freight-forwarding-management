@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { cashProofCode, formatInvoiceNumber, formatProofNumber, withProofDay } from "../../src/lib/sequence";
-import { invoiceEditBlock, invoiceTotals, receiptCancelBlock } from "../../src/lib/receivables";
+import { invoiceEditBlock, invoiceTotals, pickPpnRate, receiptCancelBlock } from "../../src/lib/receivables";
 import { jobLockReason, shouldCloseJob } from "../../src/lib/job-lock";
 import { journalEditBlock } from "../../src/lib/journal";
 import { chargeLockReason } from "../../src/lib/job-charges";
@@ -47,6 +47,15 @@ describe("nilai invoice", () => {
     expect(t.ppn).toBe(92_950);
     expect(t.subtotal).toBe(15_651_974);
     expect(t.total).toBe(15_744_924);
+  });
+  it("tarif PPN per invoice: 1,1% kalau ada biaya transportasi di luar reimburse, selain itu 11%", () => {
+    const rates = { transport: 0.011, other: 0.11 };
+    const cc = { isTransport: false, asReceipt: false };
+    const truck = { isTransport: true, asReceipt: false };
+    const extTruckReimburse = { isTransport: true, asReceipt: true };
+    expect(pickPpnRate([cc, truck], rates)).toBe(0.011);
+    expect(pickPpnRate([cc], rates)).toBe(0.11);
+    expect(pickPpnRate([cc, extTruckReimburse], rates)).toBe(0.11);
   });
   it("invoice bisa diedit hanya sebelum ada pembayaran", () => {
     expect(invoiceEditBlock({ status: "UNPAID", amountPaid: 0 })).toBeNull();

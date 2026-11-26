@@ -22,16 +22,17 @@ export function ChargeNew({ revenueAccounts, expenseAccounts }: { revenueAccount
   const [rev, setRev] = useState("");
   const [exp, setExp] = useState("");
   const [receipt, setReceipt] = useState(false);
+  const [transport, setTransport] = useState(false);
 
   function reset() {
-    setCode(""); setName(""); setRev(""); setExp(""); setReceipt(false);
+    setCode(""); setName(""); setRev(""); setExp(""); setReceipt(false); setTransport(false);
   }
 
   function save() {
     start(async () => {
       const res = await createChargeCodeAction({
         code, name, revenueAccountId: rev, expenseAccountId: exp,
-        defaultTaxable: !receipt, isPph23: false, isPph26: false, pph26Rate: 0, asReceipt: receipt,
+        defaultTaxable: !receipt, isPph23: false, isPph26: false, pph26Rate: 0, asReceipt: receipt, isTransport: transport,
       });
       if (res.ok) { toast.success(`Charge ${code.toUpperCase()} ditambahkan.`); setOpen(false); reset(); router.refresh(); }
       else toast.error(res.error);
@@ -68,6 +69,10 @@ export function ChargeNew({ revenueAccounts, expenseAccounts }: { revenueAccount
           <label className="col-span-2 flex items-start gap-2">
             <input type="checkbox" checked={receipt} onChange={(e) => setReceipt(e.target.checked)} className="mt-0.5 h-4 w-4 accent-primary" />
             <span>Reimburse (as receipt)<span className="block text-xs text-muted-foreground">Ditagih ulang ke customer sesuai kuitansi (mis. materai, LOLO, behandle). Otomatis tercentang Reimburse saat diinput di costing.</span></span>
+          </label>
+          <label className="col-span-2 flex items-start gap-2">
+            <input type="checkbox" checked={transport} onChange={(e) => setTransport(e.target.checked)} className="mt-0.5 h-4 w-4 accent-primary" />
+            <span>Biaya transportasi<span className="block text-xs text-muted-foreground">Trucking beserta surcharge-nya (extra distance, overweight, extended trucking) dan freight laut, udara, atau kereta. Invoice yang memuatnya kena PPN tarif transportasi (1,1%), tanpa itu tarif biasa (11%).</span></span>
           </label>
         </div>
         <DialogFooter>

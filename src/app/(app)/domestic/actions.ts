@@ -7,7 +7,7 @@ import { assertPerm, assertNotOwn } from "@/lib/auth-helpers";
 import { customerScope, domesticScope } from "@/lib/data-scope";
 import { writeAudit } from "@/lib/audit";
 import { genDocNumber, genInvoiceNumber, SEQ } from "@/lib/sequence";
-import { getPpnRate } from "@/lib/receivables";
+import { getPpnRates, pickPpnRate } from "@/lib/receivables";
 import { postJournal } from "@/lib/journal";
 import { accountMap, ACC } from "@/lib/coa";
 import { clean } from "@/lib/crud";
@@ -181,7 +181,7 @@ export async function createInvoiceFromDomestic(id: string): Promise<ActionResul
       lines.push({ chargeCode: { connect: { id: cc.id } }, description: p.label, qty: D(1), unitPrice: D(p.amount), amount: D(p.amount), taxable: !cc.asReceipt });
     }
     subtotal = r2(subtotal); taxableBase = r2(taxableBase);
-    const ppnRate = await getPpnRate(tx);
+    const ppnRate = pickPpnRate(parts.map((p) => ({ isTransport: code(p.code)!.isTransport, asReceipt: false })), await getPpnRates(tx));
     const ppn = r2(taxableBase * ppnRate);
     const total = r2(subtotal + ppn);
 

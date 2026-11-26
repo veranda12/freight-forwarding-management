@@ -62,6 +62,19 @@ Format: **Keputusan** — _alasan_.
   kini hanya baris JU, isian formulir lain tetap tersimpan tetapi tidak tercetak). Nilainya milik SLG, jadi tidak
   di-seed. Jurnal bernomor `JE/…` (transfer, setor pajak, aset, armada) dicetak dengan formulir Jurnal Umum.
 
+## Tarif PPN invoice dari biaya transportasi (2026-11-25, keputusan tim pajak client)
+
+- **Tarif dipilih per invoice, bukan per baris.** Ada baris non-reimburse dengan charge `isTransport` (trucking beserta
+  extra distance, overweight, extended trucking; freight laut, udara, kereta) = tarif transportasi (`AccountingSetting.ppnRate`,
+  1,1%). Tidak ada = tarif tanpa transportasi (`ppnRateNoTransport`, 11%). Reimburse tetap di luar DPP dan tidak memicu tarif.
+- Client: extra distance, overweight, dan extended trucking selalu datang bersama trucking. Extended trucking tetap reimburse.
+- Dihitung saat invoice dibuat dan **dihitung ulang setiap kali invoice belum lunas disusun ulang** (`rebuildInvoice`), mengikuti
+  aturan "perhitungan berlaku untuk yang belum dibayar". Invoice yang sudah ada pembayaran tetap memakai tarif tersimpan.
+- Penanda di Master Data, Charge Code, tombol "Invoice & Reimburse". Migrasi `20261125090000_ppn_by_transport` mengisi penanda
+  dari kode (TRUCK, XDIST, OVWT, EXTTRUCK, OF, AF, LCL, LSS, DOMFRT) dan nama (truck, freight, overweight, extra distance, delivery fee).
+- Usulan Excel `docs/Rate_Card-pajak.xlsx` (reinvoicing masuk DPP, dana talangan, PPN masukan tidak dikreditkan) **tidak dipakai**;
+  tim pajak client hanya menetapkan aturan tarif di atas. PPh 23 tetap 2% dari jasa tanpa reimburse.
+
 ## Rebranding SentraHub dan identitas PT Sentra Logistik Global (2026-11-23)
 
 - Nama aplikasi **SentraHub** (dulu CargoFlow), dari satu tempat `src/config/product.ts`. Nama PT pengguna **PT Sentra
@@ -259,3 +272,8 @@ lalu di-**merge** ke branch MariaDB (bukan cherry-pick, supaya commit `part2` be
 - Bahasa Indonesia; istilah industri tetap Inggris (Job, Shipper, B/L, ETD...).
 - Nama produk pakai placeholder **{NAMA_PRODUK}** terpusat di `src/config/product.ts`.
 - Halaman tracking publik `/track/[number]` tanpa login & tanpa data harga.
+
+## Tata letak PDF invoice dan laporan container (permintaan client 2026-11-25)
+
+- PDF invoice (ringkas dan detail) dibagi dua blok: **Reimbursement (As Per Receipt)** di atas dengan subtotal sendiri, lalu **Service Charges** di bawah dengan subtotal, PPN, baris "Reimbursement (above)", dan **TOTAL INVOICE** = jasa + PPN + reimburse. Huruf seksi berlanjut dari blok atas ke bawah. Baris excluded (red lane) ikut blok jasa. Logika di `invoiceBlocks()` (`src/lib/pdf/invoice-document.tsx`); tampilan invoice di layar tidak berubah.
+- Reporting tab **Container per Bulan** (`src/lib/container-report.ts`): jumlah job, container per tipe, total container, dan TEU per bulan untuk satu tahun, bulan diklik untuk rincian job. Bulan ditentukan tanggal tiba (ATA, lalu ETA) untuk impor dan tanggal berangkat (ATD, lalu ETD) untuk ekspor; tanpa jadwal pakai tanggal job dibuka. Job batal tidak dihitung. Container tanpa tipe dihitung "Tanpa tipe" dengan TEU 0. Hanya job ekspor-impor; modul domestik tidak memakai container. Export Excel `type=containers&year=`.

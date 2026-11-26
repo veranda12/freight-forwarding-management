@@ -7,7 +7,7 @@
 import { Prisma, PrismaClient } from "@prisma/client";
 import { PRISMA_CLIENT_OPTIONS } from "../../src/lib/prisma-options";
 import { getBalanceSheet, getTrialBalance } from "../../src/lib/accounting";
-import { createInvoiceFromJobCore, getPpnRate, recordReceiptCore } from "../../src/lib/receivables";
+import { createInvoiceFromJobCore, getPpnRates, pickPpnRate, recordReceiptCore } from "../../src/lib/receivables";
 import { createBillFromJobCore, recordVendorPaymentCore } from "../../src/lib/payables";
 import { getTaxPeriods, remitTaxPeriod } from "../../src/lib/tax";
 import { STATUS_LABEL } from "../../src/lib/tax-period";
@@ -111,8 +111,11 @@ async function main() {
   const inv = await db.invoice.findUniqueOrThrow({ where: { id: invId } });
   // Aturan PPN sejak penyesuaian client SLG (3330c48): PPN = semua pendapatan non-reimburse x tarif setting (bawaan 1,1%),
   // bukan lagi baris "taxable" x 11%. Job simulasi tidak punya reimburse, jadi DPP = subtotal.
-  const ppnRate = await getPpnRate(db);
+  // Sejak client ae9a170 tarifnya per invoice: ada charge transportasi = tarif transportasi (1,1%), tidak ada = 11%.
+  const sellLines = await db.costingLine.findMany({ where: { jobId, side: "SELLING" }, include: { chargeCode: true } });
+  const ppnRate = pickPpnRate(sellLines.map((l) => ({ isTransport: l.chargeCode.isTransport, asReceipt: l.asReceipt })), await getPpnRates(db));
   const ppnExpected = Math.round(25_500_000 * ppnRate * 100) / 100;
+  ok(Number(inv.ppnRate) === ppnRate, `tarif PPN invoice ${+(Number(inv.ppnRate) * 100).toFixed(2)}% sesuai isi job (${sellLines.some((l) => l.chargeCode.isTransport) ? "ada" : "tanpa"} charge transportasi)`);
   ok(Number(inv.subtotal) === 25_500_000 && Number(inv.taxableBase) === 25_500_000 && Number(inv.ppnAmount) === ppnExpected && Number(inv.total) === 25_500_000 + ppnExpected,
     `invoice ${inv.number}: subtotal ${f(Number(inv.subtotal))}, DPP ${f(Number(inv.taxableBase))}, PPN ${f(Number(inv.ppnAmount))}, total ${f(Number(inv.total))}`);
   let again = "";

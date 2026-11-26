@@ -1,7 +1,7 @@
 import { requirePerm } from "@/lib/auth-helpers";
 import { jobScope } from "@/lib/data-scope";
 import { prisma } from "@/lib/prisma";
-import { getPpnRate } from "@/lib/receivables";
+import { getPpnRates } from "@/lib/receivables";
 import { PageHeader } from "@/components/page-header";
 import { Breadcrumbs } from "@/components/breadcrumbs";
 import { invoiceCandidates } from "../candidates";
@@ -14,10 +14,10 @@ export default async function NewInvoicePage({ searchParams }: { searchParams: P
   const user = await requirePerm("invoices.create", { redirectTo: "/invoices" });
   const { job } = await searchParams;
   const today = new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10);
-  const [candidates, currencies, ppnRate] = await Promise.all([
+  const [candidates, currencies, ppnRates] = await Promise.all([
     invoiceCandidates(prisma, undefined, jobScope(user)),
     prisma.currency.findMany({ where: { isBase: false }, select: { code: true, name: true }, orderBy: { code: "asc" } }),
-    getPpnRate(prisma),
+    getPpnRates(prisma),
   ]);
   return (
     <div className="space-y-6">
@@ -25,7 +25,7 @@ export default async function NewInvoicePage({ searchParams }: { searchParams: P
         <Breadcrumbs items={[{ label: "Invoice (AR)", href: "/invoices" }, { label: "Buat Invoice" }]} />
         <PageHeader title="Buat Invoice" description="Cari job atau B/L, lalu pilih satu job yang ditagih" />
       </div>
-      <InvoiceBuilder candidates={candidates} currencies={currencies} ppnRate={ppnRate} today={today} initialJobId={job} />
+      <InvoiceBuilder candidates={candidates} currencies={currencies} ppnRates={ppnRates} today={today} initialJobId={job} />
     </div>
   );
 }

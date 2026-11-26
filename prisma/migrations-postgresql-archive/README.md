@@ -23,3 +23,6 @@ Catatan:
   diarsipkan di sini; padanan MariaDB-nya `prisma/migrations/20261124110000_slg_accrual_operation`.
 - Rebranding SentraHub (2026-11-23, merge client `d1de500`): `20261125090000_company_sentra` diarsipkan di sini;
   padanan MariaDB-nya `prisma/migrations/20261125100000_company_sentra`.
+- PPN per invoice 1,1%/11% dari biaya transportasi (2026-11-26, merge client `ae9a170`): `20261125090000_ppn_by_transport`
+  diarsipkan di sini; padanan MariaDB-nya `prisma/migrations/20261125110000_ppn_by_transport` (`ILIKE` menjadi `LIKE`,
+  kolasi `utf8mb4_unicode_ci` sudah tidak peka huruf besar/kecil).
