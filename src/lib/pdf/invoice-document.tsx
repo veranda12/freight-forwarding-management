@@ -94,8 +94,8 @@ function groupLines(lines: PdfInvoiceLine[], excluded: PdfExcludedLine[], start:
 export type InvoiceBlock = { kind: "RECEIPT" | "SERVICE"; title: string; groups: Group[]; subtotal: number };
 
 /**
- * Permintaan client: reimburse (as per receipt) dicetak di blok atas dengan subtotal sendiri, tagihan jasa
- * di blok bawah dengan subtotal, PPN, dan total invoice. Huruf seksi berlanjut dari blok atas ke bawah.
+ * Permintaan client: tagihan jasa di blok atas dengan subtotal dan PPN, reimburse (as per receipt) di blok bawah
+ * dengan subtotal sendiri lalu total invoice (revisi 26 Nov: urutan dibalik). Huruf seksi berlanjut dari blok atas ke bawah.
  * Baris excluded (red lane) ikut blok jasa, kecuali seksinya hanya ada di blok reimburse.
  */
 export function invoiceBlocks(inv: Pick<PdfInvoice, "lines" | "excluded">): InvoiceBlock[] {
@@ -105,10 +105,10 @@ export function invoiceBlocks(inv: Pick<PdfInvoice, "lines" | "excluded">): Invo
   const exReceipt = inv.excluded.filter((e) => !serviceSecs.has(e.section ?? null));
   const exService = inv.excluded.filter((e) => serviceSecs.has(e.section ?? null));
   const blocks: InvoiceBlock[] = [];
-  const rg = groupLines(receipt, exReceipt, 0);
-  if (rg.length) blocks.push({ kind: "RECEIPT", title: "Reimbursement (As Per Receipt)", groups: rg, subtotal: sum(rg) });
-  const sg = groupLines(service, exService, rg.length);
+  const sg = groupLines(service, exService, 0);
   if (sg.length) blocks.push({ kind: "SERVICE", title: "Service Charges", groups: sg, subtotal: sum(sg) });
+  const rg = groupLines(receipt, exReceipt, sg.length);
+  if (rg.length) blocks.push({ kind: "RECEIPT", title: "Reimbursement (As Per Receipt)", groups: rg, subtotal: sum(rg) });
   return blocks;
 }
 const sum = (gs: Group[]) => Math.round(gs.reduce((t, g) => t + g.total, 0) * 100) / 100;
@@ -190,15 +190,13 @@ function Parties({ inv }: { inv: PdfInvoice }) {
 }
 
 /**
- * Ringkasan di bawah tiap blok, tabel bergaris di sisi kanan. Blok reimburse cukup subtotalnya; blok terakhir
- * (jasa) memuat subtotal, PPN, baris reimburse bila ada (agar penjumlahannya terbaca), dan total invoice.
+ * Ringkasan di bawah tiap blok, tabel bergaris di sisi kanan. Blok jasa memuat subtotal dan PPN; blok reimburse
+ * subtotalnya. Blok terakhir ditutup total invoice, didahului jasa + PPN dari blok atas bila ada (agar penjumlahannya terbaca).
  */
-function BlockTotals({ inv, block, last, receiptTotal }: { inv: PdfInvoice; block: InvoiceBlock; last: boolean; receiptTotal: number | null }) {
+function BlockTotals({ inv, block, last, serviceTotal }: { inv: PdfInvoice; block: InvoiceBlock; last: boolean; serviceTotal: number | null }) {
   const rows: [string, string][] = [[block.kind === "RECEIPT" ? "Subtotal Reimbursement" : "Subtotal Service Charges", `IDR ${num(block.subtotal)}`]];
-  if (last) {
-    if (block.kind === "SERVICE") rows.push([`VAT (PPN) ${(inv.ppnRate * 100).toLocaleString("en-US", { maximumFractionDigits: 2 })}%`, `IDR ${num(inv.ppn)}`]);
-    if (block.kind === "SERVICE" && receiptTotal != null) rows.push(["Reimbursement (above)", `IDR ${num(receiptTotal)}`]);
-  }
+  if (block.kind === "SERVICE") rows.push([`VAT (PPN) ${(inv.ppnRate * 100).toLocaleString("en-US", { maximumFractionDigits: 2 })}%`, `IDR ${num(inv.ppn)}`]);
+  if (last && block.kind === "RECEIPT" && serviceTotal != null) rows.push(["Service Charges + VAT (above)", `IDR ${num(serviceTotal)}`]);
   return (
     <View style={[s.grid, { marginLeft: "auto", width: 270, marginTop: 6 }]} wrap={false}>
       {rows.map(([k, v]) => (
@@ -236,11 +234,11 @@ const W = { no: 26, qty: 38, unit: 46, price: 76, amt: 84 };
 /** Invoice ringkas (total per seksi) dan invoice detail (per baris) dalam satu PDF. */
 export function InvoiceDocument({ inv, company }: { inv: PdfInvoice; company: PdfInvoiceCompany }) {
   const blocks = invoiceBlocks(inv);
-  const receiptBlock = blocks.find((b) => b.kind === "RECEIPT");
-  const hasReceipt = receiptBlock != null;
+  const serviceBlock = blocks.find((b) => b.kind === "SERVICE");
+  const hasReceipt = blocks.some((b) => b.kind === "RECEIPT");
   const cancelled = inv.status === "CANCELLED";
   const totalsOf = (b: InvoiceBlock, i: number) => (
-    <BlockTotals inv={inv} block={b} last={i === blocks.length - 1} receiptTotal={b.kind === "SERVICE" && receiptBlock ? receiptBlock.subtotal : null} />
+    <BlockTotals inv={inv} block={b} last={i === blocks.length - 1} serviceTotal={serviceBlock ? Math.round((serviceBlock.subtotal + inv.ppn) * 100) / 100 : null} />
   );
 
   return (
