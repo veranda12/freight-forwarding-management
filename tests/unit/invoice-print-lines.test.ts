@@ -22,6 +22,17 @@ describe("mergeReceiptLines", () => {
     expect(l).toMatchObject({ qty: 1, unitLabel: null, unitPrice: 800_000, amount: 800_000 });
   });
 
+  it("unit berbeda tidak digabung: THC 40HC dan THC 20GP dirinci per tipe", () => {
+    const out = mergeReceiptLines([
+      line("Terminal Handling Charge", null, 2, 2_450_000, true, "40HC"),
+      line("Terminal Handling Charge", null, 1, 1_650_000, true, "20GP"),
+      line("Terminal Handling Charge", "vendor B", 1, 100_000, true, "40HC"),
+    ]);
+    expect(out).toHaveLength(2);
+    expect(out[0]).toMatchObject({ qty: 1, unitLabel: null, amount: 5_000_000 }); // qty beda: 1 x total
+    expect(out[1]).toMatchObject({ qty: 1, unitLabel: "20GP", unitPrice: 1_650_000, amount: 1_650_000 });
+  });
+
   it("baris non-reimburse dan B/L berbeda tidak digabung", () => {
     const out = mergeReceiptLines([
       line("Customs Clearance", null, 1, 2_000_000, false, "20RF"),

@@ -8,6 +8,7 @@ const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
  * vendor A dan lift off dari vendor B menjadi satu "LOLO Fee" dengan nominal dijumlah dan keterangan "Lift on & Lift off".
  * Di costing dan invoice tetap dua baris (masing-masing tersambung ke bill vendornya); ini hanya untuk cetakan.
  * Baris non-reimburse tidak digabung, karena tarifnya bisa berbeda per tipe container. `bl` memisahkan B/L di invoice gabungan.
+ * Unit berbeda juga tidak digabung (client 26 Nov): THC 20GP dan THC 40HC tarifnya beda, jadi dirinci per tipe.
  * Qty dan unit sama di semua baris: qty dipertahankan, harga satuan dijumlah. Selain itu: 1 x total.
  */
 export function mergeReceiptLines<T extends PdfInvoiceLine & { bl?: string | null }>(lines: T[]): T[] {
@@ -15,7 +16,7 @@ export function mergeReceiptLines<T extends PdfInvoiceLine & { bl?: string | nul
   const order: (T | string)[] = [];
   for (const l of lines) {
     if (!l.asReceipt) { order.push(l); continue; }
-    const k = `${l.section}|${l.name}|${l.bl ?? ""}`;
+    const k = `${l.section}|${l.name}|${l.unitLabel ?? ""}|${l.bl ?? ""}`;
     if (!groups.has(k)) { groups.set(k, []); order.push(k); }
     groups.get(k)!.push(l);
   }
