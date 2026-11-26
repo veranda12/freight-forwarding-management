@@ -219,3 +219,8 @@ Format: **Keputusan** — _alasan_.
 - Bahasa Indonesia; istilah industri tetap Inggris (Job, Shipper, B/L, ETD...).
 - Nama produk pakai placeholder **{NAMA_PRODUK}** terpusat di `src/config/product.ts`.
 - Halaman tracking publik `/track/[number]` tanpa login & tanpa data harga.
+
+## Tata letak PDF invoice dan laporan container (permintaan client 2026-11-25)
+
+- PDF invoice (ringkas dan detail) dibagi dua blok: **Reimbursement (As Per Receipt)** di atas dengan subtotal sendiri, lalu **Service Charges** di bawah dengan subtotal, PPN, baris "Reimbursement (above)", dan **TOTAL INVOICE** = jasa + PPN + reimburse. Huruf seksi berlanjut dari blok atas ke bawah. Baris excluded (red lane) ikut blok jasa. Logika di `invoiceBlocks()` (`src/lib/pdf/invoice-document.tsx`); tampilan invoice di layar tidak berubah.
+- Reporting tab **Container per Bulan** (`src/lib/container-report.ts`): jumlah job, container per tipe, total container, dan TEU per bulan untuk satu tahun, bulan diklik untuk rincian job. Bulan ditentukan tanggal tiba (ATA, lalu ETA) untuk impor dan tanggal berangkat (ATD, lalu ETD) untuk ekspor; tanpa jadwal pakai tanggal job dibuka. Job batal tidak dihitung. Container tanpa tipe dihitung "Tanpa tipe" dengan TEU 0. Hanya job ekspor-impor; modul domestik tidak memakai container. Export Excel `type=containers&year=`.

@@ -13,11 +13,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { JobStatus, TransportMode } from "@prisma/client";
 import { AgingCard } from "./aging-card";
+import { ContainerCard } from "./container-card";
+import { containerJobSelect, containerReport, toContainerJob } from "@/lib/container-report";
 
 export const dynamic = "force-dynamic";
 
-export default async function ReportsPage() {
+export default async function ReportsPage({ searchParams }: { searchParams: Promise<{ tab?: string; cy?: string; cm?: string }> }) {
   const user = await requirePerm("reports.view");
+  const sp = await searchParams;
   // Tab hanya untuk modul yang boleh dilihat; isi mengikuti batas data user.
   const seeJobs = hasPerm(user, "jobs.view");
   const seeAr = hasPerm(user, "invoices.view");
@@ -32,7 +35,14 @@ export default async function ReportsPage() {
     seeAr ? getArAging(invoiceScope(user)) : null,
     seeAp ? getApAging(billScope(user)) : null,
   ]);
-  const firstTab = seeJobs ? "profit" : seeAr ? "ar" : seeAp ? "ap" : "profit";
+  const firstTab = seeJobs && sp.tab === "container" ? "container" : seeJobs ? "profit" : seeAr ? "ar" : seeAp ? "ap" : "profit";
+
+  // Container per bulan: semua job tidak batal yang punya container, dikelompokkan menurut bulan tiba/berangkat.
+  const year = Number(sp.cy) || new Date(Date.now() + 7 * 3600_000).getUTCFullYear();
+  const containers = !seeJobs ? null : containerReport((await prisma.job.findMany({
+    where: { ...jobScope(user), status: { not: "CANCELLED" }, containers: { some: {} } },
+    select: containerJobSelect,
+  })).map(toContainerJob), year);
 
   // profitability per mode
   const perMode = new Map<TransportMode, { count: number; rev: number; cost: number; profit: number }>();
@@ -56,13 +66,14 @@ export default async function ReportsPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Reporting" description="Job profitability, shipment per status, sales performance, dan aging" />
+      <PageHeader title="Reporting" description="Job profitability, shipment per status, sales performance, container per bulan, dan aging" />
 
       <Tabs defaultValue={firstTab}>
         <TabsList>
           {seeJobs && <TabsTrigger value="profit">Profitability</TabsTrigger>}
           {seeJobs && <TabsTrigger value="status">Per Status</TabsTrigger>}
           {seeJobs && <TabsTrigger value="sales">Sales Performance</TabsTrigger>}
+          {seeJobs && <TabsTrigger value="container">Container per Bulan</TabsTrigger>}
           {seeAr && <TabsTrigger value="ar">AR Aging</TabsTrigger>}
           {seeAp && <TabsTrigger value="ap">AP Aging</TabsTrigger>}
         </TabsList>
@@ -135,6 +146,10 @@ export default async function ReportsPage() {
               </Table>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="container">
+          {containers && <ContainerCard data={containers} selected={sp.cm ?? null} canExport={canExport} />}
         </TabsContent>
 
         <TabsContent value="ar">

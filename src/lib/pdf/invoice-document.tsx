@@ -76,20 +76,42 @@ const LETTERS = "ABCDEFGHIJ";
 type Group = { key: InvoiceSection | "OTHER"; letter: string; label: string; lines: PdfInvoiceLine[]; excluded: PdfExcludedLine[]; total: number };
 
 /** Kelompokkan baris per seksi sesuai urutan cetak; baris tanpa seksi masuk "Other Charges" di akhir. */
-function groupLines(inv: PdfInvoice): Group[] {
+function groupLines(lines: PdfInvoiceLine[], excluded: PdfExcludedLine[], start: number): Group[] {
   const keys: (InvoiceSection | "OTHER")[] = [...SECTION_ORDER, "OTHER"];
   const groups: Group[] = [];
   for (const key of keys) {
     const match = (sec: InvoiceSection | null) => (key === "OTHER" ? sec == null : sec === key);
-    const lines = inv.lines.filter((l) => match(l.section));
-    if (lines.length === 0) continue;
+    const ls = lines.filter((l) => match(l.section));
+    if (ls.length === 0) continue;
     groups.push({
-      key, letter: LETTERS[groups.length], label: key === "OTHER" ? "Other Charges" : SECTION_LABELS[key],
-      lines, excluded: inv.excluded.filter((e) => match(e.section)), total: lines.reduce((t, l) => t + l.amount, 0),
+      key, letter: LETTERS[start + groups.length], label: key === "OTHER" ? "Other Charges" : SECTION_LABELS[key],
+      lines: ls, excluded: excluded.filter((e) => match(e.section)), total: ls.reduce((t, l) => t + l.amount, 0),
     });
   }
   return groups;
 }
+
+export type InvoiceBlock = { kind: "RECEIPT" | "SERVICE"; title: string; groups: Group[]; subtotal: number };
+
+/**
+ * Permintaan client: reimburse (as per receipt) dicetak di blok atas dengan subtotal sendiri, tagihan jasa
+ * di blok bawah dengan subtotal, PPN, dan total invoice. Huruf seksi berlanjut dari blok atas ke bawah.
+ * Baris excluded (red lane) ikut blok jasa, kecuali seksinya hanya ada di blok reimburse.
+ */
+export function invoiceBlocks(inv: Pick<PdfInvoice, "lines" | "excluded">): InvoiceBlock[] {
+  const receipt = inv.lines.filter((l) => l.asReceipt);
+  const service = inv.lines.filter((l) => !l.asReceipt);
+  const serviceSecs = new Set(service.map((l) => l.section ?? null));
+  const exReceipt = inv.excluded.filter((e) => !serviceSecs.has(e.section ?? null));
+  const exService = inv.excluded.filter((e) => serviceSecs.has(e.section ?? null));
+  const blocks: InvoiceBlock[] = [];
+  const rg = groupLines(receipt, exReceipt, 0);
+  if (rg.length) blocks.push({ kind: "RECEIPT", title: "Reimbursement (As Per Receipt)", groups: rg, subtotal: sum(rg) });
+  const sg = groupLines(service, exService, rg.length);
+  if (sg.length) blocks.push({ kind: "SERVICE", title: "Service Charges", groups: sg, subtotal: sum(sg) });
+  return blocks;
+}
+const sum = (gs: Group[]) => Math.round(gs.reduce((t, g) => t + g.total, 0) * 100) / 100;
 
 type CellStyle = Record<string, any> | Record<string, any>[] | undefined;
 /** Satu sel tabel bergaris. `w` lebar tetap (pt) atau undefined untuk mengisi sisa ruang. */
@@ -167,20 +189,35 @@ function Parties({ inv }: { inv: PdfInvoice }) {
   );
 }
 
-/** Subtotal, PPN, dan total dalam tabel bergaris di sisi kanan. */
-function Totals({ inv }: { inv: PdfInvoice }) {
-  const rows: [string, string][] = [["Subtotal", `IDR ${num(inv.subtotal)}`]];
-  if (inv.ppn > 0) rows.push([`VAT (PPN) ${(inv.ppnRate * 100).toLocaleString("en-US", { maximumFractionDigits: 2 })}%`, `IDR ${num(inv.ppn)}`]);
+/**
+ * Ringkasan di bawah tiap blok, tabel bergaris di sisi kanan. Blok reimburse cukup subtotalnya; blok terakhir
+ * (jasa) memuat subtotal, PPN, baris reimburse bila ada (agar penjumlahannya terbaca), dan total invoice.
+ */
+function BlockTotals({ inv, block, last, receiptTotal }: { inv: PdfInvoice; block: InvoiceBlock; last: boolean; receiptTotal: number | null }) {
+  const rows: [string, string][] = [[block.kind === "RECEIPT" ? "Subtotal Reimbursement" : "Subtotal Service Charges", `IDR ${num(block.subtotal)}`]];
+  if (last) {
+    if (block.kind === "SERVICE") rows.push([`VAT (PPN) ${(inv.ppnRate * 100).toLocaleString("en-US", { maximumFractionDigits: 2 })}%`, `IDR ${num(inv.ppn)}`]);
+    if (block.kind === "SERVICE" && receiptTotal != null) rows.push(["Reimbursement (above)", `IDR ${num(receiptTotal)}`]);
+  }
   return (
-    <View style={[s.grid, { marginLeft: "auto", width: 250, marginTop: 8 }]} wrap={false}>
+    <View style={[s.grid, { marginLeft: "auto", width: 270, marginTop: 6 }]} wrap={false}>
       {rows.map(([k, v]) => (
         <View key={k} style={s.row}><Cell style={s.label}>{k}</Cell><Cell w={120} textStyle={s.right}>{v}</Cell></View>
       ))}
-      <View style={s.row}><Cell style={s.totalCell}>TOTAL</Cell><Cell w={120} style={s.totalCell} textStyle={s.right}>{`IDR ${num(inv.total)}`}</Cell></View>
-      {inv.currency !== "IDR" ? (
+      {last ? <View style={s.row}><Cell style={s.totalCell}>TOTAL INVOICE</Cell><Cell w={120} style={s.totalCell} textStyle={s.right}>{`IDR ${num(inv.total)}`}</Cell></View> : null}
+      {last && inv.currency !== "IDR" ? (
         <View style={s.row}><Cell style={s.label}>{`Amount due in ${inv.currency}`}</Cell><Cell w={120} textStyle={s.right}>{`${inv.currency} ${num(inv.amountForeign)} @ ${num(inv.exchangeRate)}`}</Cell></View>
       ) : null}
     </View>
+  );
+}
+
+/** Judul blok (Reimbursement / Service Charges) di atas tabelnya. */
+function BlockTitle({ block, first }: { block: InvoiceBlock; first: boolean }) {
+  return (
+    <Text style={[s.bold, { fontSize: 9, marginTop: first ? 10 : 12, marginBottom: 3, textTransform: "uppercase", letterSpacing: 0.4 }]}>
+      {block.title}
+    </Text>
   );
 }
 
@@ -198,9 +235,13 @@ const W = { no: 26, qty: 38, unit: 46, price: 76, amt: 84 };
 
 /** Invoice ringkas (total per seksi) dan invoice detail (per baris) dalam satu PDF. */
 export function InvoiceDocument({ inv, company }: { inv: PdfInvoice; company: PdfInvoiceCompany }) {
-  const groups = groupLines(inv);
-  const hasReceipt = inv.lines.some((l) => l.asReceipt);
+  const blocks = invoiceBlocks(inv);
+  const receiptBlock = blocks.find((b) => b.kind === "RECEIPT");
+  const hasReceipt = receiptBlock != null;
   const cancelled = inv.status === "CANCELLED";
+  const totalsOf = (b: InvoiceBlock, i: number) => (
+    <BlockTotals inv={inv} block={b} last={i === blocks.length - 1} receiptTotal={b.kind === "SERVICE" && receiptBlock ? receiptBlock.subtotal : null} />
+  );
 
   return (
     <Document title={`Invoice ${inv.number}`} author={company.name}>
@@ -209,23 +250,28 @@ export function InvoiceDocument({ inv, company }: { inv: PdfInvoice; company: Pd
         <Header company={company} title={cancelled ? "INVOICE (CANCELLED)" : "INVOICE"} inv={inv} showDue />
         <Parties inv={inv} />
 
-        <View style={[s.grid, s.gap]}>
-          <View style={s.row}>
-            <Cell w={W.no} style={s.th} textStyle={s.center}>No</Cell>
-            <Cell style={s.th}>Description</Cell>
-            <Cell w={60} style={s.th} textStyle={s.center}>Items</Cell>
-            <Cell w={110} style={s.th} textStyle={s.right}>Amount (IDR)</Cell>
-          </View>
-          {groups.map((g) => (
-            <View key={g.key} style={s.row} wrap={false}>
-              <Cell w={W.no} textStyle={[s.center, s.bold]}>{g.letter}</Cell>
-              <Cell>{g.label}</Cell>
-              <Cell w={60} textStyle={s.center}>{String(g.lines.length)}</Cell>
-              <Cell w={110} textStyle={s.right}>{num(g.total)}</Cell>
+        {blocks.map((b, bi) => (
+          <View key={b.kind}>
+            <BlockTitle block={b} first={bi === 0} />
+            <View style={s.grid}>
+              <View style={s.row}>
+                <Cell w={W.no} style={s.th} textStyle={s.center}>No</Cell>
+                <Cell style={s.th}>Description</Cell>
+                <Cell w={60} style={s.th} textStyle={s.center}>Items</Cell>
+                <Cell w={110} style={s.th} textStyle={s.right}>Amount (IDR)</Cell>
+              </View>
+              {b.groups.map((g) => (
+                <View key={g.key} style={s.row} wrap={false}>
+                  <Cell w={W.no} style={b.kind === "RECEIPT" ? s.shaded : undefined} textStyle={[s.center, s.bold]}>{g.letter}</Cell>
+                  <Cell style={b.kind === "RECEIPT" ? s.shaded : undefined}>{g.label}</Cell>
+                  <Cell w={60} style={b.kind === "RECEIPT" ? s.shaded : undefined} textStyle={s.center}>{String(g.lines.length)}</Cell>
+                  <Cell w={110} style={b.kind === "RECEIPT" ? s.shaded : undefined} textStyle={s.right}>{num(g.total)}</Cell>
+                </View>
+              ))}
             </View>
-          ))}
-        </View>
-        <Totals inv={inv} />
+            {totalsOf(b, bi)}
+          </View>
+        ))}
 
         <View style={[s.grid, s.gap]} wrap={false}>
           <View style={s.row}><Cell w={110} style={s.label}>Amount in words</Cell><Cell textStyle={{ fontFamily: "Helvetica-Oblique" }}>{amountInWords(inv.total)}</Cell></View>
@@ -265,55 +311,60 @@ export function InvoiceDocument({ inv, company }: { inv: PdfInvoice; company: Pd
         <Header company={company} title="INVOICE DETAIL" inv={inv} showDue={false} />
         <Parties inv={inv} />
 
-        <View style={[s.grid, s.gap]}>
-          <View style={s.row} fixed>
-            <Cell w={W.no} style={s.th} textStyle={s.center}>No</Cell>
-            <Cell style={s.th}>Description</Cell>
-            <Cell w={W.qty} style={s.th} textStyle={s.center}>Qty</Cell>
-            <Cell w={W.unit} style={s.th} textStyle={s.center}>Unit</Cell>
-            <Cell w={W.price} style={s.th} textStyle={s.right}>Unit Price</Cell>
-            <Cell w={W.amt} style={s.th} textStyle={s.right}>Amount (IDR)</Cell>
-          </View>
-          {groups.map((g) => (
-            <View key={g.key}>
-              <View style={s.row} wrap={false}>
-                <Cell w={W.no} style={s.sectionCell} textStyle={s.center}>{g.letter}</Cell>
-                <Cell style={s.sectionCell}>{g.label}</Cell>
+        {blocks.map((b, bi) => (
+          <View key={b.kind}>
+            <BlockTitle block={b} first={bi === 0} />
+            <View style={s.grid}>
+              <View style={s.row} fixed>
+                <Cell w={W.no} style={s.th} textStyle={s.center}>No</Cell>
+                <Cell style={s.th}>Description</Cell>
+                <Cell w={W.qty} style={s.th} textStyle={s.center}>Qty</Cell>
+                <Cell w={W.unit} style={s.th} textStyle={s.center}>Unit</Cell>
+                <Cell w={W.price} style={s.th} textStyle={s.right}>Unit Price</Cell>
+                <Cell w={W.amt} style={s.th} textStyle={s.right}>Amount (IDR)</Cell>
               </View>
-              {g.lines.map((l, i) => {
-                const bg = l.asReceipt ? s.shaded : undefined;
-                return (
-                  <View key={i} style={s.row} wrap={false}>
-                    <Cell w={W.no} style={bg} textStyle={s.center}>{String(i + 1)}</Cell>
-                    <Cell style={bg}>
-                      <Text>{l.name}</Text>
-                      {l.note ? <Text style={s.note}>{l.note}</Text> : null}
-                    </Cell>
-                    <Cell w={W.qty} style={bg} textStyle={s.center}>{num(l.qty)}</Cell>
-                    <Cell w={W.unit} style={bg} textStyle={s.center}>{l.unitLabel ?? "-"}</Cell>
-                    <Cell w={W.price} style={bg} textStyle={s.right}>{num(l.unitPrice)}</Cell>
-                    <Cell w={W.amt} style={bg} textStyle={s.right}>{num(l.amount)}</Cell>
+              {b.groups.map((g) => (
+                <View key={g.key}>
+                  <View style={s.row} wrap={false}>
+                    <Cell w={W.no} style={s.sectionCell} textStyle={s.center}>{g.letter}</Cell>
+                    <Cell style={s.sectionCell}>{g.label}</Cell>
                   </View>
-                );
-              })}
-              {g.excluded.map((e, i) => (
-                <View key={`x${i}`} style={s.row} wrap={false}>
-                  <Cell w={W.no} textStyle={[s.center, { color: MUTED }]}>{String(g.lines.length + i + 1)}</Cell>
-                  <Cell><Text style={{ color: MUTED }}>{e.name}</Text><Text style={s.note}>{e.reason}</Text></Cell>
-                  <Cell w={W.qty} textStyle={[s.center, { color: MUTED }]}>-</Cell>
-                  <Cell w={W.unit} textStyle={[s.center, { color: MUTED }]}>{e.unitLabel ?? "-"}</Cell>
-                  <Cell w={W.price} textStyle={[s.right, { color: MUTED }]}>-</Cell>
-                  <Cell w={W.amt} textStyle={[s.right, { color: MUTED, fontFamily: "Helvetica-Oblique" }]}>Excluded</Cell>
+                  {g.lines.map((l, i) => {
+                    const bg = l.asReceipt ? s.shaded : undefined;
+                    return (
+                      <View key={i} style={s.row} wrap={false}>
+                        <Cell w={W.no} style={bg} textStyle={s.center}>{String(i + 1)}</Cell>
+                        <Cell style={bg}>
+                          <Text>{l.name}</Text>
+                          {l.note ? <Text style={s.note}>{l.note}</Text> : null}
+                        </Cell>
+                        <Cell w={W.qty} style={bg} textStyle={s.center}>{num(l.qty)}</Cell>
+                        <Cell w={W.unit} style={bg} textStyle={s.center}>{l.unitLabel ?? "-"}</Cell>
+                        <Cell w={W.price} style={bg} textStyle={s.right}>{num(l.unitPrice)}</Cell>
+                        <Cell w={W.amt} style={bg} textStyle={s.right}>{num(l.amount)}</Cell>
+                      </View>
+                    );
+                  })}
+                  {g.excluded.map((e, i) => (
+                    <View key={`x${i}`} style={s.row} wrap={false}>
+                      <Cell w={W.no} textStyle={[s.center, { color: MUTED }]}>{String(g.lines.length + i + 1)}</Cell>
+                      <Cell><Text style={{ color: MUTED }}>{e.name}</Text><Text style={s.note}>{e.reason}</Text></Cell>
+                      <Cell w={W.qty} textStyle={[s.center, { color: MUTED }]}>-</Cell>
+                      <Cell w={W.unit} textStyle={[s.center, { color: MUTED }]}>{e.unitLabel ?? "-"}</Cell>
+                      <Cell w={W.price} textStyle={[s.right, { color: MUTED }]}>-</Cell>
+                      <Cell w={W.amt} textStyle={[s.right, { color: MUTED, fontFamily: "Helvetica-Oblique" }]}>Excluded</Cell>
+                    </View>
+                  ))}
+                  <View style={s.row} wrap={false}>
+                    <Cell style={s.subCell} textStyle={s.right}>{`Subtotal ${g.letter}`}</Cell>
+                    <Cell w={W.amt} style={s.subCell} textStyle={s.right}>{num(g.total)}</Cell>
+                  </View>
                 </View>
               ))}
-              <View style={s.row} wrap={false}>
-                <Cell style={s.subCell} textStyle={s.right}>{`Subtotal ${g.letter}`}</Cell>
-                <Cell w={W.amt} style={s.subCell} textStyle={s.right}>{num(g.total)}</Cell>
-              </View>
             </View>
-          ))}
-        </View>
-        <Totals inv={inv} />
+            {totalsOf(b, bi)}
+          </View>
+        ))}
         {hasReceipt ? (
           <View style={s.legend}><View style={s.swatch} /><Text style={{ fontSize: 7, color: MUTED }}>Shaded rows are actual costs charged as per receipt, without mark-up.</Text></View>
         ) : null}
